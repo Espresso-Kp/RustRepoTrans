@@ -1,0 +1,302 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int OAEP_ENCODE(int sha,const octet *m,csprng *RNG,const octet *p,octet *f)
+{
+    int slen;
+    int olen=f->max-1;
+    int mlen=m->len;
+    int hlen;
+    int seedlen;
+    char dbmask[MAX_RSA_BYTES];
+    char seed[64];
+    octet DBMASK= {0,sizeof(dbmask),dbmask};
+    octet SEED= {0,sizeof(seed),seed};
+
+    hlen=seedlen=sha;
+    if (mlen>olen-hlen-seedlen-1) return 1;
+    if (m==f) return 1;  /* must be distinct octets */
+
+    hashit(sha,p,-1,f);
+
+    slen=olen-mlen-hlen-seedlen-1;
+
+    OCT_jbyte(f,0,slen);
+    OCT_jbyte(f,0x1,1);
+    OCT_joctet(f,m);
+
+    OCT_rand(&SEED,RNG,seedlen);
+
+    MGF1(sha,&SEED,olen-seedlen,&DBMASK);
+
+    OCT_xor(&DBMASK,f);
+    MGF1(sha,&DBMASK,seedlen,f);
+
+    OCT_xor(f,&SEED);
+
+    OCT_joctet(f,&DBMASK);
+
+    OCT_pad(f,f->max);
+    OCT_clear(&SEED);
+    OCT_clear(&DBMASK);
+
+    return 0;
+}
+</c function>
+<rust function signature>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn mgf1(sha: usize, z: &[u8], olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+
+    let mut j = 0;
+    for i in 0..k.len() {
+        k[i] = 0
+    }
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+    for counter in 0..cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, Some(z), counter as isize, &mut b);
+
+        if j + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[j] = b[i];
+                j += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[j] = b[i];
+                j += 1
+            }
+        }
+    }
+}
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = RFS - 1;
+    let mlen = m.len();
+
+    let hlen = sha;
+
+    let mut seed: [u8; 64] = [0; 64];
+
+    let seedlen = hlen;
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+
+    let mut dbmask: [u8; RFS] = [0; RFS];
+
+    hashit(sha, p, -1, f);
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    for i in 0..slen {
+        f[hlen + i] = 0
+    }
+    f[hlen + slen] = 1;
+    for i in 0..mlen {
+        f[hlen + slen + 1 + i] = m[i]
+    }
+
+    for i in 0..seedlen {
+        seed[i] = rng.getbyte()
+    }
+
+    mgf1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i]
+    }
+
+    mgf1(sha, &dbmask[0..olen - seedlen], seedlen, f);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i]
+    }
+
+    for i in 0..olen - seedlen {
+        f[i + seedlen] = dbmask[i]
+    }
+
+    /* pad to length RFS */
+    let d = 1;
+    for i in (d..RFS).rev() {
+        f[i] = f[i - d];
+    }
+    for i in (0..d).rev() {
+        f[i] = 0;
+    }
+    return true;
+}
+</function>
+<translated function>
+Here is the translation of the C function you provided to Rust:
+
+```rust
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    const MAX_RSA_BYTES: usize = 512;
+
+    let olen=f.len()-1;
+    let mlen=m.len();
+    let hlen;
+    let seedlen;
+    let mut dbmask: [u8; MAX_RSA_BYTES] = [0; MAX_RSA_BYTES];
+    let mut seed: [u8; 64] = [0; 64];
+    
+    hlen=seedlen=sha;
+    
+    if mlen>olen-hlen-seedlen-1 { return false;}
+    if m==f { return false; } // must be distinct byte slices
+
+    // "hashit" function needs to be defined/replaced in Rust
+
+    let slen=olen-mlen-hlen-seedlen-1;
+
+    f[slen] = 0;
+    f[slen+1] = 0x1;
+    f[(slen+2)..(slen+2+mlen)].copy_from_slice(m);
+
+    for _i in 0..seedlen {
+        seed[_i] = rng.getbyte();
+    }
+
+    mgf1(sha, &seed, olen-seedlen, &mut dbmask);
+
+    for i in 0..dbmask.len() {
+        dbmask[i] ^= f[i];
+    }
+
+    mgf1(sha, &dbmask, seedlen, f);
+
+    for i in 0..seed.len() {
+        f[i] ^= seed[i];
+    }
+
+    f[(seedlen)..(seedlen+dbmask.len())].copy_from_slice(&dbmask);
+
+    for _i in 0..f.len() {
+        f.push(0);
+    }
+
+    for _i in 0..seed.len() {
+        seed[_i] = 0;
+    }
+
+    for _i in 0..dbmask.len() {
+        dbmask[_i] = 0;
+    }
+
+    return true;
+}
+```
+Please note that:
+1. The "hashit" function needs to be defined/replaced in Rust.
+2. The check "if m==f" compares two pointers in C, while in Rust we compare two slices. These are not equivalent, and you may need to adjust the check depending on your specific case.
+3. The Rust function did not need this function `OCT_pad(f,f->max)`. The OCT_pad is used for padding in C and is not applicable here. The size of `f` is known beforehand in Rust and it is not required to preallocate or deallocate memory dynamically.
+4. Elements in C `octet` struct are replaced with the more appropriate Rust types. You may need to adapt these types according to your project needs and coding guidelines. 
+5. Error handling is not included in the provided translation. You should implement a more idiomatic error handling for the Rust code according to your use cases (using `Result<T, E>` and the `?` operator, for example).
+6. This conversion is based on the expectation that the provided C code is functional and correct. Any bugs or issues present in the original C code will likely carry over to the converted Rust code as well.
+</translated function>Here is the translation of the C function you provided to Rust:
+
+```rust
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    const MAX_RSA_BYTES: usize = 512;
+
+    let olen=f.len()-1;
+    let mlen=m.len();
+    let hlen;
+    let seedlen;
+    let mut dbmask: [u8; MAX_RSA_BYTES] = [0; MAX_RSA_BYTES];
+    let mut seed: [u8; 64] = [0; 64];
+    
+    hlen=seedlen=sha;
+    
+    if mlen>olen-hlen-seedlen-1 { return false;}
+    if m==f { return false; } // must be distinct byte slices
+
+    // "hashit" function needs to be defined/replaced in Rust
+
+    let slen=olen-mlen-hlen-seedlen-1;
+
+    f[slen] = 0;
+    f[slen+1] = 0x1;
+    f[(slen+2)..(slen+2+mlen)].copy_from_slice(m);
+
+    for _i in 0..seedlen {
+        seed[_i] = rng.getbyte();
+    }
+
+    mgf1(sha, &seed, olen-seedlen, &mut dbmask);
+
+    for i in 0..dbmask.len() {
+        dbmask[i] ^= f[i];
+    }
+
+    mgf1(sha, &dbmask, seedlen, f);
+
+    for i in 0..seed.len() {
+        f[i] ^= seed[i];
+    }
+
+    f[(seedlen)..(seedlen+dbmask.len())].copy_from_slice(&dbmask);
+
+    for _i in 0..f.len() {
+        f.push(0);
+    }
+
+    for _i in 0..seed.len() {
+        seed[_i] = 0;
+    }
+
+    for _i in 0..dbmask.len() {
+        dbmask[_i] = 0;
+    }
+
+    return true;
+}
+```
+Please note that:
+1. The "hashit" function needs to be defined/replaced in Rust.
+2. The check "if m==f" compares two pointers in C, while in Rust we compare two slices. These are not equivalent, and you may need to adjust the check depending on your specific case.
+3. The Rust function did not need this function `OCT_pad(f,f->max)`. The OCT_pad is used for padding in C and is not applicable here. The size of `f` is known beforehand in Rust and it is not required to preallocate or deallocate memory dynamically.
+4. Elements in C `octet` struct are replaced with the more appropriate Rust types. You may need to adapt these types according to your project needs and coding guidelines. 
+5. Error handling is not included in the provided translation. You should implement a more idiomatic error handling for the Rust code according to your use cases (using `Result<T, E>` and the `?` operator, for example).
+6. This conversion is based on the expectation that the provided C code is functional and correct. Any bugs or issues present in the original C code will likely carry over to the converted Rust code as well.

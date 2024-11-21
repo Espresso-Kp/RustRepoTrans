@@ -1,0 +1,112 @@
+pub fn get(&self, key: Param) -> Option<&str> {
+        self.inner.get(&key).map(|s| s.as_str())
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct Chatlist {
+    /// Stores pairs of `chat_id, message_id`
+    ids: Vec<(ChatId, Option<MsgId>)>,
+}
+
+pub async fn get_summary2(
+        context: &Context,
+        chat_id: ChatId,
+        lastmsg_id: Option<MsgId>,
+        chat: Option<&Chat>,
+    ) -> Result<Summary> {
+        let chat_loaded: Chat;
+        let chat = if let Some(chat) = chat {
+            chat
+        } else {
+            let chat = Chat::load_from_db(context, chat_id).await?;
+            chat_loaded = chat;
+            &chat_loaded
+        };
+
+        let (lastmsg, lastcontact) = if let Some(lastmsg_id) = lastmsg_id {
+            let lastmsg = Message::load_from_db(context, lastmsg_id)
+                .await
+                .context("loading message failed")?;
+            if lastmsg.from_id == ContactId::SELF {
+                (Some(lastmsg), None)
+            } else {
+                match chat.typ {
+                    Chattype::Group | Chattype::Broadcast | Chattype::Mailinglist => {
+                        let lastcontact = Contact::get_by_id(context, lastmsg.from_id)
+                            .await
+                            .context("loading contact failed")?;
+                        (Some(lastmsg), Some(lastcontact))
+                    }
+                    Chattype::Single => (Some(lastmsg), None),
+                }
+            }
+        } else {
+            (None, None)
+        };
+
+        if chat.id.is_archived_link() {
+            Ok(Default::default())
+        } else if let Some(lastmsg) = lastmsg.filter(|msg| msg.from_id != ContactId::UNDEFINED) {
+            Summary::new_with_reaction_details(context, &lastmsg, chat, lastcontact.as_ref()).await
+        } else {
+            Ok(Summary {
+                text: stock_str::no_messages(context).await,
+                ..Default::default()
+            })
+        }
+    }
+    
+pub struct Summary {
+    /// Part displayed before ":", such as an username or a string "Draft".
+    pub prefix: Option<SummaryPrefix>,
+
+    /// Summary text, always present.
+    pub text: String,
+
+    /// Message timestamp.
+    pub timestamp: i64,
+
+    /// Message state.
+    pub state: MessageState,
+
+    /// Message preview image path
+    pub thumbnail_path: Option<String>,
+}
+
+
+pub fn get_header(&self, headerdef: HeaderDef) -> Option<&str> {
+        self.headers
+            .get(headerdef.get_headername())
+            .map(|s| s.as_str())
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+------
+
+use anyhow::{ensure, Context as _, Result};
+use once_cell::sync::Lazy;
+use crate::chat::{update_special_chat_names, Chat, ChatId, ChatVisibility};
+use crate::constants::{
+    Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK, DC_GCL_ADD_ALLDONE_HINT,
+    DC_GCL_ARCHIVED_ONLY, DC_GCL_FOR_FORWARDING, DC_GCL_NO_SPECIALS,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::message::{Message, MessageState, MsgId};
+use crate::param::{Param, Params};
+use crate::stock_str;
+use crate::summary::Summary;
+use crate::tools::IsNoneOrEmpty;
+use super::*;
+use crate::chat::{
+        add_contact_to_chat, create_group_chat, get_chat_contacts, remove_contact_from_chat,
+        send_text_msg, ProtectionStatus,
+    };
+use crate::message::Viewtype;
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::TestContext;

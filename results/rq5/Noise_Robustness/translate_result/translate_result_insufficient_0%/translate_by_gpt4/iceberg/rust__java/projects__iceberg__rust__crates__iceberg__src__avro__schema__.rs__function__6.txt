@@ -1,0 +1,183 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public ObjectInspector primitive(Type.PrimitiveType primitiveType) {
+    final PrimitiveTypeInfo primitiveTypeInfo;
+
+    switch (primitiveType.typeId()) {
+      case BINARY:
+        return IcebergBinaryObjectInspector.get();
+      case BOOLEAN:
+        primitiveTypeInfo = TypeInfoFactory.booleanTypeInfo;
+        break;
+      case DATE:
+        return DATE_INSPECTOR;
+      case DECIMAL:
+        Types.DecimalType type = (Types.DecimalType) primitiveType;
+        return IcebergDecimalObjectInspector.get(type.precision(), type.scale());
+      case DOUBLE:
+        primitiveTypeInfo = TypeInfoFactory.doubleTypeInfo;
+        break;
+      case FIXED:
+        return IcebergFixedObjectInspector.get();
+      case FLOAT:
+        primitiveTypeInfo = TypeInfoFactory.floatTypeInfo;
+        break;
+      case INTEGER:
+        primitiveTypeInfo = TypeInfoFactory.intTypeInfo;
+        break;
+      case LONG:
+        primitiveTypeInfo = TypeInfoFactory.longTypeInfo;
+        break;
+      case STRING:
+        primitiveTypeInfo = TypeInfoFactory.stringTypeInfo;
+        break;
+      case UUID:
+        return IcebergUUIDObjectInspector.get();
+      case TIMESTAMP:
+        boolean adjustToUTC = ((Types.TimestampType) primitiveType).shouldAdjustToUTC();
+        return adjustToUTC ? TIMESTAMP_INSPECTOR_WITH_TZ : TIMESTAMP_INSPECTOR;
+      case TIME:
+        return IcebergTimeObjectInspector.get();
+      default:
+        throw new IllegalArgumentException(primitiveType.typeId() + " type is not supported");
+    }
+
+    return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(primitiveTypeInfo);
+  }
+</java function>
+<rust function signature>
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+        let avro_schema = match p {
+            PrimitiveType::Boolean => AvroSchema::Boolean,
+            PrimitiveType::Int => AvroSchema::Int,
+            PrimitiveType::Long => AvroSchema::Long,
+            PrimitiveType::Float => AvroSchema::Float,
+            PrimitiveType::Double => AvroSchema::Double,
+            PrimitiveType::Date => AvroSchema::Date,
+            PrimitiveType::Time => AvroSchema::TimeMicros,
+            PrimitiveType::Timestamp => AvroSchema::TimestampMicros,
+            PrimitiveType::Timestamptz => AvroSchema::TimestampMicros,
+            PrimitiveType::String => AvroSchema::String,
+            PrimitiveType::Uuid => avro_fixed_schema(UUID_BYTES, Some(UUID_LOGICAL_TYPE))?,
+            PrimitiveType::Fixed(len) => avro_fixed_schema((*len) as usize, None)?,
+            PrimitiveType::Binary => AvroSchema::Bytes,
+            PrimitiveType::Decimal { precision, scale } => {
+                avro_decimal_schema(*precision as usize, *scale as usize)?
+            }
+        };
+        Ok(Either::Left(avro_schema))
+    }
+</function>
+<translated function>
+In the given Java function, Java's switch case is used. In Rust, we don't have switch case instead we use match expression. For the Java NullPointerException, Rust uses Option type, and for the java's IllegalArgumentException, Rust uses Result<T,E>.
+
+Here is the translated Rust function based on the given Java function:
+
+```rust
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField, Error> {
+     match p.type_id() {
+        "BINARY" => return Ok(AvroSchemaOrField(IcebergBinaryObjectInspector::get())),
+        "BOOLEAN" => matched_type = TypeInfoFactory::boolean_type_info,
+        "DATE" => return Ok(AvroSchemaOrField(DATE_INSPECTOR)),
+        "DECIMAL" => {
+            let type_as_decimal = p.into_decimal();
+            return Ok(AvroSchemaOrField(IcebergDecimalObjectInspector::get(type_as_decimal.precision(), type_as_decimal.scale())));
+        },
+        "DOUBLE" => matched_type = TypeInfoFactory::double_type_info,
+        "FIXED" => return Ok(AvroSchemaOrField(IcebergFixedObjectInspector::get())),
+        "FLOAT" => matched_type = TypeInfoFactory::float_type_info,
+        "INTEGER" => matched_type = TypeInfoFactory::int_type_info,
+        "LONG" => matched_type = TypeInfoFactory::long_type_info,
+        "STRING" => matched_type = TypeInfoFactory::string_type_info,
+        "UUID" => return Ok(AvroSchemaOrField(IcebergUUIDObjectInspector::get())),
+        "TIMESTAMP" => {
+            let type_as_timestamp = p.into_timestamp();
+            if type_as_timestamp.should_adjust_to_UTC() {
+                return Ok(AvroSchemaOrField(TIMESTAMP_INSPECTOR_WITH_TZ));
+            } else {
+                return Ok(AvroSchemaOrField(TIMESTAMP_INSPECTOR));
+            }
+        },
+        "TIME" => return Ok(AvroSchemaOrField(IcebergTimeObjectInspector::get())),
+        _ => return Err(Error::new(ErrorKind::InvalidInput, format!("{} type is not supported", p.type_id())))
+    };    
+    Ok(AvroSchemaOrField(PrimitiveObjectInspectorFactory::get_primitive_java_object_inspector(matched_type)))
+}
+```
+
+Please replace the "::" with actual methods to create or convert the object as per your project structure and requirement. Here I have used "::" as static method calls.
+
+Still,there is a room of improvement like split the function to smaller ones to increase the maintainability.</translated function>In the given Java function, Java's switch case is used. In Rust, we don't have switch case instead we use match expression. For the Java NullPointerException, Rust uses Option type, and for the java's IllegalArgumentException, Rust uses Result<T,E>.
+
+Here is the translated Rust function based on the given Java function:
+
+```rust
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField, Error> {
+     match p.type_id() {
+        "BINARY" => return Ok(AvroSchemaOrField(IcebergBinaryObjectInspector::get())),
+        "BOOLEAN" => matched_type = TypeInfoFactory::boolean_type_info,
+        "DATE" => return Ok(AvroSchemaOrField(DATE_INSPECTOR)),
+        "DECIMAL" => {
+            let type_as_decimal = p.into_decimal();
+            return Ok(AvroSchemaOrField(IcebergDecimalObjectInspector::get(type_as_decimal.precision(), type_as_decimal.scale())));
+        },
+        "DOUBLE" => matched_type = TypeInfoFactory::double_type_info,
+        "FIXED" => return Ok(AvroSchemaOrField(IcebergFixedObjectInspector::get())),
+        "FLOAT" => matched_type = TypeInfoFactory::float_type_info,
+        "INTEGER" => matched_type = TypeInfoFactory::int_type_info,
+        "LONG" => matched_type = TypeInfoFactory::long_type_info,
+        "STRING" => matched_type = TypeInfoFactory::string_type_info,
+        "UUID" => return Ok(AvroSchemaOrField(IcebergUUIDObjectInspector::get())),
+        "TIMESTAMP" => {
+            let type_as_timestamp = p.into_timestamp();
+            if type_as_timestamp.should_adjust_to_UTC() {
+                return Ok(AvroSchemaOrField(TIMESTAMP_INSPECTOR_WITH_TZ));
+            } else {
+                return Ok(AvroSchemaOrField(TIMESTAMP_INSPECTOR));
+            }
+        },
+        "TIME" => return Ok(AvroSchemaOrField(IcebergTimeObjectInspector::get())),
+        _ => return Err(Error::new(ErrorKind::InvalidInput, format!("{} type is not supported", p.type_id())))
+    };    
+    Ok(AvroSchemaOrField(PrimitiveObjectInspectorFactory::get_primitive_java_object_inspector(matched_type)))
+}
+```
+
+Please replace the "::" with actual methods to create or convert the object as per your project structure and requirement. Here I have used "::" as static method calls.
+
+Still,there is a room of improvement like split the function to smaller ones to increase the maintainability.

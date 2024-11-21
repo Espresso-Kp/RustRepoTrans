@@ -1,0 +1,291 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def map(self, map_type: MapType, key_result: AvroType, value_result: AvroType) -> AvroType:
+        if isinstance(key_result, StringType):
+            # Avro Maps does not support other keys than a String,
+            return {
+                "type": "map",
+                "values": value_result,
+                "key-id": self.last_map_key_field_id,
+                "value-id": self.last_map_value_field_id,
+            }
+        else:
+            # Creates a logical map that's a list of schema's
+            # binary compatible
+            return {
+                "type": "array",
+                "items": {
+                    "type": "record",
+                    "name": f"k{self.last_map_key_field_id}_v{self.last_map_value_field_id}",
+                    "fields": [
+                        {"name": "key", "type": key_result, "field-id": self.last_map_key_field_id},
+                        {"name": "value", "type": value_result, "field-id": self.last_map_value_field_id},
+                    ],
+                },
+                "logicalType": "map",
+            }
+</python function>
+<rust function signature>
+fn map(
+        &mut self,
+        map: &MapType,
+        key_value: AvroSchemaOrField,
+        value: AvroSchemaOrField,
+    ) -> Result<AvroSchemaOrField> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn avro_record_schema(name: &str, fields: Vec<AvroRecordField>) -> Result<AvroSchema> {
+    let lookup = fields
+        .iter()
+        .enumerate()
+        .map(|f| (f.1.name.clone(), f.0))
+        .collect();
+
+    Ok(AvroSchema::Record(RecordSchema {
+        name: Name::new(name)?,
+        aliases: None,
+        doc: None,
+        fields,
+        lookup,
+        attributes: Default::default(),
+    }))
+}
+
+fn avro_optional(avro_schema: AvroSchema) -> Result<AvroSchema> {
+    Ok(AvroSchema::Union(UnionSchema::new(vec![
+        AvroSchema::Null,
+        avro_schema,
+    ])?))
+}
+
+struct SchemaToAvroSchema {
+    schema: String,
+}
+
+struct AvroSchemaToSchema {
+    next_id: i32,
+}
+
+pub enum Schema {
+    /// A `null` Avro schema.
+    Null,
+    /// A `boolean` Avro schema.
+    Boolean,
+    /// An `int` Avro schema.
+    Int,
+    /// A `long` Avro schema.
+    Long,
+    /// A `float` Avro schema.
+    Float,
+    /// A `double` Avro schema.
+    Double,
+    /// A `bytes` Avro schema.
+    /// `Bytes` represents a sequence of 8-bit unsigned bytes.
+    Bytes,
+    /// A `string` Avro schema.
+    /// `String` represents a unicode character sequence.
+    String,
+    /// A `array` Avro schema. Avro arrays are required to have the same type for each element.
+    /// This variant holds the `Schema` for the array element type.
+    Array(Box<Schema>),
+    /// A `map` Avro schema.
+    /// `Map` holds a pointer to the `Schema` of its values, which must all be the same schema.
+    /// `Map` keys are assumed to be `string`.
+    Map(Box<Schema>),
+    /// A `union` Avro schema.
+    Union(UnionSchema),
+    /// A `record` Avro schema.
+    Record(RecordSchema),
+    /// An `enum` Avro schema.
+    Enum(EnumSchema),
+    /// A `fixed` Avro schema.
+    Fixed(FixedSchema),
+    /// Logical type which represents `Decimal` values. The underlying type is serialized and
+    /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
+    Decimal(DecimalSchema),
+    /// A universally unique identifier, annotating a string.
+    Uuid,
+    /// Logical type which represents the number of days since the unix epoch.
+    /// Serialization format is `Schema::Int`.
+    Date,
+    /// The time of day in number of milliseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMillis,
+    /// The time of day in number of microseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMicros,
+    /// An instant in time represented as the number of milliseconds after the UNIX epoch.
+    TimestampMillis,
+    /// An instant in time represented as the number of microseconds after the UNIX epoch.
+    TimestampMicros,
+    /// An instant in localtime represented as the number of milliseconds after the UNIX epoch.
+    LocalTimestampMillis,
+    /// An instant in local time represented as the number of microseconds after the UNIX epoch.
+    LocalTimestampMicros,
+    /// An amount of time defined by a number of months, days and milliseconds.
+    Duration,
+    /// A reference to another schema.
+    Ref { name: Name },
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn map(
+        &mut self,
+        map: &MapType,
+        key_value: AvroSchemaOrField,
+        value: AvroSchemaOrField,
+    ) -> Result<AvroSchemaOrField> {
+        let key_field_schema = key_value.unwrap_left();
+        let mut value_field_schema = value.unwrap_left();
+        if !map.value_field.required {
+            value_field_schema = avro_optional(value_field_schema)?;
+        }
+
+        if matches!(key_field_schema, AvroSchema::String) {
+            Ok(Either::Left(AvroSchema::Map(Box::new(value_field_schema))))
+        } else {
+            // Avro map requires that key must be string type. Here we convert it to array if key is
+            // not string type.
+            let key_field = {
+                let mut field = AvroRecordField {
+                    name: map.key_field.name.clone(),
+                    doc: None,
+                    aliases: None,
+                    default: None,
+                    schema: key_field_schema,
+                    order: RecordFieldOrder::Ascending,
+                    position: 0,
+                    custom_attributes: Default::default(),
+                };
+                field.custom_attributes.insert(
+                    FILED_ID_PROP.to_string(),
+                    Value::Number(Number::from(map.key_field.id)),
+                );
+                field
+            };
+
+            let value_field = {
+                let mut field = AvroRecordField {
+                    name: map.value_field.name.clone(),
+                    doc: None,
+                    aliases: None,
+                    default: None,
+                    schema: value_field_schema,
+                    order: RecordFieldOrder::Ignore,
+                    position: 0,
+                    custom_attributes: Default::default(),
+                };
+                field.custom_attributes.insert(
+                    FILED_ID_PROP.to_string(),
+                    Value::Number(Number::from(map.value_field.id)),
+                );
+                field
+            };
+
+            let fields = vec![key_field, value_field];
+            let item_avro_schema = avro_record_schema(
+                format!("k{}_v{}", map.key_field.id, map.value_field.id).as_str(),
+                fields,
+            )?;
+
+            Ok(Either::Left(AvroSchema::Array(item_avro_schema.into())))
+        }
+    }
+</function>
+<translated function>
+ ```rust
+fn map(
+    &mut self,
+    map: &MapType,
+    key_value: AvroSchemaOrField,
+    value: AvroSchemaOrField,
+) -> Result<AvroSchemaOrField> {
+    if let AvroSchemaOrField::Schema(schema) = &key_value {
+        if let AvroSchema::String = schema.clone() {
+            // Avro Maps does not support other keys than a String,
+            let map_schema = AvroSchema::Map {
+                values: Box::new(value),
+                key_id: self.last_map_key_field_id,
+                value_id: self.last_map_value_field_id,
+            };
+            return Ok(AvroSchemaOrField::Schema(map_schema));
+        }
+    }
+
+    // Creates a logical map that's a list of schema's
+    // binary compatible
+    let key_field = AvroRecordField::new("key", key_value.clone(), self.last_map_key_field_id)?;
+    let value_field = AvroRecordField::new("value", value.clone(), self.last_map_value_field_id)?;
+    let fields = vec![key_field, value_field];
+    let record_schema = avro_record_schema(
+        &format!("k{}_{}v{}", self.last_map_key_field_id, self.last_map_value_field_id),
+        fields,
+    )?;
+    let logical_map_schema = AvroSchema::Logical(LogicalSchema::Map {
+        items: Box::new(record_schema),
+    });
+
+    Ok(AvroSchemaOrField::Schema(logical_map_schema))
+}
+```</translated function> ```rust
+fn map(
+    &mut self,
+    map: &MapType,
+    key_value: AvroSchemaOrField,
+    value: AvroSchemaOrField,
+) -> Result<AvroSchemaOrField> {
+    if let AvroSchemaOrField::Schema(schema) = &key_value {
+        if let AvroSchema::String = schema.clone() {
+            // Avro Maps does not support other keys than a String,
+            let map_schema = AvroSchema::Map {
+                values: Box::new(value),
+                key_id: self.last_map_key_field_id,
+                value_id: self.last_map_value_field_id,
+            };
+            return Ok(AvroSchemaOrField::Schema(map_schema));
+        }
+    }
+
+    // Creates a logical map that's a list of schema's
+    // binary compatible
+    let key_field = AvroRecordField::new("key", key_value.clone(), self.last_map_key_field_id)?;
+    let value_field = AvroRecordField::new("value", value.clone(), self.last_map_value_field_id)?;
+    let fields = vec![key_field, value_field];
+    let record_schema = avro_record_schema(
+        &format!("k{}_{}v{}", self.last_map_key_field_id, self.last_map_value_field_id),
+        fields,
+    )?;
+    let logical_map_schema = AvroSchema::Logical(LogicalSchema::Map {
+        items: Box::new(record_schema),
+    });
+
+    Ok(AvroSchemaOrField::Schema(logical_map_schema))
+}
+```

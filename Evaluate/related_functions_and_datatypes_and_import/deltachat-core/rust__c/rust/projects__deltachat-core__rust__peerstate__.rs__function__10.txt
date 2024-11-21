@@ -1,0 +1,127 @@
+pub fn recalc_fingerprint(&mut self) {
+        if let Some(ref public_key) = self.public_key {
+            let old_public_fingerprint = self.public_key_fingerprint.take();
+            self.public_key_fingerprint = Some(public_key.fingerprint());
+
+            if old_public_fingerprint.is_some()
+                && old_public_fingerprint != self.public_key_fingerprint
+            {
+                self.fingerprint_changed = true;
+            }
+        }
+
+        if let Some(ref gossip_key) = self.gossip_key {
+            let old_gossip_fingerprint = self.gossip_key_fingerprint.take();
+            self.gossip_key_fingerprint = Some(gossip_key.fingerprint());
+
+            if old_gossip_fingerprint.is_none()
+                || self.gossip_key_fingerprint.is_none()
+                || old_gossip_fingerprint != self.gossip_key_fingerprint
+            {
+                // Warn about gossip key change only if there is no public key obtained from
+                // Autocrypt header, which overrides gossip key.
+                if old_gossip_fingerprint.is_some() && self.public_key_fingerprint.is_none() {
+                    self.fingerprint_changed = true;
+                }
+            }
+        }
+    }
+
+pub struct Aheader {
+    pub addr: String,
+    pub public_key: SignedPublicKey,
+    pub prefer_encrypt: EncryptPreference,
+}
+
+pub enum EncryptPreference {
+    #[default]
+    NoPreference = 0,
+    Mutual = 1,
+    Reset = 20,
+}
+
+pub struct Peerstate {
+    /// E-mail address of the contact.
+    pub addr: String,
+
+    /// Timestamp of the latest peerstate update.
+    ///
+    /// Updated when a message is received from a contact,
+    /// either with or without `Autocrypt` header.
+    pub last_seen: i64,
+
+    /// Timestamp of the latest `Autocrypt` header reception.
+    pub last_seen_autocrypt: i64,
+
+    /// Encryption preference of the contact.
+    pub prefer_encrypt: EncryptPreference,
+
+    /// Public key of the contact received in `Autocrypt` header.
+    pub public_key: Option<SignedPublicKey>,
+
+    /// Fingerprint of the contact public key.
+    pub public_key_fingerprint: Option<Fingerprint>,
+
+    /// Public key of the contact received in `Autocrypt-Gossip` header.
+    pub gossip_key: Option<SignedPublicKey>,
+
+    /// Timestamp of the latest `Autocrypt-Gossip` header reception.
+    ///
+    /// It is stored to avoid applying outdated gossiped key
+    /// from delayed or reordered messages.
+    pub gossip_timestamp: i64,
+
+    /// Fingerprint of the contact gossip key.
+    pub gossip_key_fingerprint: Option<Fingerprint>,
+
+    /// Public key of the contact at the time it was verified,
+    /// either directly or via gossip from the verified contact.
+    pub verified_key: Option<SignedPublicKey>,
+
+    /// Fingerprint of the verified public key.
+    pub verified_key_fingerprint: Option<Fingerprint>,
+
+    /// The address that introduced this verified key.
+    pub verifier: Option<String>,
+
+    /// Secondary public verified key of the contact.
+    /// It could be a contact gossiped by another verified contact in a shared group
+    /// or a key that was previously used as a verified key.
+    pub secondary_verified_key: Option<SignedPublicKey>,
+
+    /// Fingerprint of the secondary verified public key.
+    pub secondary_verified_key_fingerprint: Option<Fingerprint>,
+
+    /// The address that introduced secondary verified key.
+    pub secondary_verifier: Option<String>,
+
+    /// Row ID of the key in the `keypairs` table
+    /// that we think the peer knows as verified.
+    pub backward_verified_key_id: Option<i64>,
+
+    /// True if it was detected
+    /// that the fingerprint of the key used in chats with
+    /// opportunistic encryption was changed after Peerstate creation.
+    pub fingerprint_changed: bool,
+}
+
+------
+use std::mem;
+use anyhow::{Context as _, Error, Result};
+use deltachat_contact_tools::{addr_cmp, ContactAddress};
+use num_traits::FromPrimitive;
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::chat::{self, Chat};
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::constants::Chattype;
+use crate::contact::{Contact, Origin};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{DcKey, Fingerprint, SignedPublicKey};
+use crate::message::Message;
+use crate::mimeparser::SystemMessage;
+use crate::sql::Sql;
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::test_utils::alice_keypair;

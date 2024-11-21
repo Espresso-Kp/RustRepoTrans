@@ -1,0 +1,197 @@
+pub(crate) fn convert_to_glue_table(
+    table_name: impl Into<String>,
+    metadata_location: String,
+    metadata: &TableMetadata,
+    properties: &HashMap<String, String>,
+    prev_metadata_location: Option<String>,
+) -> Result<TableInput> {
+    let glue_schema = GlueSchemaBuilder::from_iceberg(metadata)?.build();
+
+    let storage_descriptor = StorageDescriptor::builder()
+        .set_columns(Some(glue_schema))
+        .location(&metadata_location)
+        .build();
+
+    let mut parameters = HashMap::from([
+        (TABLE_TYPE.to_string(), ICEBERG.to_string()),
+        (METADATA_LOCATION.to_string(), metadata_location),
+    ]);
+
+    if let Some(prev) = prev_metadata_location {
+        parameters.insert(PREV_METADATA_LOCATION.to_string(), prev);
+    }
+
+    let mut table_input_builder = TableInput::builder()
+        .name(table_name)
+        .set_parameters(Some(parameters))
+        .storage_descriptor(storage_descriptor)
+        .table_type(EXTERNAL_TABLE);
+
+    if let Some(description) = properties.get(DESCRIPTION) {
+        table_input_builder = table_input_builder.description(description);
+    }
+
+    let table_input = table_input_builder.build().map_err(from_aws_build_error)?;
+
+    Ok(table_input)
+}
+fn build(file_io_builder: FileIOBuilder) -> Result<Self> {
+        let scheme_str = file_io_builder.scheme_str.unwrap_or("".to_string());
+        let scheme = Self::parse_scheme(&scheme_str)?;
+        let mut new_props = HashMap::default();
+        new_props.insert("root".to_string(), DEFAULT_ROOT_PATH.to_string());
+
+        match scheme {
+            Scheme::Fs => Ok(Self::LocalFs {
+                op: Operator::via_map(Scheme::Fs, new_props)?,
+            }),
+            Scheme::S3 => {
+                for prop in file_io_builder.props {
+                    if let Some(op_key) = S3_CONFIG_MAPPING.get(prop.0.as_str()) {
+                        new_props.insert(op_key.to_string(), prop.1);
+                    }
+                }
+
+                Ok(Self::S3 {
+                    scheme_str,
+                    props: new_props,
+                })
+            }
+            _ => Err(Error::new(
+                ErrorKind::FeatureUnsupported,
+                format!("Constructing file io from scheme: {scheme} not supported now",),
+            )),
+        }
+    }
+pub fn identifier(&self) -> &TableIdent {
+        &self.identifier
+    }
+pub async fn metadata(&self) -> Result<FileMetadata> {
+        let meta = self.op.stat(&self.path[self.relative_path_pos..]).await?;
+
+        Ok(FileMetadata {
+            size: meta.content_length(),
+        })
+    }
+pub fn new_output(&self, path: impl AsRef<str>) -> Result<OutputFile> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        let path = path.as_ref().to_string();
+        let relative_path_pos = path.len() - relative_path.len();
+        Ok(OutputFile {
+            op,
+            path,
+            relative_path_pos,
+        })
+    }
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+pub fn metadata_location(&self) -> Option<&str> {
+        self.metadata_location.as_deref()
+    }
+async fn get_namespace(&self, namespace: &NamespaceIdent) -> Result<Namespace> {
+        let db_name = validate_namespace(namespace)?;
+
+        let builder = self.client.0.get_database().name(&db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+        match resp.database() {
+            Some(db) => {
+                let namespace = convert_to_namespace(db);
+                Ok(namespace)
+            }
+            None => Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} does not exist", db_name),
+            )),
+        }
+    }
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+pub fn new(namespace: NamespaceIdent, name: String) -> Self {
+        Self { namespace, name }
+    }
+pub fn new(name: String) -> Self {
+        Self(vec![name])
+    }
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+struct GlueClient(aws_sdk_glue::Client);
+pub struct Table {
+    file_io: FileIO,
+    #[builder(default, setter(strip_option, into))]
+    metadata_location: Option<String>,
+    #[builder(setter(into))]
+    metadata: TableMetadataRef,
+    identifier: TableIdent,
+    #[builder(default = false)]
+    readonly: bool,
+}
+pub struct GlueCatalogConfig {
+    #[builder(default, setter(strip_option))]
+    uri: Option<String>,
+    #[builder(default, setter(strip_option))]
+    catalog_id: Option<String>,
+    warehouse: String,
+    #[builder(default)]
+    props: HashMap<String, String>,
+}
+pub struct TableIdent {
+    /// Namespace of the table.
+    pub namespace: NamespaceIdent,
+    /// Table name.
+    pub name: String,
+}
+pub struct NamespaceIdent(Vec<String>);
+------
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;

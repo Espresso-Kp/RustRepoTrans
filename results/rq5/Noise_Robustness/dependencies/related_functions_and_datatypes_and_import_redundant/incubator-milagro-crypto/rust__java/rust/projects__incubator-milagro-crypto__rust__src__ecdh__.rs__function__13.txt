@@ -1,0 +1,370 @@
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+
+pub fn invmodp(&mut self, p: &Big) {
+        self.rmod(p);
+        let mut u = self.clone();
+        let mut v = p.clone();
+        let mut x1 = Big::new_int(1);
+        let mut x2 = Big::new();
+        let one = Big::new_int(1);
+
+        while (Big::comp(&u, &one) != 0) && (Big::comp(&v, &one) != 0) {
+            while u.parity() == 0 {
+                u.fshr(1);
+                if x1.parity() != 0 {
+                    x1.add(p);
+                    x1.norm();
+                }
+                x1.fshr(1);
+            }
+            while v.parity() == 0 {
+                v.fshr(1);
+                if x2.parity() != 0 {
+                    x2.add(p);
+                    x2.norm();
+                }
+                x2.fshr(1);
+            }
+            if Big::comp(&u, &v) >= 0 {
+                u.sub(&v);
+                u.norm();
+                if Big::comp(&x1, &x2) >= 0 {
+                    x1.sub(&x2)
+                } else {
+                    let mut t = p.clone();
+                    t.sub(&x2);
+                    x1.add(&t);
+                }
+                x1.norm();
+            } else {
+                v.sub(&u);
+                v.norm();
+                if Big::comp(&x2, &x1) >= 0 {
+                    x2.sub(&x1)
+                } else {
+                    let mut t = p.clone();
+                    t.sub(&x1);
+                    x2.add(&t);
+                }
+                x2.norm();
+            }
+        }
+        if Big::comp(&u, &one) == 0 {
+            *self = x1
+        } else {
+            *self = x2
+        }
+    }
+
+pub fn getx(&self) -> Big {
+        let mut W = self.clone();
+        W.affine();
+        return W.x.redc();
+    }
+
+pub fn is_zilch(&self) -> bool {
+        for i in 0..NLEN {
+            if self.w[i] != 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+pub fn mul2(&self, e: &Big, Q: &ECP, f: &Big) -> ECP {
+        let mut W: [ECP; 8] = [
+            ECP::new(),
+            ECP::new(),
+            ECP::new(),
+            ECP::new(),
+            ECP::new(),
+            ECP::new(),
+            ECP::new(),
+            ECP::new(),
+        ];
+
+        const CT: usize = 1 + (big::NLEN * (big::BASEBITS as usize) + 1) / 2;
+        let mut w: [i8; CT] = [0; CT];
+
+        let mut te = e.clone();
+        let mut tf = f.clone();
+
+        // precompute table
+
+        W[1] = self.clone();
+        W[1].sub(Q);
+        W[2] = self.clone();
+        W[2].add(Q);
+        let mut S = Q.clone();
+        S.dbl();
+        let mut C = W[1].clone();
+        W[0] = C.clone();
+        W[0].sub(&S); // copy to C is stupid Rust thing..
+        C = W[2].clone();
+        W[3] = C.clone();
+        W[3].add(&S);
+        let mut T = self.clone();
+        T.dbl();
+        C = W[1].clone();
+        W[5] = C.clone();
+        W[5].add(&T);
+        C = W[2].clone();
+        W[6] = C.clone();
+        W[6].add(&T);
+        C = W[5].clone();
+        W[4] = C.clone();
+        W[4].sub(&S);
+        C = W[6].clone();
+        W[7] = C.clone();
+        W[7].add(&S);
+
+        // if multiplier is odd, add 2, else add 1 to multiplier, and add 2P or P to correction
+
+        let mut s = te.parity();
+        te.inc(1);
+        te.norm();
+        let mut ns = te.parity();
+        let mut mt = te.clone();
+        mt.inc(1);
+        mt.norm();
+        te.cmove(&mt, s);
+        T.cmove(&self, ns);
+        C = T.clone();
+
+        s = tf.parity();
+        tf.inc(1);
+        tf.norm();
+        ns = tf.parity();
+        mt = tf.clone();
+        mt.inc(1);
+        mt.norm();
+        tf.cmove(&mt, s);
+        S.cmove(&Q, ns);
+        C.add(&S);
+
+        mt = te.clone();
+        mt.add(&tf);
+        mt.norm();
+        let nb = 1 + (mt.nbits() + 1) / 2;
+
+        // convert exponent to signed 2-bit window
+        for i in 0..nb {
+            let a = te.lastbits(3) - 4;
+            te.dec(a);
+            te.norm();
+            te.fshr(2);
+            let b = tf.lastbits(3) - 4;
+            tf.dec(b);
+            tf.norm();
+            tf.fshr(2);
+            w[i] = (4 * a + b) as i8;
+        }
+        w[nb] = (4 * te.lastbits(3) + tf.lastbits(3)) as i8;
+        S = W[((w[nb] as usize) - 1) / 2].clone();
+
+        for i in (0..nb).rev() {
+            T.selector(&W, w[i] as i32);
+            S.dbl();
+            S.dbl();
+            S.add(&T);
+        }
+        S.sub(&C); /* apply correction */
+        S.affine();
+        return S;
+    }
+
+fn hashit(sha: usize, a: &[u8], n: usize, b: Option<&[u8]>, pad: usize, w: &mut [u8]) {
+    let mut r: [u8; 64] = [0; 64];
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+
+    if pad == 0 {
+        for i in 0..sha {
+            w[i] = r[i]
+        }
+    } else {
+        if pad <= sha {
+            for i in 0..pad {
+                w[i] = r[i]
+            }
+        } else {
+            for i in 0..sha {
+                w[i + pad - sha] = r[i]
+            }
+            for i in 0..(pad - sha) {
+                w[i] = 0
+            }
+        }
+    }
+}
+
+pub fn is_infinity(&self) -> bool {
+        match CURVETYPE {
+            CurveType::Edwards => self.x.is_zilch() && self.y.equals(&self.z),
+            CurveType::Weierstrass => self.x.is_zilch() && self.z.is_zilch(),
+            CurveType::Montgomery => self.z.is_zilch(),
+        }
+    }
+
+pub fn generator() -> ECP {
+        let G: ECP;
+
+        let gx = Big::new_ints(&rom::CURVE_GX);
+
+        if CURVETYPE != CurveType::Montgomery {
+            let gy = Big::new_ints(&rom::CURVE_GY);
+            G = ECP::new_bigs(&gx, &gy);
+        } else {
+            G = ECP::new_big(&gx);
+        }
+        return G;
+    }
+
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+
+pub fn comp(a: &Big, b: &Big) -> isize {
+        for i in (0..NLEN).rev() {
+            if a.w[i] == b.w[i] {
+                continue;
+            }
+            if a.w[i] > b.w[i] {
+                return 1;
+            } else {
+                return -1;
+            }
+        }
+        0
+    }
+
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+
+pub fn modmul(a1: &Big, b1: &Big, m: &Big) -> Big {
+        let mut a = a1.clone();
+        let mut b = b1.clone();
+        a.rmod(m);
+        b.rmod(m);
+        let mut d = Big::mul(&a, &b);
+        d.dmod(m)
+    }
+
+pub const MODBYTES: usize = 32;
+
+pub const ERROR: isize = -3;
+
+pub const INVALID: isize = -4;
+
+pub const CURVE_ORDER: [Chunk; NLEN] = [
+    0xD,
+    0x800000000010A1,
+    0x8000000007FF9F,
+    0x40000001BA344D,
+    0x25236482,
+];
+
+pub fn comp(a: &DBig, b: &DBig) -> isize {
+        for i in (0..big::DNLEN).rev() {
+            if a.w[i] == b.w[i] {
+                continue;
+            }
+            if a.w[i] > b.w[i] {
+                return 1;
+            } else {
+                return -1;
+            }
+        }
+        0
+    }
+pub struct Big {
+    pub w: [Chunk; NLEN],
+}
+------
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;

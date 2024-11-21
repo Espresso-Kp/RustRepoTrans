@@ -1,0 +1,90 @@
+pub fn suitable_encodings(&self) -> Vec<String> {
+        std::iter::once(self.encoding.clone())
+            .chain(self.submatch.iter().map(|s| s.encoding.clone()))
+            .collect()
+    }
+pub(crate) fn mb_encoding_languages(iana_name: &str) -> Vec<&'static Language> {
+    ENCODING_TO_LANGUAGE
+        .get(iana_name)
+        .map_or(vec![], |found| vec![found])
+}
+pub(crate) fn encoding_languages(iana_name: String) -> Vec<&'static Language> {
+    match encoding_unicode_range(&iana_name)
+        .unwrap_or_default()
+        .iter()
+        .find(|&&range| !range.contains("Latin"))
+    {
+        Some(&range) => unicode_range_languages(range),
+        None => vec![&Language::Unknown],
+    }
+}
+pub struct CharsetMatch {
+    payload: Vec<u8>,
+    encoding: String,
+
+    mean_mess_ratio: f32,
+    coherence_matches: CoherenceMatches,
+
+    has_sig_or_bom: bool,
+
+    submatch: Vec<CharsetMatch>,
+    decoded_payload: Option<String>,
+}
+pub enum Language {
+    English,
+    German,
+    French,
+    Dutch,
+    Italian,
+    Polish,
+    Spanish,
+    Russian,
+    Japanese,
+    Portuguese,
+    Swedish,
+    Chinese,
+    Ukrainian,
+    Norwegian,
+    Finnish,
+    Vietnamese,
+    Czech,
+    Hungarian,
+    Korean,
+    Indonesian,
+    Turkish,
+    Romanian,
+    Farsi,
+    Arabic,
+    Danish,
+    Serbian,
+    Lithuanian,
+    Slovene,
+    Slovak,
+    Hebrew,
+    Bulgarian,
+    Croatian,
+    Hindi,
+    Estonian,
+    Thai,
+    Greek,
+    Tamil,
+    Kazakh,
+    Unknown,
+}
+pub type CoherenceMatches = Vec<CoherenceMatch>;
+------
+
+use crate::cd::{encoding_languages, mb_encoding_languages};
+use crate::consts::{IANA_SUPPORTED_ALIASES, TOO_BIG_SEQUENCE};
+use crate::utils::{decode, iana_name, is_multi_byte_encoding, range_scan};
+use clap::Parser;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use serde::Serialize;
+use std::cmp::Ordering;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::Hash;
+use std::ops::Index;
+use std::path::PathBuf;
+use std::time::Duration;

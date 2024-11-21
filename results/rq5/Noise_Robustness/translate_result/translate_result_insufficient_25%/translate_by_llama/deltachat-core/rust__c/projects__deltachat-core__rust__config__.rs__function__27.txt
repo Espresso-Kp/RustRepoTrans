@@ -1,0 +1,156 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_addr_equals_self(dc_context_t* context, const char* addr)
+{
+	int   ret             = 0;
+	char* normalized_addr = NULL;
+	char* self_addr       = NULL;
+
+	if (context==NULL || addr==NULL) {
+		goto cleanup;
+	}
+
+	normalized_addr = dc_addr_normalize(addr);
+
+	if (NULL==(self_addr=dc_sqlite3_get_config(context->sql, "configured_addr", NULL))) {
+		goto cleanup;
+	}
+
+	ret = strcasecmp(normalized_addr, self_addr)==0? 1 : 0;
+
+cleanup:
+	free(self_addr);
+	free(normalized_addr);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub(crate) async fn is_self_addr(&self, addr: &str) -> Result<bool> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) async fn get_secondary_self_addrs(&self) -> Result<Vec<String>> {
+        let secondary_addrs = self
+            .get_config(Config::SecondaryAddrs)
+            .await?
+            .unwrap_or_default();
+        Ok(secondary_addrs
+            .split_ascii_whitespace()
+            .map(|s| s.to_string())
+            .collect())
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::env;
+use std::path::Path;
+use std::str::FromStr;
+use anyhow::{ensure, Context as _, Result};
+use base64::Engine as _;
+use deltachat_contact_tools::addr_cmp;
+use serde::{Deserialize, Serialize};
+use strum::{EnumProperty, IntoEnumIterator};
+use strum_macros::{AsRefStr, Display, EnumIter, EnumString};
+use tokio::fs;
+use crate::blob::BlobObject;
+use crate::constants::{self, DC_VERSION_STR};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::log::LogExt;
+use crate::mimefactory::RECOMMENDED_FILE_SIZE;
+use crate::provider::{get_provider_by_id, Provider};
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{get_abs_path, improve_single_line_input};
+use num_traits::FromPrimitive;
+use super::*;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) async fn is_self_addr(&self, addr: &str) -> Result<bool> {
+        Ok(self
+            .get_config(Config::ConfiguredAddr)
+            .await?
+            .iter()
+            .any(|a| addr_cmp(addr, a))
+            || self
+                .get_secondary_self_addrs()
+                .await?
+                .iter()
+                .any(|a| addr_cmp(addr, a)))
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+use anyhow::{ensure, Context as _, Result};
+use crate::context::Context;
+use crate::constants::DC_VERSION_STR;
+use crate::tools::get_abs_path;
+use crate::sync::SyncData;
+use crate::blob::BlobObject;
+use crate::mimefactory::RECOMMENDED_FILE_SIZE;
+use crate::provider::{get_provider_by_id, Provider};
+use crate::events::EventType;
+use crate::log::LogExt;
+use tokio::fs;
+use strum::{EnumProperty, IntoEnumIterator};
+use strum_macros::{AsRefStr, Display, EnumIter, EnumString};
+use serde::{Deserialize, Serialize};
+use base64::Engine as _;
+use deltachat_contact_tools::addr_cmp;
+
+pub(crate) async fn is_self_addr(&self, addr: &str) -> Result<bool> {
+    let context = self.inner.clone();
+    let secondary_addrs = get_secondary_self_addrs(&context).await?;
+
+    let normalized_addr = addr.to_lowercase();
+    let self_addr = secondary_addrs
+       .iter()
+       .find(|s| addr_cmp(normalized_addr.as_str(), s.as_str()) == 0)
+       .ok_or_else(|| anyhow!("self_addr not found"))?;
+
+    Ok(normalized_addr == self_addr)
+}
+```
+Note that I've assumed that `get_secondary_self_addrs` is a function that returns a `Result<Vec<String>>` as defined in the provided Rust code. I've also assumed that `addr_cmp` is a function from the `deltachat_contact_tools` crate that compares two addresses. If these assumptions are incorrect, please let me know and I'll adjust the code accordingly.</translated function>Here is the translated Rust function:
+```rust
+use anyhow::{ensure, Context as _, Result};
+use crate::context::Context;
+use crate::constants::DC_VERSION_STR;
+use crate::tools::get_abs_path;
+use crate::sync::SyncData;
+use crate::blob::BlobObject;
+use crate::mimefactory::RECOMMENDED_FILE_SIZE;
+use crate::provider::{get_provider_by_id, Provider};
+use crate::events::EventType;
+use crate::log::LogExt;
+use tokio::fs;
+use strum::{EnumProperty, IntoEnumIterator};
+use strum_macros::{AsRefStr, Display, EnumIter, EnumString};
+use serde::{Deserialize, Serialize};
+use base64::Engine as _;
+use deltachat_contact_tools::addr_cmp;
+
+pub(crate) async fn is_self_addr(&self, addr: &str) -> Result<bool> {
+    let context = self.inner.clone();
+    let secondary_addrs = get_secondary_self_addrs(&context).await?;
+
+    let normalized_addr = addr.to_lowercase();
+    let self_addr = secondary_addrs
+       .iter()
+       .find(|s| addr_cmp(normalized_addr.as_str(), s.as_str()) == 0)
+       .ok_or_else(|| anyhow!("self_addr not found"))?;
+
+    Ok(normalized_addr == self_addr)
+}
+```
+Note that I've assumed that `get_secondary_self_addrs` is a function that returns a `Result<Vec<String>>` as defined in the provided Rust code. I've also assumed that `addr_cmp` is a function from the `deltachat_contact_tools` crate that compares two addresses. If these assumptions are incorrect, please let me know and I'll adjust the code accordingly.

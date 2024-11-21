@@ -1,0 +1,60 @@
+<path>
+projects/deltachat-core/rust/imex.rs
+</path>
+<function>
+pub fn create_setup_code(_context: &Context) -> String {
+    let mut random_val: u16;
+    let mut rng = thread_rng();
+    let mut ret = String::new();
+
+    for i in 0..9 {
+        loop {
+            random_val = rng.gen();
+            if random_val as usize <= 60000 {
+                break;
+            }
+        }
+        random_val = (random_val as usize % 10000) as u16;
+        ret += &format!(
+            "{}{:04}",
+            if 0 != i { "-" } else { "" },
+            random_val as usize
+        );
+    }
+
+    ret
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_imex.c
+</path>
+<function>
+char* dc_create_setup_code(dc_context_t* context)
+{
+	#define         CODE_ELEMS 9
+	uint16_t        random_val = 0;
+	int             i = 0;
+	dc_strbuilder_t ret;
+	dc_strbuilder_init(&ret, 0);
+
+	for (i = 0; i < CODE_ELEMS; i++)
+	{
+		do
+		{
+			if (!RAND_bytes((unsigned char*)&random_val, sizeof(uint16_t))) {
+				dc_log_warning(context, 0, "Falling back to pseudo-number generation for the setup code.");
+				RAND_pseudo_bytes((unsigned char*)&random_val, sizeof(uint16_t));
+			}
+		}
+		while (random_val > 60000); /* make sure the modulo below does not reduce entropy (range is 0..65535, a module 10000 would make appearing values <=535 one time more often than other values) */
+
+		random_val = random_val % 10000; /* force all blocks into the range 0..9999 */
+
+		dc_strbuilder_catf(&ret, "%s%04i", i?"-":"", (int)random_val);
+	}
+
+	return ret.buf;
+}
+</function>

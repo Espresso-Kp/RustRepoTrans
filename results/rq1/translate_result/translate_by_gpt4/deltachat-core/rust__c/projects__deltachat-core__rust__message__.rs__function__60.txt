@@ -1,0 +1,272 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int dc_msg_is_setupmessage(const dc_msg_t* msg)
+{
+	if (msg==NULL || msg->magic!=DC_MSG_MAGIC || msg->type!=DC_MSG_FILE) {
+		return 0;
+	}
+
+	return dc_param_get_int(msg->param, DC_PARAM_CMD, 0)==DC_CMD_AUTOCRYPT_SETUP_MESSAGE? 1 : 0;
+}
+</c function>
+<rust function signature>
+pub fn is_setupmessage(&self) -> bool 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn get_cmd(&self) -> SystemMessage {
+        self.get_int(Param::Cmd)
+            .and_then(SystemMessage::from_i32)
+            .unwrap_or_default()
+    }
+
+pub struct Message {
+    /// Message ID.
+    pub(crate) id: MsgId,
+
+    /// `From:` contact ID.
+    pub(crate) from_id: ContactId,
+
+    /// ID of the first contact in the `To:` header.
+    pub(crate) to_id: ContactId,
+
+    /// ID of the chat message belongs to.
+    pub(crate) chat_id: ChatId,
+
+    /// Type of the message.
+    pub(crate) viewtype: Viewtype,
+
+    /// State of the message.
+    pub(crate) state: MessageState,
+    pub(crate) download_state: DownloadState,
+
+    /// Whether the message is hidden.
+    pub(crate) hidden: bool,
+    pub(crate) timestamp_sort: i64,
+    pub(crate) timestamp_sent: i64,
+    pub(crate) timestamp_rcvd: i64,
+    pub(crate) ephemeral_timer: EphemeralTimer,
+    pub(crate) ephemeral_timestamp: i64,
+    pub(crate) text: String,
+
+    /// Message subject.
+    ///
+    /// If empty, a default subject will be generated when sending.
+    pub(crate) subject: String,
+
+    /// `Message-ID` header value.
+    pub(crate) rfc724_mid: String,
+
+    /// `In-Reply-To` header value.
+    pub(crate) in_reply_to: Option<String>,
+    pub(crate) is_dc_message: MessengerMessage,
+    pub(crate) mime_modified: bool,
+    pub(crate) chat_blocked: Blocked,
+    pub(crate) location_id: u32,
+    pub(crate) error: Option<String>,
+    pub(crate) param: Params,
+}
+
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+
+pub enum SystemMessage {
+    /// Unknown type of system message.
+    #[default]
+    Unknown = 0,
+
+    /// Group name changed.
+    GroupNameChanged = 2,
+
+    /// Group avatar changed.
+    GroupImageChanged = 3,
+
+    /// Member was added to the group.
+    MemberAddedToGroup = 4,
+
+    /// Member was removed from the group.
+    MemberRemovedFromGroup = 5,
+
+    /// Autocrypt Setup Message.
+    AutocryptSetupMessage = 6,
+
+    /// Secure-join message.
+    SecurejoinMessage = 7,
+
+    /// Location streaming is enabled.
+    LocationStreamingEnabled = 8,
+
+    /// Location-only message.
+    LocationOnly = 9,
+
+    /// Chat ephemeral message timer is changed.
+    EphemeralTimerChanged = 10,
+
+    /// "Messages are guaranteed to be end-to-end encrypted from now on."
+    ChatProtectionEnabled = 11,
+
+    /// "%1$s sent a message from another device."
+    ChatProtectionDisabled = 12,
+
+    /// Message can't be sent because of `Invalid unencrypted mail to <>`
+    /// which is sent by chatmail servers.
+    InvalidUnencryptedMail = 13,
+
+    /// 1:1 chats info message telling that SecureJoin has started and the user should wait for it
+    /// to complete.
+    SecurejoinWait = 14,
+
+    /// 1:1 chats info message telling that SecureJoin is still running, but the user may already
+    /// send messages.
+    SecurejoinWaitTimeout = 15,
+
+    /// Self-sent-message that contains only json used for multi-device-sync;
+    /// if possible, we attach that to other messages as for locations.
+    MultiDeviceSync = 20,
+
+    /// Sync message that contains a json payload
+    /// sent to the other webxdc instances
+    /// These messages are not shown in the chat.
+    WebxdcStatusUpdate = 30,
+
+    /// Webxdc info added with `info` set in `send_webxdc_status_update()`.
+    WebxdcInfoMessage = 32,
+
+    /// This message contains a users iroh node address.
+    IrohNodeAddr = 40,
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use anyhow::{ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::{parse_vcard, VcardContact};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use tokio::{fs, io};
+use crate::blob::BlobObject;
+use crate::chat::{Chat, ChatId, ChatIdBlocked};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    Blocked, Chattype, VideochatType, DC_CHAT_ID_TRASH, DC_DESIRED_TEXT_LEN, DC_MSG_ID_LAST_SPECIAL,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::debug_logging::set_debug_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::{start_ephemeral_timers_msgids, Timer as EphemeralTimer};
+use crate::events::EventType;
+use crate::imap::markseen_on_imap_table;
+use crate::location::delete_poi_location;
+use crate::mimeparser::{parse_message_id, SystemMessage};
+use crate::param::{Param, Params};
+use crate::pgp::split_armored_data;
+use crate::reaction::get_msg_reactions;
+use crate::sql;
+use crate::summary::Summary;
+use crate::tools::{
+    buf_compress, buf_decompress, get_filebytes, get_filemeta, gm2local_offset, read_file, time,
+    timestamp_to_str, truncate,
+};
+use MessageState::*;
+use MessageState::*;
+use num_traits::FromPrimitive;
+use super::*;
+use crate::chat::{
+        self, add_contact_to_chat, marknoticed_chat, send_text_msg, ChatItem, ProtectionStatus,
+    };
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::reaction::send_reaction;
+use crate::receive_imf::receive_imf;
+use crate::test_utils as test;
+use crate::test_utils::{TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn is_setupmessage(&self) -> bool {
+        if self.viewtype != Viewtype::File {
+            return false;
+        }
+
+        self.param.get_cmd() == SystemMessage::AutocryptSetupMessage
+    }
+</function>
+<translated function>
+pub fn is_setupmessage(&self) -> bool {
+    if self.viewtype != Viewtype::File {
+        return false;
+    }
+
+    matches!(self.get_cmd(), SystemMessage::AutocryptSetupMessage)
+}</translated function>pub fn is_setupmessage(&self) -> bool {
+    if self.viewtype != Viewtype::File {
+        return false;
+    }
+
+    matches!(self.get_cmd(), SystemMessage::AutocryptSetupMessage)
+}

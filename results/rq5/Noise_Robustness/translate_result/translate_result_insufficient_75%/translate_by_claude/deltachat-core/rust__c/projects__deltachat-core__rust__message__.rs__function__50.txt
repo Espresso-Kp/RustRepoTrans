@@ -1,0 +1,298 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+dc_lot_t* dc_msg_get_summary(const dc_msg_t* msg, const dc_chat_t* chat)
+{
+	dc_lot_t*      ret = dc_lot_new();
+	dc_contact_t*  contact = NULL;
+	dc_chat_t*     chat_to_delete = NULL;
+
+	if (msg==NULL || msg->magic!=DC_MSG_MAGIC) {
+		goto cleanup;
+	}
+
+	if (chat==NULL) {
+		if ((chat_to_delete=dc_get_chat(msg->context, msg->chat_id))==NULL) {
+			goto cleanup;
+		}
+		chat = chat_to_delete;
+	}
+
+	if (msg->from_id!=DC_CONTACT_ID_SELF && DC_CHAT_TYPE_IS_MULTI(chat->type)) {
+		contact = dc_get_contact(chat->context, msg->from_id);
+	}
+
+	dc_lot_fill(ret, msg, chat, contact, msg->context);
+
+cleanup:
+	dc_contact_unref(contact);
+	dc_chat_unref(chat_to_delete);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+pub struct Message {
+    /// Message ID.
+    pub(crate) id: MsgId,
+
+    /// `From:` contact ID.
+    pub(crate) from_id: ContactId,
+
+    /// ID of the first contact in the `To:` header.
+    pub(crate) to_id: ContactId,
+
+    /// ID of the chat message belongs to.
+    pub(crate) chat_id: ChatId,
+
+    /// Type of the message.
+    pub(crate) viewtype: Viewtype,
+
+    /// State of the message.
+    pub(crate) state: MessageState,
+    pub(crate) download_state: DownloadState,
+
+    /// Whether the message is hidden.
+    pub(crate) hidden: bool,
+    pub(crate) timestamp_sort: i64,
+    pub(crate) timestamp_sent: i64,
+    pub(crate) timestamp_rcvd: i64,
+    pub(crate) ephemeral_timer: EphemeralTimer,
+    pub(crate) ephemeral_timestamp: i64,
+    pub(crate) text: String,
+
+    /// Message subject.
+    ///
+    /// If empty, a default subject will be generated when sending.
+    pub(crate) subject: String,
+
+    /// `Message-ID` header value.
+    pub(crate) rfc724_mid: String,
+
+    /// `In-Reply-To` header value.
+    pub(crate) in_reply_to: Option<String>,
+    pub(crate) is_dc_message: MessengerMessage,
+    pub(crate) mime_modified: bool,
+    pub(crate) chat_blocked: Blocked,
+    pub(crate) location_id: u32,
+    pub(crate) error: Option<String>,
+    pub(crate) param: Params,
+}
+pub struct Summary {
+    /// Part displayed before ":", such as an username or a string "Draft".
+    pub prefix: Option<SummaryPrefix>,
+
+    /// Summary text, always present.
+    pub text: String,
+
+    /// Message timestamp.
+    pub timestamp: i64,
+
+    /// Message state.
+    pub state: MessageState,
+
+    /// Message preview image path
+    pub thumbnail_path: Option<String>,
+}
+pub struct ContactId(u32);
+impl ContactId {
+    /// Undefined contact. Used as a placeholder for trashed messages.
+    pub const UNDEFINED: ContactId = ContactId::new(0);
+
+    /// The owner of the account.
+    ///
+    /// The email-address is set by `set_config` using "addr".
+    pub const SELF: ContactId = ContactId::new(1);
+
+    /// ID of the contact for info messages.
+    pub const INFO: ContactId = ContactId::new(2);
+
+    /// ID of the contact for device messages.
+    pub const DEVICE: ContactId = ContactId::new(5);
+    pub(crate) const LAST_SPECIAL: ContactId = ContactId::new(9);
+
+    /// Address to go with [`ContactId::DEVICE`].
+    ///
+    /// This is used by APIs which need to return an email address for this contact.
+    pub const DEVICE_ADDR: &'static str = "device@localhost";
+}
+pub enum Chattype {
+    /// 1:1 chat.
+    Single = 100,
+
+    /// Group chat.
+    Group = 120,
+
+    /// Mailing list.
+    Mailinglist = 140,
+
+    /// Broadcast list.
+    Broadcast = 160,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use anyhow::{ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::{parse_vcard, VcardContact};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use tokio::{fs, io};
+use crate::blob::BlobObject;
+use crate::chat::{Chat, ChatId, ChatIdBlocked};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    Blocked, Chattype, VideochatType, DC_CHAT_ID_TRASH, DC_DESIRED_TEXT_LEN, DC_MSG_ID_LAST_SPECIAL,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::debug_logging::set_debug_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::{start_ephemeral_timers_msgids, Timer as EphemeralTimer};
+use crate::events::EventType;
+use crate::imap::markseen_on_imap_table;
+use crate::location::delete_poi_location;
+use crate::mimeparser::{parse_message_id, SystemMessage};
+use crate::param::{Param, Params};
+use crate::pgp::split_armored_data;
+use crate::reaction::get_msg_reactions;
+use crate::sql;
+use crate::summary::Summary;
+use crate::tools::{
+    buf_compress, buf_decompress, get_filebytes, get_filemeta, gm2local_offset, read_file, time,
+    timestamp_to_str, truncate,
+};
+use MessageState::*;
+use MessageState::*;
+use num_traits::FromPrimitive;
+use super::*;
+use crate::chat::{
+        self, add_contact_to_chat, marknoticed_chat, send_text_msg, ChatItem, ProtectionStatus,
+    };
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::reaction::send_reaction;
+use crate::receive_imf::receive_imf;
+use crate::test_utils as test;
+use crate::test_utils::{TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> {
+        let chat_loaded: Chat;
+        let chat = if let Some(chat) = chat {
+            chat
+        } else {
+            let chat = Chat::load_from_db(context, self.chat_id).await?;
+            chat_loaded = chat;
+            &chat_loaded
+        };
+
+        let contact = if self.from_id != ContactId::SELF {
+            match chat.typ {
+                Chattype::Group | Chattype::Broadcast | Chattype::Mailinglist => {
+                    Some(Contact::get_by_id(context, self.from_id).await?)
+                }
+                Chattype::Single => None,
+            }
+        } else {
+            None
+        };
+
+        Summary::new(context, self, chat, contact.as_ref()).await
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and data type declarations:
+
+```rust
+pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> {
+    let mut ret = Summary {
+        prefix: None,
+        text: String::new(),
+        timestamp: 0,
+        state: MessageState::Undefined,
+        thumbnail_path: None,
+    };
+
+    let chat_to_delete: Option<Chat>;
+    let chat = if let Some(c) = chat {
+        c
+    } else {
+        chat_to_delete = context.get_chat(self.chat_id).await?;
+        chat_to_delete.as_ref().unwrap()
+    };
+
+    let contact = if self.from_id != ContactId::SELF && chat.get_type() != Chattype::Single {
+        Some(context.get_contact(self.from_id).await?)
+    } else {
+        None
+    };
+
+    self.fill_summary(&mut ret, chat, contact.as_ref(), context).await?;
+
+    Ok(ret)
+}
+```
+
+Note that this translation makes some assumptions and adaptations:
+
+1. The `dc_lot_t` type is replaced with the `Summary` struct.
+2. Error handling is done using Rust's `Result` type instead of goto statements.
+3. The `fill_summary` method is assumed to exist on the `Message` struct (self) to replace the `dc_lot_fill` function.
+4. The `get_chat` and `get_contact` methods are assumed to be async and return `Result<Chat>` and `Result<Contact>` respectively.
+5. The `get_type` method is assumed to exist on the `Chat` struct to replace the `DC_CHAT_TYPE_IS_MULTI` macro.
+6. Memory management is handled automatically by Rust's ownership system, so there's no need for explicit `unref` calls.
+
+This translation maintains the general structure and logic of the original C function while adapting it to Rust's idioms and the provided function signature.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and data type declarations:
+
+```rust
+pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> {
+    let mut ret = Summary {
+        prefix: None,
+        text: String::new(),
+        timestamp: 0,
+        state: MessageState::Undefined,
+        thumbnail_path: None,
+    };
+
+    let chat_to_delete: Option<Chat>;
+    let chat = if let Some(c) = chat {
+        c
+    } else {
+        chat_to_delete = context.get_chat(self.chat_id).await?;
+        chat_to_delete.as_ref().unwrap()
+    };
+
+    let contact = if self.from_id != ContactId::SELF && chat.get_type() != Chattype::Single {
+        Some(context.get_contact(self.from_id).await?)
+    } else {
+        None
+    };
+
+    self.fill_summary(&mut ret, chat, contact.as_ref(), context).await?;
+
+    Ok(ret)
+}
+```
+
+Note that this translation makes some assumptions and adaptations:
+
+1. The `dc_lot_t` type is replaced with the `Summary` struct.
+2. Error handling is done using Rust's `Result` type instead of goto statements.
+3. The `fill_summary` method is assumed to exist on the `Message` struct (self) to replace the `dc_lot_fill` function.
+4. The `get_chat` and `get_contact` methods are assumed to be async and return `Result<Chat>` and `Result<Contact>` respectively.
+5. The `get_type` method is assumed to exist on the `Chat` struct to replace the `DC_CHAT_TYPE_IS_MULTI` macro.
+6. Memory management is handled automatically by Rust's ownership system, so there's no need for explicit `unref` calls.
+
+This translation maintains the general structure and logic of the original C function while adapting it to Rust's idioms and the provided function signature.

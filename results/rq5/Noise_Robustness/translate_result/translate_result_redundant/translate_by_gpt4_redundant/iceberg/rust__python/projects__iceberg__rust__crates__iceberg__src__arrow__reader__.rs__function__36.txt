@@ -1,0 +1,135 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def __new__(cls, left: BooleanExpression, right: BooleanExpression) -> BooleanExpression:  # type: ignore
+
+        if left is AlwaysTrue() or right is AlwaysTrue():
+            return AlwaysTrue()
+        elif left is AlwaysFalse():
+            return right
+        elif right is AlwaysFalse():
+            return left
+        else:
+            obj = super().__new__(cls)
+            obj.left = left
+            obj.right = right
+            return obj
+</python function>
+<rust function signature>
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+struct PredicateConverter<'a> {
+    /// The Parquet schema descriptor.
+    pub parquet_schema: &'a SchemaDescriptor,
+    /// The map between field id and leaf column index in Parquet schema.
+    pub column_map: &'a HashMap<i32, usize>,
+    /// The required column indices in Parquet schema for the predicates.
+    pub column_indices: &'a Vec<usize>,
+}
+
+type PredicateResult =
+    dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, ArrowError> + Send + 'static;
+    
+
+
+struct PredicateConverter<'a> {
+    /// The Parquet schema descriptor.
+    pub parquet_schema: &'a SchemaDescriptor,
+    /// The map between field id and leaf column index in Parquet schema.
+    pub column_map: &'a HashMap<i32, usize>,
+    /// The required column indices in Parquet schema for the predicates.
+    pub column_indices: &'a Vec<usize>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use crate::error::Result;
+use arrow_arith::boolean::{and, is_not_null, is_null, not, or};
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
+use arrow_ord::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
+use arrow_schema::{ArrowError, DataType, SchemaRef as ArrowSchemaRef};
+use async_stream::try_stream;
+use bytes::Bytes;
+use fnv::FnvHashSet;
+use futures::future::BoxFuture;
+use futures::stream::StreamExt;
+use futures::{try_join, TryFutureExt};
+use parquet::arrow::arrow_reader::{ArrowPredicateFn, RowFilter};
+use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, PARQUET_FIELD_ID_META_KEY};
+use parquet::file::metadata::ParquetMetaData;
+use parquet::schema::types::{SchemaDescriptor, Type as ParquetType};
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::str::FromStr;
+use std::sync::Arc;
+use crate::arrow::{arrow_schema_to_schema, get_arrow_datum};
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::io::{FileIO, FileMetadata, FileRead};
+use crate::scan::{ArrowRecordBatchStream, FileScanTaskStream};
+use crate::spec::{Datum, SchemaRef};
+use crate::{Error, ErrorKind};
+use crate::arrow::reader::CollectFieldIdVisitor;
+use crate::expr::visitors::bound_predicate_visitor::visit;
+use crate::expr::{Bind, Reference};
+use crate::spec::{NestedField, PrimitiveType, Schema, SchemaRef, Type};
+use std::collections::HashSet;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> {
+        Ok(Box::new(move |batch| {
+            let left = lhs(batch.clone())?;
+            let right = rhs(batch)?;
+            or(&left, &right)
+        }))
+    }
+</function>
+<translated function>
+Based on your Python to Rust conversion request and provided Rust function signature, dependencies, and related variables, this is the equivalent Rust function:
+
+```rust
+fn or( &mut self, mut lhs: Box<PredicateResult>, mut rhs: Box<PredicateResult>, ) -> Result<Box<PredicateResult>> {
+    match (lhs, rhs) {
+        (_, nonspecific @ Box::new(AlwaysTrue { .. })) | (nonspecific @ Box::new(AlwaysTrue { .. }), _ ) => Ok(nonspecific),
+        (lhs @ Box::new(AlwaysFalse { .. }), rhs) => Ok(rhs),
+        (lhs, rhs @ Box::new(AlwaysFalse { .. })) => Ok(lhs),
+        (lhs, rhs) => {
+            let obj = Box::new(BooleanExpression{ left: lhs, right: rhs });
+            Ok(obj)
+        }
+    }
+}
+```
+
+Please note that I use pattern matching (`match`) in Rust which replaces if-elif-else structure in Python (I also try to use the branch characteristics of the `match`). Also in Rust, I need to box up the value and return the `Ok` variant of result since the rust function signature requires that. Aim in here assumes AlwaysTrue and AlwaysFalse are the different types of PredicateResult. However, structures AlwaysTrue, AlwaysFalse and BooleanExpression are not included in the original information and so I made assumptions about their structures. You'll have to replace these with the appropriate types and functions according to your actual code base.</translated function>Based on your Python to Rust conversion request and provided Rust function signature, dependencies, and related variables, this is the equivalent Rust function:
+
+```rust
+fn or( &mut self, mut lhs: Box<PredicateResult>, mut rhs: Box<PredicateResult>, ) -> Result<Box<PredicateResult>> {
+    match (lhs, rhs) {
+        (_, nonspecific @ Box::new(AlwaysTrue { .. })) | (nonspecific @ Box::new(AlwaysTrue { .. }), _ ) => Ok(nonspecific),
+        (lhs @ Box::new(AlwaysFalse { .. }), rhs) => Ok(rhs),
+        (lhs, rhs @ Box::new(AlwaysFalse { .. })) => Ok(lhs),
+        (lhs, rhs) => {
+            let obj = Box::new(BooleanExpression{ left: lhs, right: rhs });
+            Ok(obj)
+        }
+    }
+}
+```
+
+Please note that I use pattern matching (`match`) in Rust which replaces if-elif-else structure in Python (I also try to use the branch characteristics of the `match`). Also in Rust, I need to box up the value and return the `Ok` variant of result since the rust function signature requires that. Aim in here assumes AlwaysTrue and AlwaysFalse are the different types of PredicateResult. However, structures AlwaysTrue, AlwaysFalse and BooleanExpression are not included in the original information and so I made assumptions about their structures. You'll have to replace these with the appropriate types and functions according to your actual code base.

@@ -1,0 +1,217 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def list_namespaces(self, namespace: Union[str, Identifier] = ()) -> List[Identifier]:
+        namespace_tuple = self.identifier_to_tuple(namespace)
+        response = self._session.get(
+            self.url(
+                f"{Endpoints.list_namespaces}?parent={NAMESPACE_SEPARATOR.join(namespace_tuple)}"
+                if namespace_tuple
+                else Endpoints.list_namespaces
+            ),
+        )
+        try:
+            response.raise_for_status()
+        except HTTPError as exc:
+            self._handle_non_200_response(exc, {})
+
+        namespaces = ListNamespaceResponse(**response.json())
+        return [namespace_tuple + child_namespace for child_namespace in namespaces.namespaces]
+</python function>
+<rust function signature>
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+async fn query<
+        R: DeserializeOwned,
+        E: DeserializeOwned + Into<Error>,
+        const SUCCESS_CODE: u16,
+    >(
+        &self,
+        request: Request,
+    ) -> Result<R> {
+        let resp = self.0.execute(request).await?;
+
+        if resp.status().as_u16() == SUCCESS_CODE {
+            let text = resp.bytes().await?;
+            Ok(serde_json::from_slice::<R>(&text).map_err(|e| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    "Failed to parse response from rest catalog server!",
+                )
+                .with_context("json", String::from_utf8_lossy(&text))
+                .with_source(e)
+            })?)
+        } else {
+            let code = resp.status();
+            let text = resp.bytes().await?;
+            let e = serde_json::from_slice::<E>(&text).map_err(|e| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    "Failed to parse response from rest catalog server!",
+                )
+                .with_context("json", String::from_utf8_lossy(&text))
+                .with_context("code", code.to_string())
+                .with_source(e)
+            })?;
+            Err(e.into())
+        }
+    }
+struct HttpClient(Client);
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::HashMap;
+use std::str::FromStr;
+use async_trait::async_trait;
+use itertools::Itertools;
+use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, Request, Response, StatusCode, Url};
+use serde::de::DeserializeOwned;
+use typed_builder::TypedBuilder;
+use urlencoding::encode;
+use crate::catalog::_serde::{
+    CommitTableRequest, CommitTableResponse, CreateTableRequest, LoadTableResponse,
+};
+use iceberg::io::FileIO;
+use iceberg::table::Table;
+use iceberg::Result;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+};
+use self::_serde::{
+    CatalogConfig, ErrorResponse, ListNamespaceResponse, ListTableResponse, NamespaceSerde,
+    RenameTableRequest, TokenResponse, NO_CONTENT, OK,
+};
+use std::collections::HashMap;
+use serde_derive::{Deserialize, Serialize};
+use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
+use iceberg::{Error, ErrorKind, Namespace, TableIdent, TableRequirement, TableUpdate};
+use chrono::{TimeZone, Utc};
+use iceberg::spec::{
+        FormatVersion, NestedField, NullOrder, Operation, PrimitiveType, Schema, Snapshot,
+        SnapshotLog, SortDirection, SortField, SortOrder, Summary, Transform, Type,
+        UnboundPartitionField, UnboundPartitionSpec,
+    };
+use iceberg::transaction::Transaction;
+use mockito::{Mock, Server, ServerGuard};
+use serde_json::json;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+use uuid::uuid;
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+        let mut request = self.client.0.get(self.config.namespaces_endpoint());
+        if let Some(ns) = parent {
+            request = request.query(&[("parent", ns.encode_in_url())]);
+        }
+
+        let resp = self
+            .client
+            .query::<ListNamespaceResponse, ErrorResponse, OK>(request.build()?)
+            .await?;
+
+        resp.namespaces
+            .into_iter()
+            .map(NamespaceIdent::from_vec)
+            .collect::<Result<Vec<NamespaceIdent>>>()
+    }
+</function>
+<translated function>
+Below is the translated python function to Rust.
+
+```rust
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+
+        let mut namespace_tuple = match parent {
+            Some(ident) => ident.clone(),
+            None => NamespaceIdent::default(),
+        };
+
+        let endpoint = if let Some(ns) = parent {
+            format!("{}?parent={}", Endpoints::ListNamespaces, ns.to_string())
+        } else {
+            format!("{}", Endpoints::ListNamespaces)
+        };
+
+        let request = Request::builder()
+            .method(Method::GET)
+            .url(endpoint)
+            .header("Content-Type", "application/json")
+            .body(Body::from(""))?;
+
+        let response = self.query::<ListNamespaceResponse, ErrorResponse, OK>(request).await?;
+
+        let mut namespaces: Vec<NamespaceIdent> = Vec::new();
+
+        for child_namespace in response.namespaces {
+            namespace_tuple.push(child_namespace);
+            namespaces.push(namespace_tuple.clone());
+            namespace_tuple.pop();
+        }
+
+        Ok(namespaces)
+    }
+```
+This translation assumes that `ListNamespaceResponse`, `NamespaceIdent`, `Request`, `Method`, `Body`, `ErrorResponse`, `OK`, and `Endpoints::ListNamespaces` are correctly defined within scope. It also assumes that `self.query()` function has been previously defined. 
+
+It is worth noting that python and Rust have quite different approaches to error handling. Python uses try-except mechanism while Rust uses the Result type. Also, the HTTP library used in Rust (`reqwest`) differs from the one in Python (`requests`).
+</translated function>Below is the translated python function to Rust.
+
+```rust
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+
+        let mut namespace_tuple = match parent {
+            Some(ident) => ident.clone(),
+            None => NamespaceIdent::default(),
+        };
+
+        let endpoint = if let Some(ns) = parent {
+            format!("{}?parent={}", Endpoints::ListNamespaces, ns.to_string())
+        } else {
+            format!("{}", Endpoints::ListNamespaces)
+        };
+
+        let request = Request::builder()
+            .method(Method::GET)
+            .url(endpoint)
+            .header("Content-Type", "application/json")
+            .body(Body::from(""))?;
+
+        let response = self.query::<ListNamespaceResponse, ErrorResponse, OK>(request).await?;
+
+        let mut namespaces: Vec<NamespaceIdent> = Vec::new();
+
+        for child_namespace in response.namespaces {
+            namespace_tuple.push(child_namespace);
+            namespaces.push(namespace_tuple.clone());
+            namespace_tuple.pop();
+        }
+
+        Ok(namespaces)
+    }
+```
+This translation assumes that `ListNamespaceResponse`, `NamespaceIdent`, `Request`, `Method`, `Body`, `ErrorResponse`, `OK`, and `Endpoints::ListNamespaces` are correctly defined within scope. It also assumes that `self.query()` function has been previously defined. 
+
+It is worth noting that python and Rust have quite different approaches to error handling. Python uses try-except mechanism while Rust uses the Result type. Also, the HTTP library used in Rust (`reqwest`) differs from the one in Python (`requests`).

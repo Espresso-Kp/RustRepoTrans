@@ -1,0 +1,58 @@
+<path>
+projects/deltachat-core/rust/chat.rs
+</path>
+<function>
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> {
+    // Normal chats do not include SELF.  Group chats do (as it may happen that one is deleted from a
+    // groupchat but the chats stays visible, moreover, this makes displaying lists easier)
+
+    let list = context
+        .sql
+        .query_map(
+            "SELECT cc.contact_id
+               FROM chats_contacts cc
+               LEFT JOIN contacts c
+                      ON c.id=cc.contact_id
+              WHERE cc.chat_id=?
+              ORDER BY c.id=1, c.last_seen DESC, c.id DESC;",
+            (chat_id,),
+            |row| row.get::<_, ContactId>(0),
+            |ids| ids.collect::<Result<Vec<_>, _>>().map_err(Into::into),
+        )
+        .await?;
+
+    Ok(list)
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chat.c
+</path>
+<function>
+dc_array_t* dc_get_chat_contacts(dc_context_t* context, uint32_t chat_id)
+{
+	/* Normal chats do not include SELF.  Group chats do (as it may happen that one is deleted from a
+	groupchat but the chats stays visible, moreover, this makes displaying lists easier) */
+	dc_array_t*   ret = dc_array_new(context, 100);
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT cc.contact_id FROM chats_contacts cc"
+			" LEFT JOIN contacts c ON c.id=cc.contact_id"
+			" WHERE cc.chat_id=?"
+			" ORDER BY c.id=1, c.last_seen DESC, c.id DESC;");
+	sqlite3_bind_int(stmt, 1, chat_id);
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</function>

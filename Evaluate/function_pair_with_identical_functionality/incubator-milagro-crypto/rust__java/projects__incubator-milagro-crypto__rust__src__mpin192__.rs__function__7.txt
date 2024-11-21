@@ -1,0 +1,87 @@
+<path>
+projects/incubator-milagro-crypto/rust/src/mpin192.rs
+</path>
+<function>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut t: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        t[i] = e[i + 1]
+    }
+    let mut u = Big::from_bytes(&t);
+    for i in 0..EFS {
+        t[i] = e[i + EFS + 1]
+    }
+    let mut v = Big::from_bytes(&t);
+
+    let mut P = ECP::new_bigs(&u, &v);
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let p = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&p, rng);
+
+    let mut su = rng.getbyte() as isize;
+    su %= 2;
+
+    let mut W = emap(&mut u, su);
+    P.sub(&mut W);
+    let sv = P.gets();
+    let rn = unmap(&mut v, &mut P);
+    let mut m = rng.getbyte() as isize;
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + 1] = t[i]
+    }
+    v.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + EFS + 1] = t[i]
+    }
+
+    return 0;
+}
+</function>
+------
+
+<path>
+projects/incubator-milagro-crypto/java/src/main/java/org/apache/milagro/amcl/BLS383/MPIN.java
+</path>
+<function>
+public static int ENCODING(RAND rng,byte[] E)
+	{
+		int rn,m,su,sv;
+		byte[] T=new byte[EFS];
+
+		for (int i=0;i<EFS;i++) T[i]=E[i+1];
+		BIG u=BIG.fromBytes(T);
+		for (int i=0;i<EFS;i++) T[i]=E[i+EFS+1];
+		BIG v=BIG.fromBytes(T);
+		
+		ECP P=new ECP(u,v);
+		if (P.is_infinity()) return INVALID_POINT;
+
+		BIG p=new BIG(ROM.Modulus);
+		u=BIG.randomnum(p,rng);
+
+		su=rng.getByte(); /*if (su<0) su=-su;*/ su%=2;
+		
+		ECP W=map(u,su);
+		P.sub(W); //P.affine();
+		sv=P.getS();
+		rn=unmap(v,P);
+		m=rng.getByte(); /*if (m<0) m=-m;*/ m%=rn;
+		v.inc(m+1);
+		E[0]=(byte)(su+2*sv);
+		u.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+1]=T[i];
+		v.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+EFS+1]=T[i];		
+		
+		return 0;
+	}
+</function>
+

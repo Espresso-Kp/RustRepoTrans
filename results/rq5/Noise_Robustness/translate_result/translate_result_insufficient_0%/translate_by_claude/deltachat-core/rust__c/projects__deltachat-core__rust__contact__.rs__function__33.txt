@@ -1,0 +1,255 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int dc_delete_contact(dc_context_t* context, uint32_t contact_id)
+{
+	int           success = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || contact_id<=DC_CONTACT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+	/* we can only delete contacts that are not in use anywhere; this function is mainly for the user who has just
+	created an contact manually and wants to delete it a moment later */
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_ROW || sqlite3_column_int(stmt, 0) >= 1) {
+		goto cleanup;
+	}
+	sqlite3_finalize(stmt);
+	stmt = NULL;
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM msgs WHERE from_id=? OR to_id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	sqlite3_bind_int(stmt, 2, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_ROW || sqlite3_column_int(stmt, 0) >= 1) {
+		goto cleanup;
+	}
+	sqlite3_finalize(stmt);
+	stmt = NULL;
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"DELETE FROM contacts WHERE id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_DONE) {
+		goto cleanup;
+	}
+
+	context->cb(context, DC_EVENT_CONTACTS_CHANGED, 0, 0);
+
+	success = 1;
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return success;
+}
+</c function>
+<rust function signature>
+pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp::{min, Reverse};
+use std::collections::BinaryHeap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use base64::Engine as _;
+use deltachat_contact_tools::may_be_valid_addr;
+use deltachat_contact_tools::{
+    self as contact_tools, addr_cmp, addr_normalize, sanitize_name_and_addr, strip_rtlo_characters,
+    ContactAddress, VcardContact,
+};
+use deltachat_derive::{FromSql, ToSql};
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use tokio::task;
+use tokio::time::{timeout, Duration};
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::blob::BlobObject;
+use crate::chat::{ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{Blocked, Chattype, DC_GCL_ADD_SELF, DC_GCL_VERIFIED_ONLY};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{load_self_public_key, DcKey, SignedPublicKey};
+use crate::log::LogExt;
+use crate::login_param::LoginParam;
+use crate::message::MessageState;
+use crate::mimeparser::AvatarAction;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::sql::{self, params_iter};
+use crate::sync::{self, Sync::*};
+use crate::tools::{
+    duration_to_str, get_abs_path, improve_single_line_input, smeared_time, time, SystemTime,
+};
+use crate::{chat, chatlist_events, stock_str};
+use deltachat_contact_tools::{may_be_valid_addr, normalize_name};
+use super::*;
+use crate::chat::{get_chat_contacts, send_text_msg, Chat};
+use crate::chatlist::Chatlist;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{self, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> {
+        ensure!(!contact_id.is_special(), "Can not delete special contact");
+
+        context
+            .sql
+            .transaction(move |transaction| {
+                // make sure, the transaction starts with a write command and becomes EXCLUSIVE by that -
+                // upgrading later may be impossible by races.
+                let deleted_contacts = transaction.execute(
+                    "DELETE FROM contacts WHERE id=?
+                     AND (SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?)=0;",
+                    (contact_id, contact_id),
+                )?;
+                if deleted_contacts == 0 {
+                    transaction.execute(
+                        "UPDATE contacts SET origin=? WHERE id=?;",
+                        (Origin::Hidden, contact_id),
+                    )?;
+                }
+                Ok(())
+            })
+            .await?;
+
+        context.emit_event(EventType::ContactsChanged(None));
+        Ok(())
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> {
+    if contact_id <= ContactId::LAST_SPECIAL {
+        return Ok(());
+    }
+
+    let db = context.sql.clone();
+
+    // Check if contact is in use in chats_contacts
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?;",
+            params![contact_id],
+            |row| row.get(0),
+        )
+        .context("Failed to check contact usage in chats_contacts")?;
+
+    if count >= 1 {
+        return Ok(());
+    }
+
+    // Check if contact is in use in msgs
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM msgs WHERE from_id=? OR to_id=?;",
+            params![contact_id, contact_id],
+            |row| row.get(0),
+        )
+        .context("Failed to check contact usage in msgs")?;
+
+    if count >= 1 {
+        return Ok(());
+    }
+
+    // Delete the contact
+    db.execute(
+        "DELETE FROM contacts WHERE id=?;",
+        params![contact_id],
+    )
+    .context("Failed to delete contact")?;
+
+    context.emit_event(EventType::ContactsChanged);
+
+    Ok(())
+}
+```
+
+This Rust translation maintains the core logic of the original C function while adapting it to Rust's async/await paradigm and error handling conventions. It uses the `Context` struct, which is assumed to contain a `sql` field for database operations. The function returns a `Result<()>` to handle potential errors.
+
+The translated function performs the following steps:
+1. Checks if the contact_id is valid (greater than LAST_SPECIAL).
+2. Checks if the contact is in use in chats_contacts.
+3. Checks if the contact is in use in msgs.
+4. If the contact is not in use, it deletes the contact from the database.
+5. Emits a ContactsChanged event.
+
+Note that this translation assumes the existence of certain types and methods (e.g., `ContactId`, `Context`, `EventType`) which are not provided in the given dependencies. You may need to adjust these according to your actual Rust codebase.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> {
+    if contact_id <= ContactId::LAST_SPECIAL {
+        return Ok(());
+    }
+
+    let db = context.sql.clone();
+
+    // Check if contact is in use in chats_contacts
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?;",
+            params![contact_id],
+            |row| row.get(0),
+        )
+        .context("Failed to check contact usage in chats_contacts")?;
+
+    if count >= 1 {
+        return Ok(());
+    }
+
+    // Check if contact is in use in msgs
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM msgs WHERE from_id=? OR to_id=?;",
+            params![contact_id, contact_id],
+            |row| row.get(0),
+        )
+        .context("Failed to check contact usage in msgs")?;
+
+    if count >= 1 {
+        return Ok(());
+    }
+
+    // Delete the contact
+    db.execute(
+        "DELETE FROM contacts WHERE id=?;",
+        params![contact_id],
+    )
+    .context("Failed to delete contact")?;
+
+    context.emit_event(EventType::ContactsChanged);
+
+    Ok(())
+}
+```
+
+This Rust translation maintains the core logic of the original C function while adapting it to Rust's async/await paradigm and error handling conventions. It uses the `Context` struct, which is assumed to contain a `sql` field for database operations. The function returns a `Result<()>` to handle potential errors.
+
+The translated function performs the following steps:
+1. Checks if the contact_id is valid (greater than LAST_SPECIAL).
+2. Checks if the contact is in use in chats_contacts.
+3. Checks if the contact is in use in msgs.
+4. If the contact is not in use, it deletes the contact from the database.
+5. Emits a ContactsChanged event.
+
+Note that this translation assumes the existence of certain types and methods (e.g., `ContactId`, `Context`, `EventType`) which are not provided in the given dependencies. You may need to adjust these according to your actual Rust codebase.

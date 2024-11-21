@@ -1,0 +1,252 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static byte[] ECIES_ENCRYPT(int sha,byte[] P1,byte[] P2,RAND RNG,byte[] W,byte[] M,byte[] V,byte[] T)
+	{ 
+		int i,len;
+
+		byte[] Z=new byte[EFS];
+		byte[] VZ=new byte[3*EFS+1];
+		byte[] K1=new byte[ECP.AESKEY];
+		byte[] K2=new byte[ECP.AESKEY];
+		byte[] U=new byte[EGS];
+
+		if (KEY_PAIR_GENERATE(RNG,U,V)!=0) return new byte[0];  
+		if (SVDP_DH(U,W,Z)!=0) return new byte[0];     
+
+		for (i=0;i<2*EFS+1;i++) VZ[i]=V[i];
+		for (i=0;i<EFS;i++) VZ[2*EFS+1+i]=Z[i];
+
+
+		byte[] K=KDF2(sha,VZ,P1,2*ECP.AESKEY);
+
+		for (i=0;i<ECP.AESKEY;i++) {K1[i]=K[i]; K2[i]=K[ECP.AESKEY+i];} 
+
+		byte[] C=AES_CBC_IV0_ENCRYPT(K1,M);
+
+		byte[] L2=inttoBytes(P2.length,8);	
+	
+		byte[] AC=new byte[C.length+P2.length+8];
+		for (i=0;i<C.length;i++) AC[i]=C[i];
+		for (i=0;i<P2.length;i++) AC[C.length+i]=P2[i];
+		for (i=0;i<8;i++) AC[C.length+P2.length+i]=L2[i];
+	
+		HMAC(sha,AC,K2,T);
+
+		return C;
+	}
+</java function>
+<rust function signature>
+pub fn ecies_encrypt(
+    sha: usize,
+    p1: &[u8],
+    p2: &[u8],
+    rng: &mut RAND,
+    w: &[u8],
+    m: &[u8],
+    v: &mut [u8],
+    t: &mut [u8],
+) -> Option<Vec<u8>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+fn intto_bytes(n: usize, b: &mut [u8]) {
+    let mut i = b.len();
+    let mut m = n;
+    while m > 0 && i > 0 {
+        i -= 1;
+        b[i] = (m & 0xff) as u8;
+        m /= 256;
+    }
+}
+pub const AESKEY: usize = 16;
+pub const EGS: usize = big::MODBYTES as usize;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn ecies_encrypt(
+    sha: usize,
+    p1: &[u8],
+    p2: &[u8],
+    rng: &mut RAND,
+    w: &[u8],
+    m: &[u8],
+    v: &mut [u8],
+    t: &mut [u8],
+) -> Option<Vec<u8>> {
+    let mut z: [u8; EFS] = [0; EFS];
+    let mut k1: [u8; ecp::AESKEY] = [0; ecp::AESKEY];
+    let mut k2: [u8; ecp::AESKEY] = [0; ecp::AESKEY];
+    let mut u: [u8; EGS] = [0; EGS];
+    let mut vz: [u8; 3 * EFS + 1] = [0; 3 * EFS + 1];
+    let mut k: [u8; 2 * ecp::AESKEY] = [0; 2 * ecp::AESKEY];
+
+    if key_pair_generate(Some(rng), &mut u, v) != 0 {
+        return None;
+    }
+    if ecpsvdp_dh(&u, &w, &mut z) != 0 {
+        return None;
+    }
+
+    for i in 0..=2 * EFS {
+        vz[i] = v[i]
+    }
+    for i in 0..EFS {
+        vz[2 * EFS + 1 + i] = z[i]
+    }
+
+    kdf2(sha, &vz, Some(p1), 2 * ecp::AESKEY, &mut k);
+
+    for i in 0..ecp::AESKEY {
+        k1[i] = k[i];
+        k2[i] = k[ecp::AESKEY + i]
+    }
+
+    let mut c = cbc_iv0_encrypt(&k1, m);
+
+    let mut l2: [u8; 8] = [0; 8];
+    let p2l = p2.len();
+
+    intto_bytes(p2l, &mut l2);
+
+    for i in 0..p2l {
+        c.push(p2[i]);
+    }
+    for i in 0..8 {
+        c.push(l2[i]);
+    }
+
+    hmac(sha, &c, &k2, t.len(), t);
+
+    for _ in 0..p2l + 8 {
+        c.pop();
+    }
+
+    Some(c)
+}
+</function>
+<translated function>
+Your rust function may look like this:
+
+```rust
+pub fn ecies_encrypt(
+    sha: usize,
+    p1: &[u8],
+    p2: &[u8],
+    rng: &mut RAND,
+    w: &[u8],
+    m: &[u8],
+    v: &mut [u8],
+    t: &mut [u8],
+) -> Option<Vec<u8>> {
+
+    let mut z: Vec<u8> = vec![0; EFS];
+    let mut vz: Vec<u8> = vec![0; 3*EFS+1];
+    let mut k1: Vec<u8> = vec![0; AESKEY];
+    let mut k2: Vec<u8> = vec![0; AESKEY];
+    let mut u: Vec<u8> = vec![0; EGS];
+    
+    if key_pair_generate(rng, &mut u, v).is_err() {
+        return None;
+    }
+    if svdp_dh(&u, w, &mut z).is_err() {
+        return None;
+    }
+
+    vz[..2*EFS+1].copy_from_slice(&v[..2*EFS+1]);
+    vz[2*EFS+1..].copy_from_slice(&z);
+
+    let k = kdf2(sha, vz, p1, 2 * AESKEY);
+
+    k1.copy_from_slice(&k[..AESKEY]);
+    k2.copy_from_slice(&k[AESKEY..]);
+
+    let c = aes_cbc_iv0_encrypt(&k1, m);
+
+    let mut l2 = vec![0; 8];
+    int_to_bytes(p2.len(), &mut l2);
+
+    let mut ac = vec![0; c.len()+p2.len()+8];
+    ac[..c.len()].copy_from_slice(&c);
+    ac[c.len()..c.len()+p2.len()].copy_from_slice(p2);
+    ac[c.len()+p2.len()..].copy_from_slice(&l2);
+
+    hmac(sha, &ac, &k2, t);
+
+    Some(c)
+}
+```
+
+Please note that as Java and Rust are different languages, that they also have different libraries and features. Because of that, the translation of the Java function to Rust requires a reimplementation of the function's logic based on the available Rust functions. Because of this as you will maybe notice all some java functions have been renamed to their rust counterparts, for example, `AES_CBC_IV0_ENCRYPT`, `HMAC`, `KDF2` have not been defined in your given code. But assuming they are similar in functionality to their Java counterparts, they have been used with appropriate signatures and return data types in the Rust function.</translated function>Your rust function may look like this:
+
+```rust
+pub fn ecies_encrypt(
+    sha: usize,
+    p1: &[u8],
+    p2: &[u8],
+    rng: &mut RAND,
+    w: &[u8],
+    m: &[u8],
+    v: &mut [u8],
+    t: &mut [u8],
+) -> Option<Vec<u8>> {
+
+    let mut z: Vec<u8> = vec![0; EFS];
+    let mut vz: Vec<u8> = vec![0; 3*EFS+1];
+    let mut k1: Vec<u8> = vec![0; AESKEY];
+    let mut k2: Vec<u8> = vec![0; AESKEY];
+    let mut u: Vec<u8> = vec![0; EGS];
+    
+    if key_pair_generate(rng, &mut u, v).is_err() {
+        return None;
+    }
+    if svdp_dh(&u, w, &mut z).is_err() {
+        return None;
+    }
+
+    vz[..2*EFS+1].copy_from_slice(&v[..2*EFS+1]);
+    vz[2*EFS+1..].copy_from_slice(&z);
+
+    let k = kdf2(sha, vz, p1, 2 * AESKEY);
+
+    k1.copy_from_slice(&k[..AESKEY]);
+    k2.copy_from_slice(&k[AESKEY..]);
+
+    let c = aes_cbc_iv0_encrypt(&k1, m);
+
+    let mut l2 = vec![0; 8];
+    int_to_bytes(p2.len(), &mut l2);
+
+    let mut ac = vec![0; c.len()+p2.len()+8];
+    ac[..c.len()].copy_from_slice(&c);
+    ac[c.len()..c.len()+p2.len()].copy_from_slice(p2);
+    ac[c.len()+p2.len()..].copy_from_slice(&l2);
+
+    hmac(sha, &ac, &k2, t);
+
+    Some(c)
+}
+```
+
+Please note that as Java and Rust are different languages, that they also have different libraries and features. Because of that, the translation of the Java function to Rust requires a reimplementation of the function's logic based on the available Rust functions. Because of this as you will maybe notice all some java functions have been renamed to their rust counterparts, for example, `AES_CBC_IV0_ENCRYPT`, `HMAC`, `KDF2` have not been defined in your given code. But assuming they are similar in functionality to their Java counterparts, they have been used with appropriate signatures and return data types in the Rust function.

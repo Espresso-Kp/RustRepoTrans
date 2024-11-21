@@ -1,0 +1,737 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_KEY(int sha,byte[] G1,byte[] G2,int pin,byte[] R,byte[] X,byte[] H,byte[] wCID,byte[] CK)
+	{
+		byte[] t;
+
+		FP48 g1=FP48.fromBytes(G1);
+		FP48 g2=FP48.fromBytes(G2);
+		BIG z=BIG.fromBytes(R);
+		BIG x=BIG.fromBytes(X);
+		BIG h=BIG.fromBytes(H);
+
+		ECP W=ECP.fromBytes(wCID);
+		if (W.is_infinity()) return INVALID_POINT; 
+
+		W=PAIR256.G1mul(W,x);
+
+//		FP2 f=new FP2(new BIG(ROM.Fra),new BIG(ROM.Frb));
+		BIG r=new BIG(ROM.CURVE_Order);
+//		BIG q=new BIG(ROM.Modulus);
+
+		z.add(h);	//new
+		z.mod(r);
+
+		g2.pinpow(pin,PBLEN);
+		g1.mul(g2);
+
+		FP16 c=g1.compow(z,r);
+
+		t=mpin_hash(sha,c,W);
+
+		for (int i=0;i<ECP.AESKEY;i++) CK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+pub fn mul(&mut self, b: &FP) {
+        if i64::from(self.xes) * i64::from(b.xes) > i64::from(FEXCESS) {
+            self.reduce()
+        }
+
+        let mut d = Big::mul(&(self.x), &(b.x));
+        self.x = FP::modulo(&mut d);
+        self.xes = 2;
+    }
+pub fn add(&mut self, b: &FP) {
+        self.x.add(&(b.x));
+        self.xes += b.xes;
+        if self.xes > FEXCESS {
+            self.reduce()
+        }
+    }
+fn hash(sha: usize, c: &mut FP16, U: &mut ECP, r: &mut [u8]) -> bool {
+    let mut w: [u8; EFS] = [0; EFS];
+    let mut t: [u8; 18 * EFS] = [0; 18 * EFS];
+
+    c.geta().geta().geta().geta().to_bytes(&mut w);
+    for i in 0..EFS {
+        t[i] = w[i]
+    }
+    c.geta().geta().geta().getb().to_bytes(&mut w);
+    for i in EFS..2 * EFS {
+        t[i] = w[i - EFS]
+    }
+    c.geta().geta().getb().geta().to_bytes(&mut w);
+    for i in 2 * EFS..3 * EFS {
+        t[i] = w[i - 2 * EFS]
+    }
+    c.geta().geta().getb().getb().to_bytes(&mut w);
+    for i in 3 * EFS..4 * EFS {
+        t[i] = w[i - 3 * EFS]
+    }
+    c.geta().getb().geta().geta().to_bytes(&mut w);
+    for i in 4 * EFS..5 * EFS {
+        t[i] = w[i - 4 * EFS]
+    }
+    c.geta().getb().geta().getb().to_bytes(&mut w);
+    for i in 5 * EFS..6 * EFS {
+        t[i] = w[i - 5 * EFS]
+    }
+    c.geta().getb().getb().geta().to_bytes(&mut w);
+    for i in 6 * EFS..7 * EFS {
+        t[i] = w[i - 6 * EFS]
+    }
+    c.geta().getb().getb().getb().to_bytes(&mut w);
+    for i in 7 * EFS..8 * EFS {
+        t[i] = w[i - 7 * EFS]
+    }
+
+    c.getb().geta().geta().geta().to_bytes(&mut w);
+    for i in 8 * EFS..9 * EFS {
+        t[i] = w[i - 8 * EFS]
+    }
+    c.getb().geta().geta().getb().to_bytes(&mut w);
+    for i in 9 * EFS..10 * EFS {
+        t[i] = w[i - 9 * EFS]
+    }
+    c.getb().geta().getb().geta().to_bytes(&mut w);
+    for i in 10 * EFS..11 * EFS {
+        t[i] = w[i - 10 * EFS]
+    }
+    c.getb().geta().getb().getb().to_bytes(&mut w);
+    for i in 11 * EFS..12 * EFS {
+        t[i] = w[i - 11 * EFS]
+    }
+    c.getb().getb().geta().geta().to_bytes(&mut w);
+    for i in 12 * EFS..13 * EFS {
+        t[i] = w[i - 12 * EFS]
+    }
+    c.getb().getb().geta().getb().to_bytes(&mut w);
+    for i in 13 * EFS..14 * EFS {
+        t[i] = w[i - 13 * EFS]
+    }
+    c.getb().getb().getb().geta().to_bytes(&mut w);
+    for i in 14 * EFS..15 * EFS {
+        t[i] = w[i - 14 * EFS]
+    }
+    c.getb().getb().getb().getb().to_bytes(&mut w);
+    for i in 15 * EFS..16 * EFS {
+        t[i] = w[i - 15 * EFS]
+    }
+
+    U.getx().to_bytes(&mut w);
+    for i in 16 * EFS..17 * EFS {
+        t[i] = w[i - 16 * EFS]
+    }
+    U.gety().to_bytes(&mut w);
+    for i in 17 * EFS..18 * EFS {
+        t[i] = w[i - 17 * EFS]
+    }
+
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    return false;
+}
+pub fn is_infinity(&self) -> bool {
+        match CURVETYPE {
+            CurveType::Edwards => self.x.is_zilch() && self.y.equals(&self.z),
+            CurveType::Weierstrass => self.x.is_zilch() && self.z.is_zilch(),
+            CurveType::Montgomery => self.z.is_zilch(),
+        }
+    }
+pub fn from_bytes(w: &[u8]) -> FP48 {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+
+        for i in 0..mb {
+            t[i] = w[i]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 2 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 3 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 4 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 5 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 6 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 7 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let ea8 = FP8::new_fp4s(ea, eb);
+
+        for i in 0..mb {
+            t[i] = w[i + 8 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 9 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 10 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 11 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 12 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 13 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 14 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 15 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let eb8 = FP8::new_fp4s(ea, eb);
+
+        let e = FP16::new_fp8s(ea8, eb8);
+
+        for i in 0..mb {
+            t[i] = w[i + 16 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 17 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 18 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 19 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 20 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 21 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 22 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 23 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let ea8 = FP8::new_fp4s(ea, eb);
+
+        for i in 0..mb {
+            t[i] = w[i + 24 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 25 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 26 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 27 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 28 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 29 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 30 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 31 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let eb8 = FP8::new_fp4s(ea, eb);
+
+        let f = FP16::new_fp8s(ea8, eb8);
+
+        for i in 0..mb {
+            t[i] = w[i + 32 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 33 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 34 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 35 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 36 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 37 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 38 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 39 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let ea8 = FP8::new_fp4s(ea, eb);
+
+        for i in 0..mb {
+            t[i] = w[i + 40 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 41 * mb]
+        }
+        let b = Big::from_bytes(&t);
+
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 42 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 43 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 44 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 45 * mb]
+        }
+        let b = Big::from_bytes(&t);
+
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 46 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 47 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let eb8 = FP8::new_fp4s(ea, eb);
+
+        let g = FP16::new_fp8s(ea8, eb8);
+
+        return FP48::new_fp16s(e, f, g);
+    }
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+pub const INVALID_POINT: isize = -14;
+pub const PBLEN: i32 = 14;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP48::from_bytes(&g1);
+    let mut g2 = FP48::from_bytes(&g2);
+    let mut z = Big::from_bytes(&r);
+    let mut x = Big::from_bytes(&x);
+    let h = Big::from_bytes(&h);
+
+    let mut W = ECP::from_bytes(&wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    W = pair256::g1mul(&mut W, &mut x);
+
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+
+    z.add(&h); //new
+    z.rmod(&mut r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&mut g2);
+
+    let mut c = g1.compow(&z, &mut r);
+
+    hash(sha, &mut c, &mut W, ck);
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the Java function translated to Rust:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut t = [0; 32];
+
+    let g1 = FP48::from_bytes(g1);
+    let g2 = FP48::from_bytes(g2);
+    let z = BIG::from_bytes(r);
+    let x = BIG::from_bytes(x);
+    let h = BIG::from_bytes(h);
+
+    let W = ECP::from_bytes(wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+ W = g1mul(&W, &x);
+
+ z.add(&h);
+ z.mod(r);
+
+ g2pinpow(&mut g2, pin, PBLEN);
+ g1.mul(&g2);
+
+ let c = g1.compow(&z, &r);
+ t = hash(sha, &mut c, &mut t, &mut W);
+
+ for i in 0..ECP::AESKEY {
+    ck[i] = t[i];
+ }
+
+ 0
+}
+```
+
+Note that I have assumed that `FP48`, `FP`, `BIG`, `ECP`, `FP`, `FP16`, `FP48`, `FP16`, `ECP`, `ECP8`, `ECP8`, `ECP`, `CP`, `CP`, `CP`, ` ` `CP`, `CP`, ` `CP`, ` `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CPCP`, `CP, `CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP</translated function>Here is the Java function translated to Rust:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut t = [0; 32];
+
+    let g1 = FP48::from_bytes(g1);
+    let g2 = FP48::from_bytes(g2);
+    let z = BIG::from_bytes(r);
+    let x = BIG::from_bytes(x);
+    let h = BIG::from_bytes(h);
+
+    let W = ECP::from_bytes(wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+ W = g1mul(&W, &x);
+
+ z.add(&h);
+ z.mod(r);
+
+ g2pinpow(&mut g2, pin, PBLEN);
+ g1.mul(&g2);
+
+ let c = g1.compow(&z, &r);
+ t = hash(sha, &mut c, &mut t, &mut W);
+
+ for i in 0..ECP::AESKEY {
+    ck[i] = t[i];
+ }
+
+ 0
+}
+```
+
+Note that I have assumed that `FP48`, `FP`, `BIG`, `ECP`, `FP`, `FP16`, `FP48`, `FP16`, `ECP`, `ECP8`, `ECP8`, `ECP`, `CP`, `CP`, `CP`, ` ` `CP`, `CP`, ` `CP`, ` `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CP`, `CPCP`, `CP, `CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP,CP

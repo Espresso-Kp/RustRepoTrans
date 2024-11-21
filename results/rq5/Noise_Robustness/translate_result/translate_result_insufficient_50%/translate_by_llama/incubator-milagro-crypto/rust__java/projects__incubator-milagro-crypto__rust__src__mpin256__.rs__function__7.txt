@@ -1,0 +1,260 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int ENCODING(RAND rng,byte[] E)
+	{
+		int rn,m,su,sv;
+		byte[] T=new byte[EFS];
+
+		for (int i=0;i<EFS;i++) T[i]=E[i+1];
+		BIG u=BIG.fromBytes(T);
+		for (int i=0;i<EFS;i++) T[i]=E[i+EFS+1];
+		BIG v=BIG.fromBytes(T);
+		
+		ECP P=new ECP(u,v);
+		if (P.is_infinity()) return INVALID_POINT;
+
+		BIG p=new BIG(ROM.Modulus);
+		u=BIG.randomnum(p,rng);
+
+		su=rng.getByte(); /*if (su<0) su=-su;*/ su%=2;
+		
+		ECP W=map(u,su);
+		P.sub(W); //P.affine();
+		sv=P.getS();
+		rn=unmap(v,P);
+		m=rng.getByte(); /*if (m<0) m=-m;*/ m%=rn;
+		v.inc(m+1);
+		E[0]=(byte)(su+2*sv);
+		u.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+1]=T[i];
+		v.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+EFS+1]=T[i];		
+		
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+pub fn sub(&mut self, b: &FP) {
+        let mut n = b.clone();
+        n.neg();
+        self.add(&n);
+    }
+fn unmap(u: &mut Big, P: &mut ECP) -> isize {
+    let s = P.gets();
+    let mut R: ECP;
+    let mut r = 0;
+    let x = P.getx();
+    *u = x.clone();
+    loop {
+        u.dec(1);
+        u.norm();
+        r += 1;
+        R = ECP::new_bigint(u, s);
+        if !R.is_infinity() {
+            break;
+        }
+    }
+    return r as isize;
+}
+pub fn gets(&self) -> isize {
+        let y = self.gety();
+        return y.parity();
+    }
+pub fn is_infinity(&self) -> bool {
+        match CURVETYPE {
+            CurveType::Edwards => self.x.is_zilch() && self.y.equals(&self.z),
+            CurveType::Weierstrass => self.x.is_zilch() && self.z.is_zilch(),
+            CurveType::Montgomery => self.z.is_zilch(),
+        }
+    }
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+pub const EFS: usize = big::MODBYTES as usize;
+pub const MODULUS: [Chunk; NLEN] = [0x13, 0x13A7, 0x80000000086121, 0x40000001BA344D, 0x25236482];
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut t: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        t[i] = e[i + 1]
+    }
+    let mut u = Big::from_bytes(&t);
+    for i in 0..EFS {
+        t[i] = e[i + EFS + 1]
+    }
+    let mut v = Big::from_bytes(&t);
+
+    let mut P = ECP::new_bigs(&u, &v);
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let p = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&p, rng);
+
+    let mut su = rng.getbyte() as isize;
+    su %= 2;
+
+    let mut W = emap(&mut u, su);
+    P.sub(&mut W);
+    let sv = P.gets();
+    let rn = unmap(&mut v, &mut P);
+    let mut m = rng.getbyte() as isize;
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + 1] = t[i]
+    }
+    v.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + EFS + 1] = t[i]
+    }
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut rn: isize = 0;
+    let mut su: u8 = 0;
+    let mut sv: isize = 0;
+    let mut m: u8 = 0;
+    let mut T: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        T[i] = e[i + 1];
+    }
+    let u = Big::from_bytes(&T);
+    for i in 0..EFS {
+        T[i] = e[i + EFS + 1];
+    }
+    let v = Big::from_bytes(&T);
+
+    let P = ECP::new(u, v);
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let p = Big::from(rom::MODULUS);
+    let mut u = Big::random_num(p, rng);
+
+    su = rng.getbyte();
+    su %= 2;
+
+    let W = ECP::map(u, su);
+    P.sub(&W);
+    sv = P.gets();
+    rn = ECP::unmap(v, P);
+    m = rng.getbyte();
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut T);
+    for i in 0..EFS {
+        e[i + 1] = T[i];
+    }
+    v.to_bytes(&mut T);
+    for i in 0..EFS {
+        e[i + EFS + 1] = T[i];
+    }
+
+    0
+}
+```
+Note that I've assumed that `INVALID_POINT` is a constant defined elsewhere in the code, and that `rom::MODULUS` is a constant array of bytes. I've also assumed that the `Big` and `ECP` types are defined in the `big` and `ecp` modules, respectively.</translated function>Here is the translated Rust function:
+```rust
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut rn: isize = 0;
+    let mut su: u8 = 0;
+    let mut sv: isize = 0;
+    let mut m: u8 = 0;
+    let mut T: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        T[i] = e[i + 1];
+    }
+    let u = Big::from_bytes(&T);
+    for i in 0..EFS {
+        T[i] = e[i + EFS + 1];
+    }
+    let v = Big::from_bytes(&T);
+
+    let P = ECP::new(u, v);
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let p = Big::from(rom::MODULUS);
+    let mut u = Big::random_num(p, rng);
+
+    su = rng.getbyte();
+    su %= 2;
+
+    let W = ECP::map(u, su);
+    P.sub(&W);
+    sv = P.gets();
+    rn = ECP::unmap(v, P);
+    m = rng.getbyte();
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut T);
+    for i in 0..EFS {
+        e[i + 1] = T[i];
+    }
+    v.to_bytes(&mut T);
+    for i in 0..EFS {
+        e[i + EFS + 1] = T[i];
+    }
+
+    0
+}
+```
+Note that I've assumed that `INVALID_POINT` is a constant defined elsewhere in the code, and that `rom::MODULUS` is a constant array of bytes. I've also assumed that the `Big` and `ECP` types are defined in the `big` and `ecp` modules, respectively.

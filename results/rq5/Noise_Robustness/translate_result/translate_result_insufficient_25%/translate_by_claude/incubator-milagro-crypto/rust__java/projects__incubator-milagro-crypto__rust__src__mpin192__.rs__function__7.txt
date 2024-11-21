@@ -1,0 +1,253 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int ENCODING(RAND rng,byte[] E)
+	{
+		int rn,m,su,sv;
+		byte[] T=new byte[EFS];
+
+		for (int i=0;i<EFS;i++) T[i]=E[i+1];
+		BIG u=BIG.fromBytes(T);
+		for (int i=0;i<EFS;i++) T[i]=E[i+EFS+1];
+		BIG v=BIG.fromBytes(T);
+		
+		ECP P=new ECP(u,v);
+		if (P.is_infinity()) return INVALID_POINT;
+
+		BIG p=new BIG(ROM.Modulus);
+		u=BIG.randomnum(p,rng);
+
+		su=rng.getByte(); /*if (su<0) su=-su;*/ su%=2;
+		
+		ECP W=map(u,su);
+		P.sub(W); //P.affine();
+		sv=P.getS();
+		rn=unmap(v,P);
+		m=rng.getByte(); /*if (m<0) m=-m;*/ m%=rn;
+		v.inc(m+1);
+		E[0]=(byte)(su+2*sv);
+		u.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+1]=T[i];
+		v.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+EFS+1]=T[i];		
+		
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+fn emap(u: &Big, cb: isize) -> ECP {
+    let mut P: ECP;
+    let mut x = u.clone();
+    let mut p = Big::new_ints(&rom::MODULUS);
+    x.rmod(&mut p);
+    loop {
+        P = ECP::new_bigint(&x, cb);
+        if !P.is_infinity() {
+            break;
+        }
+        x.inc(1);
+        x.norm();
+    }
+    return P;
+}
+pub fn sub(&mut self, b: &FP) {
+        let mut n = b.clone();
+        n.neg();
+        self.add(&n);
+    }
+fn unmap(u: &mut Big, P: &mut ECP) -> isize {
+    let s = P.gets();
+    let mut R: ECP;
+    let mut r = 0;
+    let x = P.getx();
+    *u = x.clone();
+    loop {
+        u.dec(1);
+        u.norm();
+        r += 1;
+        R = ECP::new_bigint(u, s);
+        if !R.is_infinity() {
+            break;
+        }
+    }
+    return r as isize;
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut t: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        t[i] = e[i + 1]
+    }
+    let mut u = Big::from_bytes(&t);
+    for i in 0..EFS {
+        t[i] = e[i + EFS + 1]
+    }
+    let mut v = Big::from_bytes(&t);
+
+    let mut P = ECP::new_bigs(&u, &v);
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let p = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&p, rng);
+
+    let mut su = rng.getbyte() as isize;
+    su %= 2;
+
+    let mut W = emap(&mut u, su);
+    P.sub(&mut W);
+    let sv = P.gets();
+    let rn = unmap(&mut v, &mut P);
+    let mut m = rng.getbyte() as isize;
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + 1] = t[i]
+    }
+    v.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + EFS + 1] = t[i]
+    }
+
+    return 0;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and library imports:
+
+```rust
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let efs = rom::EFS;
+    let mut t = vec![0u8; efs];
+    
+    t.copy_from_slice(&e[1..efs + 1]);
+    let mut u = Big::frombytearray(&t, 0);
+    t.copy_from_slice(&e[efs + 1..2 * efs + 1]);
+    let mut v = Big::frombytearray(&t, 0);
+    
+    let mut p = ECP::new_bigint(&u, &v);
+    if p.is_infinity() {
+        return rom::INVALID_POINT as isize;
+    }
+
+    let modulus = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&modulus, rng);
+
+    let su = (rng.getbyte() % 2) as isize;
+    
+    let mut w = emap(&u, su);
+    p.sub(&w);
+    let sv = p.gets();
+    let rn = unmap(&mut v, &mut p);
+    let m = (rng.getbyte() % rn as u8) as isize;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    
+    u.tobytearray(&mut t, 0);
+    e[1..efs + 1].copy_from_slice(&t);
+    v.tobytearray(&mut t, 0);
+    e[efs + 1..2 * efs + 1].copy_from_slice(&t);
+    
+    0
+}
+```
+
+This Rust function closely follows the structure and logic of the original Java function, using the provided Rust dependencies and function signatures. Note that some minor adjustments were made to accommodate Rust's syntax and conventions:
+
+1. We use `vec![0u8; efs]` to create a temporary byte array `t`.
+2. Rust's slice syntax is used for array operations.
+3. The `copy_from_slice` method is used to copy data between slices.
+4. We use `as isize` or `as u8` for explicit type casting where necessary.
+5. The `emap` function is used instead of `map` as per the provided dependencies.
+6. We use `&mut` references where mutable borrowing is required.
+
+This translation assumes that the necessary types and functions (like `RAND`, `Big`, `ECP`, etc.) are properly imported and available in the current scope, as indicated by the provided dependency libraries.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and library imports:
+
+```rust
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let efs = rom::EFS;
+    let mut t = vec![0u8; efs];
+    
+    t.copy_from_slice(&e[1..efs + 1]);
+    let mut u = Big::frombytearray(&t, 0);
+    t.copy_from_slice(&e[efs + 1..2 * efs + 1]);
+    let mut v = Big::frombytearray(&t, 0);
+    
+    let mut p = ECP::new_bigint(&u, &v);
+    if p.is_infinity() {
+        return rom::INVALID_POINT as isize;
+    }
+
+    let modulus = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&modulus, rng);
+
+    let su = (rng.getbyte() % 2) as isize;
+    
+    let mut w = emap(&u, su);
+    p.sub(&w);
+    let sv = p.gets();
+    let rn = unmap(&mut v, &mut p);
+    let m = (rng.getbyte() % rn as u8) as isize;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    
+    u.tobytearray(&mut t, 0);
+    e[1..efs + 1].copy_from_slice(&t);
+    v.tobytearray(&mut t, 0);
+    e[efs + 1..2 * efs + 1].copy_from_slice(&t);
+    
+    0
+}
+```
+
+This Rust function closely follows the structure and logic of the original Java function, using the provided Rust dependencies and function signatures. Note that some minor adjustments were made to accommodate Rust's syntax and conventions:
+
+1. We use `vec![0u8; efs]` to create a temporary byte array `t`.
+2. Rust's slice syntax is used for array operations.
+3. The `copy_from_slice` method is used to copy data between slices.
+4. We use `as isize` or `as u8` for explicit type casting where necessary.
+5. The `emap` function is used instead of `map` as per the provided dependencies.
+6. We use `&mut` references where mutable borrowing is required.
+
+This translation assumes that the necessary types and functions (like `RAND`, `Big`, `ECP`, etc.) are properly imported and available in the current scope, as indicated by the provided dependency libraries.

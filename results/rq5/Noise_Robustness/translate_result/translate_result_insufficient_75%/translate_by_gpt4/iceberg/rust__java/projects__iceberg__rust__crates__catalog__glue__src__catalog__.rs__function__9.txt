@@ -1,0 +1,265 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public boolean dropNamespace(Namespace namespace) throws NamespaceNotEmptyException {
+    namespaceExists(namespace);
+
+    GetTablesResponse response =
+        glue.getTables(
+            GetTablesRequest.builder()
+                .catalogId(awsProperties.glueCatalogId())
+                .databaseName(
+                    IcebergToGlueConverter.toDatabaseName(
+                        namespace, awsProperties.glueCatalogSkipNameValidation()))
+                .build());
+
+    if (response.hasTableList() && !response.tableList().isEmpty()) {
+      Table table = response.tableList().get(0);
+      if (isGlueIcebergTable(table)) {
+        throw new NamespaceNotEmptyException(
+            "Cannot drop namespace %s because it still contains Iceberg tables", namespace);
+      } else {
+        throw new NamespaceNotEmptyException(
+            "Cannot drop namespace %s because it still contains non-Iceberg tables", namespace);
+      }
+    }
+
+    glue.deleteDatabase(
+        DeleteDatabaseRequest.builder()
+            .catalogId(awsProperties.glueCatalogId())
+            .name(
+                IcebergToGlueConverter.toDatabaseName(
+                    namespace, awsProperties.glueCatalogSkipNameValidation()))
+            .build());
+    LOG.info("Dropped namespace: {}", namespace);
+    // Always successful, otherwise exception is thrown
+    return true;
+  }
+</java function>
+<rust function signature>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let db_name = validate_namespace(namespace)?;
+
+        let mut table_list: Vec<TableIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self
+                    .client
+                    .0
+                    .get_tables()
+                    .database_name(&db_name)
+                    .next_token(token),
+                None => self.client.0.get_tables().database_name(&db_name),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let tables: Vec<_> = resp
+                .table_list()
+                .iter()
+                .map(|tbl| TableIdent::new(namespace.clone(), tbl.name().to_string()))
+                .collect();
+
+            table_list.extend(tables);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(table_list)
+    }
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+struct GlueClient(aws_sdk_glue::Client);
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+        let db_name = validate_namespace(namespace)?;
+        let table_list = self.list_tables(namespace).await?;
+
+        if !table_list.is_empty() {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} is not empty", &db_name),
+            ));
+        }
+
+        let builder = self.client.0.delete_database().name(db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+<translated function>
+Here's the translation of the Java function into Rust:
+
+```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    validate_namespace(namespace)?;
+
+    let tables = self.list_tables(namespace).await?;
+    if !tables.is_empty() {
+        let table = &tables[0];
+
+        if table.is_glue_iceberg_table() {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "Cannot drop namespace {}, because it still contains Iceberg tables",
+                    namespace
+                ),
+            ));
+        } else {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "Cannot drop namespace {}, because it still contains non-Iceberg tables",
+                    namespace
+                ),
+            ));
+        }
+    }
+
+    match self
+        .client
+        .0
+        .delete_database()
+        .name(&validate_namespace(namespace)?)
+        .with_catalog_id!({self.config})
+        .send().await {
+            Ok(_) => println!("Dropped namespace: {}", namespace),
+            _ => return Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "Failed to delete database {}",
+                    namespace
+                ),
+            )),
+    }
+    Ok(())
+}
+```
+
+Note: `is_glue_iceberg_table` is a made-up function, you should replace it with the correct function call that checks if a table is a GlueIceberg table or not. Also `validate_namespace` should return the correct database name representation from namespace. Errors returned by `list_tables`, `validate_namespace` and `delete_database` should be processed accordingly.</translated function>Here's the translation of the Java function into Rust:
+
+```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    validate_namespace(namespace)?;
+
+    let tables = self.list_tables(namespace).await?;
+    if !tables.is_empty() {
+        let table = &tables[0];
+
+        if table.is_glue_iceberg_table() {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "Cannot drop namespace {}, because it still contains Iceberg tables",
+                    namespace
+                ),
+            ));
+        } else {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "Cannot drop namespace {}, because it still contains non-Iceberg tables",
+                    namespace
+                ),
+            ));
+        }
+    }
+
+    match self
+        .client
+        .0
+        .delete_database()
+        .name(&validate_namespace(namespace)?)
+        .with_catalog_id!({self.config})
+        .send().await {
+            Ok(_) => println!("Dropped namespace: {}", namespace),
+            _ => return Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "Failed to delete database {}",
+                    namespace
+                ),
+            )),
+    }
+    Ok(())
+}
+```
+
+Note: `is_glue_iceberg_table` is a made-up function, you should replace it with the correct function call that checks if a table is a GlueIceberg table or not. Also `validate_namespace` should return the correct database name representation from namespace. Errors returned by `list_tables`, `validate_namespace` and `delete_database` should be processed accordingly.

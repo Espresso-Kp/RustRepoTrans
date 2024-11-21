@@ -1,0 +1,302 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def primitive(self, primitive: pa.DataType) -> PrimitiveType:
+        if pa.types.is_boolean(primitive):
+            return BooleanType()
+        elif pa.types.is_integer(primitive):
+            width = primitive.bit_width
+            if width <= 32:
+                return IntegerType()
+            elif width <= 64:
+                return LongType()
+            else:
+                # Does not exist (yet)
+                raise TypeError(f"Unsupported integer type: {primitive}")
+        elif pa.types.is_float32(primitive):
+            return FloatType()
+        elif pa.types.is_float64(primitive):
+            return DoubleType()
+        elif isinstance(primitive, pa.Decimal128Type):
+            primitive = cast(pa.Decimal128Type, primitive)
+            return DecimalType(primitive.precision, primitive.scale)
+        elif pa.types.is_string(primitive) or pa.types.is_large_string(primitive):
+            return StringType()
+        elif pa.types.is_date32(primitive):
+            return DateType()
+        elif isinstance(primitive, pa.Time64Type):
+            return TimeType()
+        elif pa.types.is_timestamp(primitive):
+            return TimestampType()
+        elif pa.types.is_binary(primitive) or pa.types.is_large_binary(primitive):
+            return BinaryType()
+        elif pa.types.is_fixed_size_binary(primitive):
+            primitive = cast(pa.FixedSizeBinaryType, primitive)
+            return FixedType(primitive.byte_width)
+
+        raise TypeError(f"Unsupported type: {primitive}")
+</python function>
+<rust function signature>
+fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+pub enum Schema {
+    /// A `null` Avro schema.
+    Null,
+    /// A `boolean` Avro schema.
+    Boolean,
+    /// An `int` Avro schema.
+    Int,
+    /// A `long` Avro schema.
+    Long,
+    /// A `float` Avro schema.
+    Float,
+    /// A `double` Avro schema.
+    Double,
+    /// A `bytes` Avro schema.
+    /// `Bytes` represents a sequence of 8-bit unsigned bytes.
+    Bytes,
+    /// A `string` Avro schema.
+    /// `String` represents a unicode character sequence.
+    String,
+    /// A `array` Avro schema. Avro arrays are required to have the same type for each element.
+    /// This variant holds the `Schema` for the array element type.
+    Array(Box<Schema>),
+    /// A `map` Avro schema.
+    /// `Map` holds a pointer to the `Schema` of its values, which must all be the same schema.
+    /// `Map` keys are assumed to be `string`.
+    Map(Box<Schema>),
+    /// A `union` Avro schema.
+    Union(UnionSchema),
+    /// A `record` Avro schema.
+    Record(RecordSchema),
+    /// An `enum` Avro schema.
+    Enum(EnumSchema),
+    /// A `fixed` Avro schema.
+    Fixed(FixedSchema),
+    /// Logical type which represents `Decimal` values. The underlying type is serialized and
+    /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
+    Decimal(DecimalSchema),
+    /// A universally unique identifier, annotating a string.
+    Uuid,
+    /// Logical type which represents the number of days since the unix epoch.
+    /// Serialization format is `Schema::Int`.
+    Date,
+    /// The time of day in number of milliseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMillis,
+    /// The time of day in number of microseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMicros,
+    /// An instant in time represented as the number of milliseconds after the UNIX epoch.
+    TimestampMillis,
+    /// An instant in time represented as the number of microseconds after the UNIX epoch.
+    TimestampMicros,
+    /// An instant in localtime represented as the number of milliseconds after the UNIX epoch.
+    LocalTimestampMillis,
+    /// An instant in local time represented as the number of microseconds after the UNIX epoch.
+    LocalTimestampMicros,
+    /// An amount of time defined by a number of months, days and milliseconds.
+    Duration,
+    /// A reference to another schema.
+    Ref { name: Name },
+}
+const UUID_LOGICAL_TYPE: &str = "uuid";
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> {
+        let typ = match schema {
+            AvroSchema::Decimal(decimal) => {
+                Type::decimal(decimal.precision as u32, decimal.scale as u32)?
+            }
+            AvroSchema::Date => Type::Primitive(PrimitiveType::Date),
+            AvroSchema::TimeMicros => Type::Primitive(PrimitiveType::Time),
+            AvroSchema::TimestampMicros => Type::Primitive(PrimitiveType::Timestamp),
+            AvroSchema::Boolean => Type::Primitive(PrimitiveType::Boolean),
+            AvroSchema::Int => Type::Primitive(PrimitiveType::Int),
+            AvroSchema::Long => Type::Primitive(PrimitiveType::Long),
+            AvroSchema::Float => Type::Primitive(PrimitiveType::Float),
+            AvroSchema::Double => Type::Primitive(PrimitiveType::Double),
+            AvroSchema::String | AvroSchema::Enum(_) => Type::Primitive(PrimitiveType::String),
+            AvroSchema::Fixed(fixed) => {
+                if let Some(logical_type) = fixed.attributes.get(LOGICAL_TYPE) {
+                    let logical_type = logical_type.as_str().ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::DataInvalid,
+                            "logicalType in attributes of avro schema is not a string type",
+                        )
+                    })?;
+                    match logical_type {
+                        UUID_LOGICAL_TYPE => Type::Primitive(PrimitiveType::Uuid),
+                        ty => {
+                            return Err(Error::new(
+                                ErrorKind::FeatureUnsupported,
+                                format!(
+                                    "Logical type {ty} is not support in iceberg primitive type.",
+                                ),
+                            ))
+                        }
+                    }
+                } else {
+                    Type::Primitive(PrimitiveType::Fixed(fixed.size as u64))
+                }
+            }
+            AvroSchema::Bytes => Type::Primitive(PrimitiveType::Binary),
+            AvroSchema::Null => return Ok(None),
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::Unexpected,
+                    "Unable to convert avro {schema} to iceberg primitive type.",
+                ))
+            }
+        };
+
+        Ok(Some(typ))
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> {
+    match schema {
+        AvroSchema::Null => Ok(None),
+        AvroSchema::Boolean => Ok(Some(Type::Boolean)),
+        AvroSchema::Int => Ok(Some(Type::Int)),
+        AvroSchema::Long => Ok(Some(Type::Long)),
+        AvroSchema::Float => Ok(Some(Type::Float)),
+        AvroSchema::Double => Ok(Some(Type::Double)),
+        AvroSchema::Bytes => Ok(Some(Type::Bytes)),
+        AvroSchema::String => Ok(Some(Type::String)),
+        AvroSchema::Array(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Array(Box::new(t)))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported array type")),
+        },
+        AvroSchema::Map(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Map(Box::new(t)))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported map type")),
+        },
+        AvroSchema::Union(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Union(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported union type")),
+        },
+        AvroSchema::Record(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Record(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported record type")),
+        },
+        AvroSchema::Enum(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Enum(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported enum type")),
+        },
+        AvroSchema::Fixed(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Fixed(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported fixed type")),
+        },
+        AvroSchema::Decimal(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Decimal(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported decimal type")),
+        },
+        AvroSchema::Date => Ok(Some(Type::Date)),
+        AvroSchema::TimeMillis => Ok(Some(Type::TimeMillis)),
+        AvroSchema::TimeMicros => Ok(Some(Type::TimeMicros)),
+        AvroSchema::TimestampMillis => Ok(Some(Type::TimestampMillis)),
+        AvroSchema::TimestampMicros => Ok(Some(Type::TimestampMicros)),
+        AvroSchema::LocalTimestampMillis => Ok(Some(Type::LocalTimestampMillis)),
+        AvroSchema::LocalTimestampMicros => Ok(Some(Type::LocalTimestampMicros)),
+        AvroSchema::Duration => Ok(Some(Type::Duration)),
+        AvroSchema::Ref { name } => Ok(Some(Type::Ref { name: name.clone() })),
+    }
+}
+```
+Note that I've assumed that the `Type` enum is defined elsewhere in the codebase, and that the `Error` type is also defined elsewhere. I've also assumed that the `primitive` function is being called recursively to handle nested types. If these assumptions are incorrect, please let me know and I'll be happy to revise the code.</translated function>Here is the translated Rust function:
+```rust
+fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> {
+    match schema {
+        AvroSchema::Null => Ok(None),
+        AvroSchema::Boolean => Ok(Some(Type::Boolean)),
+        AvroSchema::Int => Ok(Some(Type::Int)),
+        AvroSchema::Long => Ok(Some(Type::Long)),
+        AvroSchema::Float => Ok(Some(Type::Float)),
+        AvroSchema::Double => Ok(Some(Type::Double)),
+        AvroSchema::Bytes => Ok(Some(Type::Bytes)),
+        AvroSchema::String => Ok(Some(Type::String)),
+        AvroSchema::Array(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Array(Box::new(t)))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported array type")),
+        },
+        AvroSchema::Map(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Map(Box::new(t)))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported map type")),
+        },
+        AvroSchema::Union(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Union(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported union type")),
+        },
+        AvroSchema::Record(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Record(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported record type")),
+        },
+        AvroSchema::Enum(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Enum(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported enum type")),
+        },
+        AvroSchema::Fixed(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Fixed(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported fixed type")),
+        },
+        AvroSchema::Decimal(inner) => match primitive(self, inner) {
+            Ok(Some(t)) => Ok(Some(Type::Decimal(inner.clone()))),
+            _ => Err(Error::new(ErrorKind::UnsupportedType, "Unsupported decimal type")),
+        },
+        AvroSchema::Date => Ok(Some(Type::Date)),
+        AvroSchema::TimeMillis => Ok(Some(Type::TimeMillis)),
+        AvroSchema::TimeMicros => Ok(Some(Type::TimeMicros)),
+        AvroSchema::TimestampMillis => Ok(Some(Type::TimestampMillis)),
+        AvroSchema::TimestampMicros => Ok(Some(Type::TimestampMicros)),
+        AvroSchema::LocalTimestampMillis => Ok(Some(Type::LocalTimestampMillis)),
+        AvroSchema::LocalTimestampMicros => Ok(Some(Type::LocalTimestampMicros)),
+        AvroSchema::Duration => Ok(Some(Type::Duration)),
+        AvroSchema::Ref { name } => Ok(Some(Type::Ref { name: name.clone() })),
+    }
+}
+```
+Note that I've assumed that the `Type` enum is defined elsewhere in the codebase, and that the `Error` type is also defined elsewhere. I've also assumed that the `primitive` function is being called recursively to handle nested types. If these assumptions are incorrect, please let me know and I'll be happy to revise the code.

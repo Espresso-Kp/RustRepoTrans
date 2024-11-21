@@ -1,0 +1,189 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public void toBytes(byte[] b)
+	{
+		byte[] t=new byte[BIG.MODBYTES];
+		ECP2 W=new ECP2(this);
+		W.affine();
+		W.x.getA().toBytes(t);
+		for (int i=0;i<BIG.MODBYTES;i++)
+			b[i]=t[i];
+		W.x.getB().toBytes(t);
+		for (int i=0;i<BIG.MODBYTES;i++)
+			b[i+BIG.MODBYTES]=t[i];
+
+		W.y.getA().toBytes(t);
+		for (int i=0;i<BIG.MODBYTES;i++)
+			b[i+2*BIG.MODBYTES]=t[i];
+		W.y.getB().toBytes(t);
+		for (int i=0;i<BIG.MODBYTES;i++)
+			b[i+3*BIG.MODBYTES]=t[i];
+	}
+</java function>
+<rust function signature>
+pub fn serialize_uncompressed_g2(g2: &ECP2) -> [u8; G2_BYTES * 2] 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn geta(&self) -> Big {
+        return self.a.redc();
+    }
+
+pub fn gety(&self) -> FP2 {
+        let mut W = self.clone();
+        W.affine();
+        W.y.clone()
+    }
+
+pub fn getx(&self) -> FP2 {
+        let mut W = self.clone();
+        W.affine();
+        W.x.clone()
+    }
+
+pub fn to_bytes(&self, b: &mut [u8]) {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let mut W = self.clone();
+
+        W.affine();
+        W.x.geta().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i] = t[i]
+        }
+        W.x.getb().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + mb] = t[i]
+        }
+
+        W.y.geta().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 2 * mb] = t[i]
+        }
+        W.y.getb().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 3 * mb] = t[i]
+        }
+    }
+
+pub fn getb(&self) -> Big {
+        return self.b.redc();
+    }
+
+pub fn is_infinity(&self) -> bool {
+        self.x.is_zilch() && self.z.is_zilch()
+    }
+
+pub struct ECP2 {
+    x: FP2,
+    y: FP2,
+    z: FP2,
+}
+
+pub const MODBYTES: usize = 32;
+pub const G2_BYTES: usize = MODBYTES * 2;
+const INFINITY_FLAG: u8 = 0b_0100_0000;
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use super::super::big::Big;
+use super::super::ecp::ECP;
+use super::super::ecp2::ECP2;
+use super::super::fp::FP;
+use super::super::fp2::FP2;
+use super::super::hash_to_curve::*;
+use super::super::pair;
+use super::super::rom::*;
+use super::iso::{iso11_to_ecp, iso3_to_ecp2};
+use crate::errors::AmclError;
+use crate::hash256::HASH256;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn serialize_uncompressed_g2(g2: &ECP2) -> [u8; G2_BYTES * 2] {
+    let mut result = [0; G2_BYTES * 2];
+
+    // Check point at inifinity
+    if g2.is_infinity() {
+        result[0] += INFINITY_FLAG;
+        return result;
+    }
+
+    // Convert to bytes
+    // Note: Zcash uses (x_im, x_re), (y_im, y_re)
+    let x = g2.getx();
+    x.getb().to_bytes(&mut result[0..MODBYTES]);
+    x.geta().to_bytes(&mut result[MODBYTES..(MODBYTES * 2)]);
+    let x = g2.gety();
+    x.getb()
+        .to_bytes(&mut result[(MODBYTES * 2)..(MODBYTES * 3)]);
+    x.geta().to_bytes(&mut result[(MODBYTES * 3)..]);
+
+    result
+}
+</function>
+<translated function>
+```
+pub fn serialize_uncompressed_g2(g2: &ECP2) -> [u8; G2_BYTES * 2] {
+    let mut b: [u8; G2_BYTES * 2] = [0; G2_BYTES * 2];
+    let mb = MODBYTES;
+    let mut t: [u8; MODBYTES] = [0; MODBYTES];
+
+    let mut W = g2.clone();
+    W.affine();
+
+    W.getx().geta().to_bytes(&mut t);
+    for i in 0..mb {
+        b[i] = t[i];
+    }
+    W.getx().getb().to_bytes(&mut t);
+    for i in 0..mb {
+        b[i + mb] = t[i];
+    }
+    
+    W.gety().geta().to_bytes(&mut t);
+    for i in 0..mb {
+        b[i + 2 * mb] = t[i];
+    }
+    W.gety().getb().to_bytes(&mut t);
+    for i in 0..mb {
+        b[i + 3 * mb] = t[i];
+    }
+
+    return b;
+}
+```</translated function>```
+pub fn serialize_uncompressed_g2(g2: &ECP2) -> [u8; G2_BYTES * 2] {
+    let mut b: [u8; G2_BYTES * 2] = [0; G2_BYTES * 2];
+    let mb = MODBYTES;
+    let mut t: [u8; MODBYTES] = [0; MODBYTES];
+
+    let mut W = g2.clone();
+    W.affine();
+
+    W.getx().geta().to_bytes(&mut t);
+    for i in 0..mb {
+        b[i] = t[i];
+    }
+    W.getx().getb().to_bytes(&mut t);
+    for i in 0..mb {
+        b[i + mb] = t[i];
+    }
+    
+    W.gety().geta().to_bytes(&mut t);
+    for i in 0..mb {
+        b[i + 2 * mb] = t[i];
+    }
+    W.gety().getb().to_bytes(&mut t);
+    for i in 0..mb {
+        b[i + 3 * mb] = t[i];
+    }
+
+    return b;
+}
+```

@@ -1,0 +1,41 @@
+<path>
+projects/iceberg/rust/crates/catalog/rest/src/catalog.rs
+</path>
+<function>
+    async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> {
+        let request = self
+            .client
+            .0
+            .post(self.config.rename_table_endpoint())
+            .json(&RenameTableRequest {
+                source: src.clone(),
+                destination: dest.clone(),
+            })
+            .build()?;
+
+        self.client
+            .execute::<ErrorResponse, NO_CONTENT>(request)
+            .await
+    }
+</function>
+------
+
+<path>
+projects/iceberg/python/pyiceberg/catalog/rest.py
+</path>
+<function>
+    def rename_table(self, from_identifier: Union[str, Identifier], to_identifier: Union[str, Identifier]) -> Table:
+        from_identifier_tuple = self.identifier_to_tuple_without_catalog(from_identifier)
+        payload = {
+            "source": self._split_identifier_for_json(from_identifier_tuple),
+            "destination": self._split_identifier_for_json(to_identifier),
+        }
+        response = self._session.post(self.url(Endpoints.rename_table), json=payload)
+        try:
+            response.raise_for_status()
+        except HTTPError as exc:
+            self._handle_non_200_response(exc, {404: NoSuchTableError, 409: TableAlreadyExistsError})
+
+        return self.load_table(to_identifier)
+
+</function>

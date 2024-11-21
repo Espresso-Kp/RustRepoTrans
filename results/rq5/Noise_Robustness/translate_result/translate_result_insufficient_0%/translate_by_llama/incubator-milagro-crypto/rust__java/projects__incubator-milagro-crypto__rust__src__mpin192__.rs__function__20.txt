@@ -1,0 +1,318 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_1(int sha,int date,byte[] CLIENT_ID,RAND rng,byte[] X,int pin,byte[] TOKEN,byte[] SEC,byte[] xID,byte[] xCID,byte[] PERMIT)
+	{
+		BIG r=new BIG(ROM.CURVE_Order);
+		BIG x;
+		if (rng!=null)
+		{
+			x=BIG.randomnum(r,rng);
+			//if (ROM.AES_S>0)
+			//{
+			//	x.mod2m(2*ROM.AES_S);
+			//}
+			x.toBytes(X);
+		}
+		else
+		{
+			x=BIG.fromBytes(X);
+		}
+		ECP P,T,W;
+		BIG px;
+//		byte[] t=new byte[EFS];
+
+		byte[] h=hashit(sha,0,CLIENT_ID,EFS);
+		P=ECP.mapit(h);
+	
+		T=ECP.fromBytes(TOKEN);
+		if (T.is_infinity()) return INVALID_POINT;
+
+		pin%=MAXPIN;
+		W=P.pinmul(pin,PBLEN);
+		T.add(W);
+		if (date!=0)
+		{
+			W=ECP.fromBytes(PERMIT);
+			if (W.is_infinity()) return INVALID_POINT;
+			T.add(W);
+			h=hashit(sha,date,h,EFS);
+			W=ECP.mapit(h);
+			if (xID!=null)
+			{
+				P=PAIR192.G1mul(P,x);
+				P.toBytes(xID,false);
+				W=PAIR192.G1mul(W,x);
+				P.add(W); //P.affine();
+			}
+			else
+			{
+				P.add(W); //P.affine();
+				P=PAIR192.G1mul(P,x);
+			}
+			if (xCID!=null) P.toBytes(xCID,false);
+		}
+		else
+		{
+			if (xID!=null)
+			{
+				P=PAIR192.G1mul(P,x);
+				P.toBytes(xID,false);
+			}
+		}
+
+		//T.affine();
+		T.toBytes(SEC,false);
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let mut sx: Big;
+
+    if let Some(rd) = rng {
+        sx = Big::randomnum(&r, rd);
+        sx.to_bytes(x);
+    } else {
+        sx = Big::from_bytes(x);
+    }
+
+    const RM: usize = big::MODBYTES as usize;
+    let mut h: [u8; RM] = [0; RM];
+
+    hashit(sha, 0, &client_id, &mut h);
+    let mut P = ECP::mapit(&h);
+
+    let mut T = ECP::from_bytes(&token);
+    if T.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut W = P.pinmul((pin as i32) % MAXPIN, PBLEN);
+    T.add(&mut W);
+    if date != 0 {
+        if let Some(rpermit) = permit {
+            W = ECP::from_bytes(&rpermit);
+        }
+        if W.is_infinity() {
+            return INVALID_POINT;
+        }
+        T.add(&mut W);
+        let mut h2: [u8; RM] = [0; RM];
+        hashit(sha, date, &h, &mut h2);
+        W = ECP::mapit(&h2);
+        if let Some(mut rxid) = xid {
+            P = pair192::g1mul(&mut P, &mut sx);
+            P.to_bytes(&mut rxid, false);
+            W = pair192::g1mul(&mut W, &mut sx);
+            P.add(&mut W);
+        } else {
+            P.add(&mut W);
+            P = pair192::g1mul(&mut P, &mut sx);
+        }
+        if let Some(mut rxcid) = xcid {
+            P.to_bytes(&mut rxcid, false)
+        }
+    } else {
+        if let Some(mut rxid) = xid {
+            P = pair192::g1mul(&mut P, &mut sx);
+            P.to_bytes(&mut rxid, false);
+        }
+    }
+
+    T.to_bytes(sec, false);
+    return 0;
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new(rom::CURVE_ORDER);
+    let mut x = if let Some(rng) = rng {
+        Big::random_num(r, rng)
+    } else {
+        Big::from_bytes(x)
+    };
+    // if rom::AES_S > 0 {
+    //     x.mod2m(2 * rom::AES_S);
+    // }
+    x.to_bytes(x);
+
+    let p = ECP::mapit(&hashit(sha, 0, client_id, rom::EFS));
+    let t = ECP::from_bytes(token);
+    if t.is_infinity() {
+        return -1; // equivalent to Java's INVALID_POINT
+    }
+
+    pin %= rom::MAXPIN;
+    let w = p.pinmul(pin, rom::PBLEN);
+    t.add(w);
+    if date!= 0 {
+        let w = ECP::from_bytes(permit.unwrap_or_else(|| panic!("permit is None")));
+        if w.is_infinity() {
+            return -1; // equivalent to Java's INVALID_POINT
+        }
+        t.add(w);
+        let h = hashit(sha, date, &hashit(sha, 0, client_id, rom::EFS), rom::EFS);
+        let w = ECP::mapit(&h);
+        if let Some(xid) = xid {
+            let p = pair192::G1_mul(p, &x);
+            p.to_bytes(xid, false);
+            let w = pair192::G1_mul(w, &x);
+            p.add(w); // p.affine();
+        } else {
+            p.add(w); // p.affine();
+            let p = pair192::G1_mul(p, &x);
+        }
+        if let Some(xcid) = xcid {
+            p.to_bytes(xcid, false);
+        }
+    } else {
+        if let Some(xid) = xid {
+            let p = pair192::G1_mul(p, &x);
+            p.to_bytes(xid, false);
+        }
+    }
+
+    t.to_bytes(sec, false);
+    0
+}
+```
+Note that I've assumed that the `hashit` function is defined elsewhere in the codebase, and that the `rom` module contains the necessary constants. I've also used the `unwrap_or_else` method to handle the `Option` values in a way that's equivalent to the Java code.</translated function>Here is the translated Rust function:
+```rust
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new(rom::CURVE_ORDER);
+    let mut x = if let Some(rng) = rng {
+        Big::random_num(r, rng)
+    } else {
+        Big::from_bytes(x)
+    };
+    // if rom::AES_S > 0 {
+    //     x.mod2m(2 * rom::AES_S);
+    // }
+    x.to_bytes(x);
+
+    let p = ECP::mapit(&hashit(sha, 0, client_id, rom::EFS));
+    let t = ECP::from_bytes(token);
+    if t.is_infinity() {
+        return -1; // equivalent to Java's INVALID_POINT
+    }
+
+    pin %= rom::MAXPIN;
+    let w = p.pinmul(pin, rom::PBLEN);
+    t.add(w);
+    if date!= 0 {
+        let w = ECP::from_bytes(permit.unwrap_or_else(|| panic!("permit is None")));
+        if w.is_infinity() {
+            return -1; // equivalent to Java's INVALID_POINT
+        }
+        t.add(w);
+        let h = hashit(sha, date, &hashit(sha, 0, client_id, rom::EFS), rom::EFS);
+        let w = ECP::mapit(&h);
+        if let Some(xid) = xid {
+            let p = pair192::G1_mul(p, &x);
+            p.to_bytes(xid, false);
+            let w = pair192::G1_mul(w, &x);
+            p.add(w); // p.affine();
+        } else {
+            p.add(w); // p.affine();
+            let p = pair192::G1_mul(p, &x);
+        }
+        if let Some(xcid) = xcid {
+            p.to_bytes(xcid, false);
+        }
+    } else {
+        if let Some(xid) = xid {
+            let p = pair192::G1_mul(p, &x);
+            p.to_bytes(xid, false);
+        }
+    }
+
+    t.to_bytes(sec, false);
+    0
+}
+```
+Note that I've assumed that the `hashit` function is defined elsewhere in the codebase, and that the `rom` module contains the necessary constants. I've also used the `unwrap_or_else` method to handle the `Option` values in a way that's equivalent to the Java code.

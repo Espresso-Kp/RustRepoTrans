@@ -1,0 +1,160 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public <T> Boolean isNaN(BoundReference<T> ref) {
+      int id = ref.fieldId();
+
+      Long valueCount = valueCounts.get(id);
+      if (valueCount == null) {
+        // the column is not present and is all nulls
+        return ROWS_CANNOT_MATCH;
+      }
+
+      Statistics<?> colStats = stats.get(id);
+      if (colStats != null && valueCount - colStats.getNumNulls() == 0) {
+        // (num nulls == value count) => all values are null => no nan values
+        return ROWS_CANNOT_MATCH;
+      }
+
+      return ROWS_MIGHT_MATCH;
+    }
+</java function>
+<rust function signature>
+fn is_nan(
+        &mut self,
+        reference: &BoundReference,
+        _predicate: &BoundPredicate,
+    ) -> crate::Result<bool> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct BoundReference {
+    // This maybe different from [`name`] filed in [`NestedField`] since this contains full path.
+    // For example, if the field is `a.b.c`, then `field.name` is `c`, but `original_name` is `a.b.c`.
+    column_name: String,
+    field: NestedFieldRef,
+    accessor: StructAccessorRef,
+}
+const ROWS_CANNOT_MATCH: crate::Result<bool> = Ok(false);
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::spec::{DataFile, Datum, PrimitiveLiteral};
+use crate::{Error, ErrorKind};
+use fnv::FnvHashSet;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::PredicateOperator::{
+        Eq, GreaterThan, GreaterThanOrEq, In, IsNan, IsNull, LessThan, LessThanOrEq, NotEq, NotIn,
+        NotNan, NotNull, NotStartsWith, StartsWith,
+    };
+use crate::expr::{
+        BinaryExpression, Bind, BoundPredicate, Predicate, Reference, SetExpression,
+        UnaryExpression,
+    };
+use crate::spec::{
+        DataContentType, DataFile, DataFileFormat, Datum, NestedField, PartitionField,
+        PartitionSpec, PrimitiveType, Schema, Struct, Transform, Type,
+    };
+use fnv::FnvHashSet;
+use std::collections::HashMap;
+use std::ops::Not;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn is_nan(
+        &mut self,
+        reference: &BoundReference,
+        _predicate: &BoundPredicate,
+    ) -> crate::Result<bool> {
+        let field_id = reference.field().id;
+
+        match self.nan_count(field_id) {
+            Some(&0) => ROWS_CANNOT_MATCH,
+            _ if self.contains_nulls_only(field_id) => ROWS_CANNOT_MATCH,
+            _ => ROWS_MIGHT_MATCH,
+        }
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+fn is_nan(
+    &mut self,
+    reference: &BoundReference,
+    _predicate: &BoundPredicate,
+) -> crate::Result<bool> {
+    let id = reference.field.id();
+
+    let value_count = match self.value_counts.get(&id) {
+        Some(count) => count,
+        None => {
+            // the column is not present and is all nulls
+            return ROWS_CANNOT_MATCH;
+        }
+    };
+
+    if let Some(col_stats) = self.stats.get(&id) {
+        if value_count - col_stats.get_num_nulls() == 0 {
+            // (num nulls == value count) => all values are null => no nan values
+            return ROWS_CANNOT_MATCH;
+        }
+    }
+
+    Ok(true) // Equivalent to ROWS_MIGHT_MATCH
+}
+```
+
+Note that I made the following assumptions and adaptations:
+
+1. The `valueCounts` and `stats` fields in the Java class are assumed to be `HashMap`s in the Rust struct, named `value_counts` and `stats` respectively.
+2. The `Statistics` type is assumed to have a `get_num_nulls()` method in Rust.
+3. The `ROWS_MIGHT_MATCH` constant is not provided in the Rust dependencies, so I've used `Ok(true)` as an equivalent.
+4. The function signature in Rust includes a `_predicate` parameter that isn't used in the Java version, so it's prefixed with an underscore to indicate it's unused.
+5. Error handling is done using `crate::Result<bool>` as per the provided function signature.
+
+This translation aims to maintain the logic of the original Java function while adhering to Rust's syntax and the provided dependencies and libraries.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+fn is_nan(
+    &mut self,
+    reference: &BoundReference,
+    _predicate: &BoundPredicate,
+) -> crate::Result<bool> {
+    let id = reference.field.id();
+
+    let value_count = match self.value_counts.get(&id) {
+        Some(count) => count,
+        None => {
+            // the column is not present and is all nulls
+            return ROWS_CANNOT_MATCH;
+        }
+    };
+
+    if let Some(col_stats) = self.stats.get(&id) {
+        if value_count - col_stats.get_num_nulls() == 0 {
+            // (num nulls == value count) => all values are null => no nan values
+            return ROWS_CANNOT_MATCH;
+        }
+    }
+
+    Ok(true) // Equivalent to ROWS_MIGHT_MATCH
+}
+```
+
+Note that I made the following assumptions and adaptations:
+
+1. The `valueCounts` and `stats` fields in the Java class are assumed to be `HashMap`s in the Rust struct, named `value_counts` and `stats` respectively.
+2. The `Statistics` type is assumed to have a `get_num_nulls()` method in Rust.
+3. The `ROWS_MIGHT_MATCH` constant is not provided in the Rust dependencies, so I've used `Ok(true)` as an equivalent.
+4. The function signature in Rust includes a `_predicate` parameter that isn't used in the Java version, so it's prefixed with an underscore to indicate it's unused.
+5. Error handling is done using `crate::Result<bool>` as per the provided function signature.
+
+This translation aims to maintain the logic of the original Java function while adhering to Rust's syntax and the provided dependencies and libraries.

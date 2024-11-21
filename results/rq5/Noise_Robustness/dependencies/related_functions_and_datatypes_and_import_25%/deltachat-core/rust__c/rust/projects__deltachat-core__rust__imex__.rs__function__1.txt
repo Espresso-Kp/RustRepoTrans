@@ -1,0 +1,107 @@
+async fn imex_inner(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> {
+    info!(
+        context,
+        "{} path: {}",
+        match what {
+            ImexMode::ExportSelfKeys | ImexMode::ExportBackup => "Export",
+            ImexMode::ImportSelfKeys | ImexMode::ImportBackup => "Import",
+        },
+        path.display()
+    );
+    ensure!(context.sql.is_open().await, "Database not opened.");
+    context.emit_event(EventType::ImexProgress(10));
+
+    if what == ImexMode::ExportBackup || what == ImexMode::ExportSelfKeys {
+        // before we export anything, make sure the private key exists
+        e2ee::ensure_secret_key_exists(context)
+            .await
+            .context("Cannot create private key or private key not available")?;
+
+        create_folder(context, &path).await?;
+    }
+
+    match what {
+        ImexMode::ExportSelfKeys => export_self_keys(context, path).await,
+        ImexMode::ImportSelfKeys => import_self_keys(context, path).await,
+
+        ImexMode::ExportBackup => {
+            export_backup(context, path, passphrase.unwrap_or_default()).await
+        }
+        ImexMode::ImportBackup => {
+            import_backup(context, path, passphrase.unwrap_or_default()).await
+        }
+    }
+}
+pub async fn recv(&self) -> Option<Event> {
+        let mut lock = self.0.lock().await;
+        match lock.recv().await {
+            Err(async_broadcast::RecvError::Overflowed(n)) => Some(Event {
+                id: 0,
+                typ: EventType::EventChannelOverflow { n },
+            }),
+            Err(async_broadcast::RecvError::Closed) => None,
+            Ok(event) => Some(event),
+        }
+    }
+macro_rules! info {
+    ($ctx:expr,  $msg:expr) => {
+        info!($ctx, $msg,)
+    };
+    ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
+        let formatted = format!($msg, $($args),*);
+        let full = format!("{file}:{line}: {msg}",
+                           file = file!(),
+                           line = line!(),
+                           msg = &formatted);
+        $ctx.emit_event($crate::EventType::Info(full));
+    }};
+}
+------
+
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};

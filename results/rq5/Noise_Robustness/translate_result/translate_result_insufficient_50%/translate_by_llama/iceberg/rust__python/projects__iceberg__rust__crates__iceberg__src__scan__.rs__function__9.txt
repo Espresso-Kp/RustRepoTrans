@@ -1,0 +1,514 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def plan_files(self) -> Iterable[FileScanTask]:
+        """Plans the relevant files by filtering on the PartitionSpecs.
+
+        Returns:
+            List of FileScanTasks that contain both data and delete files.
+        """
+        snapshot = self.snapshot()
+        if not snapshot:
+            return iter([])
+
+        # step 1: filter manifests using partition summaries
+        # the filter depends on the partition spec used to write the manifest file, so create a cache of filters for each spec id
+
+        manifest_evaluators: Dict[int, Callable[[ManifestFile], bool]] = KeyDefaultDict(self._build_manifest_evaluator)
+
+        manifests = [
+            manifest_file
+            for manifest_file in snapshot.manifests(self.io)
+            if manifest_evaluators[manifest_file.partition_spec_id](manifest_file)
+        ]
+
+        # step 2: filter the data files in each manifest
+        # this filter depends on the partition spec used to write the manifest file
+
+        partition_evaluators: Dict[int, Callable[[DataFile], bool]] = KeyDefaultDict(self._build_partition_evaluator)
+        metrics_evaluator = _InclusiveMetricsEvaluator(
+            self.table_metadata.schema(), self.row_filter, self.case_sensitive, self.options.get("include_empty_files") == "true"
+        ).eval
+
+        min_data_sequence_number = _min_data_file_sequence_number(manifests)
+
+        data_entries: List[ManifestEntry] = []
+        positional_delete_entries = SortedList(key=lambda entry: entry.data_sequence_number or INITIAL_SEQUENCE_NUMBER)
+
+        executor = ExecutorFactory.get_or_create()
+        for manifest_entry in chain(
+            *executor.map(
+                lambda args: _open_manifest(*args),
+                [
+                    (
+                        self.io,
+                        manifest,
+                        partition_evaluators[manifest.partition_spec_id],
+                        metrics_evaluator,
+                    )
+                    for manifest in manifests
+                    if self._check_sequence_number(min_data_sequence_number, manifest)
+                ],
+            )
+        ):
+            data_file = manifest_entry.data_file
+            if data_file.content == DataFileContent.DATA:
+                data_entries.append(manifest_entry)
+            elif data_file.content == DataFileContent.POSITION_DELETES:
+                positional_delete_entries.add(manifest_entry)
+            elif data_file.content == DataFileContent.EQUALITY_DELETES:
+                raise ValueError("PyIceberg does not yet support equality deletes: https://github.com/apache/iceberg/issues/6568")
+            else:
+                raise ValueError(f"Unknown DataFileContent ({data_file.content}): {manifest_entry}")
+
+        return [
+            FileScanTask(
+                data_entry.data_file,
+                delete_files=_match_deletes_to_data_file(
+                    data_entry,
+                    positional_delete_entries,
+                ),
+            )
+            for data_entry in data_entries
+        ]
+</python function>
+<rust function signature>
+pub async fn plan_files(&self) -> Result<FileScanTaskStream> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn content_type(&self) -> DataContentType {
+        self.content
+    }
+pub fn file_size_in_bytes(&self) -> u64 {
+        self.file_size_in_bytes
+    }
+pub fn file_path(&self) -> &str {
+        &self.file_path
+    }
+pub fn filter(mut self, predicate: Predicate) -> Self {
+        self.predicates = Some(predicate);
+        self
+    }
+pub fn data_file(&self) -> &DataFile {
+        &self.data_file
+    }
+pub(crate) fn eval(&self, data_file: &DataFile) -> Result<bool> {
+        let mut visitor = ExpressionEvaluatorVisitor::new(self, data_file.partition());
+
+        visit(&mut visitor, &self.partition_filter)
+    }
+fn new(
+        schema: SchemaRef,
+        snapshot: SnapshotRef,
+        table_metadata: TableMetadataRef,
+        file_io: FileIO,
+        filter: Option<Arc<Predicate>>,
+        case_sensitive: bool,
+    ) -> Result<Self> {
+        let bound_filter = match filter {
+            Some(ref filter) => Some(filter.bind(schema.clone(), case_sensitive)?),
+            None => None,
+        };
+
+        Ok(Self {
+            schema,
+            snapshot,
+            table_metadata,
+            file_io,
+            bound_filter,
+            case_sensitive,
+        })
+    }
+fn new() -> Self {
+        Self(HashMap::new())
+    }
+fn new() -> Self {
+        Self(HashMap::new())
+    }
+fn content_type_is_data(entry: &ManifestFile) -> bool {
+        if let ManifestContentType::Data = entry.content {
+            return true;
+        }
+        false
+    }
+pub(crate) fn eval(
+        filter: &'a BoundPredicate,
+        data_file: &'a DataFile,
+        include_empty_files: bool,
+    ) -> crate::Result<bool> {
+        if !include_empty_files && data_file.record_count == 0 {
+            return ROWS_CANNOT_MATCH;
+        }
+
+        let mut evaluator = Self::new(data_file);
+        visit(&mut evaluator, filter)
+    }
+struct PartitionFilterCache(HashMap<i32, BoundPredicate>);
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use crate::arrow::ArrowReaderBuilder;
+use crate::expr::visitors::expression_evaluator::ExpressionEvaluator;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::visitors::inclusive_projection::InclusiveProjection;
+use crate::expr::visitors::manifest_evaluator::ManifestEvaluator;
+use crate::expr::{Bind, BoundPredicate, Predicate};
+use crate::io::FileIO;
+use crate::spec::{
+    DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef,
+    TableMetadataRef,
+};
+use crate::table::Table;
+use crate::{Error, ErrorKind, Result};
+use arrow_array::RecordBatch;
+use async_stream::try_stream;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+use crate::expr::Reference;
+use crate::io::{FileIO, OutputFile};
+use crate::spec::{
+        DataContentType, DataFileBuilder, DataFileFormat, Datum, FormatVersion, Literal, Manifest,
+        ManifestContentType, ManifestEntry, ManifestListWriter, ManifestMetadata, ManifestStatus,
+        ManifestWriter, Struct, TableMetadata, EMPTY_SNAPSHOT_ID,
+    };
+use crate::table::Table;
+use crate::TableIdent;
+use arrow_array::{ArrayRef, Int64Array, RecordBatch};
+use futures::TryStreamExt;
+use parquet::arrow::{ArrowWriter, PARQUET_FIELD_ID_META_KEY};
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
+use std::collections::HashMap;
+use std::fs;
+use std::fs::File;
+use std::sync::Arc;
+use tempfile::TempDir;
+use tera::{Context, Tera};
+use uuid::Uuid;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn plan_files(&self) -> Result<FileScanTaskStream> {
+        let context = FileScanStreamContext::new(
+            self.schema.clone(),
+            self.snapshot.clone(),
+            self.table_metadata.clone(),
+            self.file_io.clone(),
+            self.filter.clone(),
+            self.case_sensitive,
+        )?;
+
+        let mut partition_filter_cache = PartitionFilterCache::new();
+        let mut manifest_evaluator_cache = ManifestEvaluatorCache::new();
+        let mut expression_evaluator_cache = ExpressionEvaluatorCache::new();
+
+        Ok(try_stream! {
+            let manifest_list = context
+                .snapshot
+                .load_manifest_list(&context.file_io, &context.table_metadata)
+                .await?;
+
+            for entry in manifest_list.entries() {
+                if !Self::content_type_is_data(entry) {
+                    continue;
+                }
+
+                let partition_spec_id = entry.partition_spec_id;
+
+                let partition_filter = partition_filter_cache.get(
+                    partition_spec_id,
+                    &context,
+                )?;
+
+                if let Some(partition_filter) = partition_filter {
+                    let manifest_evaluator = manifest_evaluator_cache.get(
+                        partition_spec_id,
+                        partition_filter,
+                    );
+
+                    if !manifest_evaluator.eval(entry)? {
+                        continue;
+                    }
+                }
+
+                let manifest = entry.load_manifest(&context.file_io).await?;
+                let mut manifest_entries_stream =
+                    futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
+
+                while let Some(manifest_entry) = manifest_entries_stream.next().await {
+                    let data_file = manifest_entry.data_file();
+
+                    if let Some(partition_filter) = partition_filter {
+                        let expression_evaluator = expression_evaluator_cache.get(partition_spec_id, partition_filter);
+
+                        if !expression_evaluator.eval(data_file)? {
+                            continue;
+                        }
+                    }
+
+
+                    if let Some(bound_predicate) = context.bound_filter() {
+                        // reject any manifest entries whose data file's metrics don't match the filter.
+                        if !InclusiveMetricsEvaluator::eval(
+                            bound_predicate,
+                            manifest_entry.data_file(),
+                            false
+                        )? {
+                            continue;
+                        }
+                    }
+
+                    match manifest_entry.content_type() {
+                        DataContentType::EqualityDeletes | DataContentType::PositionDeletes => {
+                            yield Err(Error::new(
+                                ErrorKind::FeatureUnsupported,
+                                "Delete files are not supported yet.",
+                            ))?;
+                        }
+                        DataContentType::Data => {
+                            let scan_task: Result<FileScanTask> = Ok(FileScanTask {
+                                data_file_path: manifest_entry.data_file().file_path().to_string(),
+                                start: 0,
+                                length: manifest_entry.file_size_in_bytes(),
+                            });
+                            yield scan_task?;
+                        }
+                    }
+                }
+            }
+        }
+        .boxed())
+    }
+</function>
+<translated function>
+Here is the Rust translation of the provided Python function:
+
+```rust
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::visitors::manifest_evaluator::ManifestEvaluator;
+use crate::io::FileIO;
+use crate::spec::{DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef, TableMetadataRef};
+use crate::table::Table;
+use async_stream::try_stream;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+pub async fn plan_files(&self) -> Result<FileScanTaskStream> {
+    let snapshot = self.snapshot()?;
+    if snapshot.is_none() {
+        return Ok(FileScanTaskStream::new());
+    }
+
+    let manifest_evaluators = self.build_manifest_evaluators();
+    let manifests = snapshot.manifests(self.io())
+       .into_iter()
+       .filter(|manifest| manifest_evaluators.contains_key(&manifest.partition_spec_id) && manifest_evaluators[&manifest.partition_spec_id](manifest));
+
+    let partition_evaluators = self.build_partition_evaluators();
+    let metrics_evaluator = InclusiveMetricsEvaluator::new(self.table_metadata().schema(), self.row_filter(), self.case_sensitive(), self.options().get("include_empty_files") == "true").eval;
+
+    let min_data_sequence_number = self.min_data_file_sequence_number(manifests)?;
+    let mut data_entries = Vec::new();
+    let mut positional_delete_entries = SortedList::new();
+
+    let executor = ExecutorFactory::get_or_create();
+    for manifest_entry in executor.map(
+        |args| self.open_manifest(*args),
+        [
+            (
+                self.io(),
+                manifest,
+                partition_evaluators[&manifest.partition_spec_id],
+                metrics_evaluator,
+            )
+            for manifest in manifests
+            if self.check_sequence_number(min_data_sequence_number, manifest)
+        ],
+    ) {
+        let data_file = manifest_entry.data_file();
+        match data_file.content_type() {
+            DataContentType::Data => {
+                data_entries.push(manifest_entry);
+            }
+            DataContentType::PositionDeletes => {
+                positional_delete_entries.add(manifest_entry);
+            }
+            DataContentType::EqualityDeletes => {
+                return Err(Error::new(ErrorKind::Unsupported, "PyIceberg does not yet support equality deletes"));
+            }
+            _ => {
+                return Err(Error::new(ErrorKind::Unsupported, format!("Unknown DataFileContent ({})", data_file.content_type())));
+            }
+        }
+    }
+
+    Ok(FileScanTaskStream::new(
+        data_entries.into_iter().map(|data_entry| FileScanTask::new(data_entry.data_file(), self.match_deletes_to_data_file(data_entry, positional_delete_entries))),
+    ))
+}
+
+fn build_manifest_evaluators(&self) -> HashMap<i32, ManifestEvaluator> {
+    let mut manifest_evaluators = HashMap::new();
+    for manifest in self.snapshot().manifests(self.io()) {
+        manifest_evaluators.entry(manifest.partition_spec_id).or_insert(self.build_manifest_evaluator(manifest));
+    }
+    manifest_evaluators
+}
+
+fn build_partition_evaluators(&self) -> HashMap<i32, PartitionEvaluator> {
+    let mut partition_evaluators = HashMap::new();
+    for manifest in self.snapshot().manifests(self.io()) {
+        partition_evaluators.entry(manifest.partition_spec_id).or_insert(self.build_partition_evaluator(manifest));
+    }
+    partition_evaluators
+}
+
+fn min_data_file_sequence_number(&self, manifests: VecManifestFile>) -> Resulti32> {
+    let mut min_sequence_number = i32::MAX;
+    for manifest in manifests {
+        if manifest.content_type() == ManifestContentType::Data {
+            let sequence_number = manifest.sequence_number();
+            if sequence_number < min_sequence_number {
+                min_sequence_number = sequence_number;
+            }
+        }
+    }
+    Ok(min_sequence_number)
+}
+
+fn open_manifest(&self, args: (FileIO, ManifestFile, PartitionEvaluator, MetricsEvaluator)) -> ResultManifestEntry> {
+    // implementation of open_manifest function
+}
+
+fn check_sequence_number(&self, min_sequence_number: i32, manifest: &ManifestFile) -> bool {
+    // implementation of check_sequence_number function
+}
+
+fn match_deletes_to_data_file(&self, data_entry: &ManifestEntry, positional_delete_entries: &SortedList) -> VecManifestEntry> {
+    // implementation of match_deletes_to_data_file function
+}
+```
+
+Note that some functions like `build_manifest_evaluators`, `build_partition_evaluators`, `min_data_file_sequence_number`, `open_manifest`, `check_sequence_number`, and `match_deletes_to_data_file` are not implemented here as they are not provided in the given Python code. You need to implement them according to your needs.</translated function>Here is the Rust translation of the provided Python function:
+
+```rust
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::visitors::manifest_evaluator::ManifestEvaluator;
+use crate::io::FileIO;
+use crate::spec::{DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef, TableMetadataRef};
+use crate::table::Table;
+use async_stream::try_stream;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+pub async fn plan_files(&self) -> Result<FileScanTaskStream> {
+    let snapshot = self.snapshot()?;
+    if snapshot.is_none() {
+        return Ok(FileScanTaskStream::new());
+    }
+
+    let manifest_evaluators = self.build_manifest_evaluators();
+    let manifests = snapshot.manifests(self.io())
+       .into_iter()
+       .filter(|manifest| manifest_evaluators.contains_key(&manifest.partition_spec_id) && manifest_evaluators[&manifest.partition_spec_id](manifest));
+
+    let partition_evaluators = self.build_partition_evaluators();
+    let metrics_evaluator = InclusiveMetricsEvaluator::new(self.table_metadata().schema(), self.row_filter(), self.case_sensitive(), self.options().get("include_empty_files") == "true").eval;
+
+    let min_data_sequence_number = self.min_data_file_sequence_number(manifests)?;
+    let mut data_entries = Vec::new();
+    let mut positional_delete_entries = SortedList::new();
+
+    let executor = ExecutorFactory::get_or_create();
+    for manifest_entry in executor.map(
+        |args| self.open_manifest(*args),
+        [
+            (
+                self.io(),
+                manifest,
+                partition_evaluators[&manifest.partition_spec_id],
+                metrics_evaluator,
+            )
+            for manifest in manifests
+            if self.check_sequence_number(min_data_sequence_number, manifest)
+        ],
+    ) {
+        let data_file = manifest_entry.data_file();
+        match data_file.content_type() {
+            DataContentType::Data => {
+                data_entries.push(manifest_entry);
+            }
+            DataContentType::PositionDeletes => {
+                positional_delete_entries.add(manifest_entry);
+            }
+            DataContentType::EqualityDeletes => {
+                return Err(Error::new(ErrorKind::Unsupported, "PyIceberg does not yet support equality deletes"));
+            }
+            _ => {
+                return Err(Error::new(ErrorKind::Unsupported, format!("Unknown DataFileContent ({})", data_file.content_type())));
+            }
+        }
+    }
+
+    Ok(FileScanTaskStream::new(
+        data_entries.into_iter().map(|data_entry| FileScanTask::new(data_entry.data_file(), self.match_deletes_to_data_file(data_entry, positional_delete_entries))),
+    ))
+}
+
+fn build_manifest_evaluators(&self) -> HashMap<i32, ManifestEvaluator> {
+    let mut manifest_evaluators = HashMap::new();
+    for manifest in self.snapshot().manifests(self.io()) {
+        manifest_evaluators.entry(manifest.partition_spec_id).or_insert(self.build_manifest_evaluator(manifest));
+    }
+    manifest_evaluators
+}
+
+fn build_partition_evaluators(&self) -> HashMap<i32, PartitionEvaluator> {
+    let mut partition_evaluators = HashMap::new();
+    for manifest in self.snapshot().manifests(self.io()) {
+        partition_evaluators.entry(manifest.partition_spec_id).or_insert(self.build_partition_evaluator(manifest));
+    }
+    partition_evaluators
+}
+
+fn min_data_file_sequence_number(&self, manifests: VecManifestFile>) -> Resulti32> {
+    let mut min_sequence_number = i32::MAX;
+    for manifest in manifests {
+        if manifest.content_type() == ManifestContentType::Data {
+            let sequence_number = manifest.sequence_number();
+            if sequence_number < min_sequence_number {
+                min_sequence_number = sequence_number;
+            }
+        }
+    }
+    Ok(min_sequence_number)
+}
+
+fn open_manifest(&self, args: (FileIO, ManifestFile, PartitionEvaluator, MetricsEvaluator)) -> ResultManifestEntry> {
+    // implementation of open_manifest function
+}
+
+fn check_sequence_number(&self, min_sequence_number: i32, manifest: &ManifestFile) -> bool {
+    // implementation of check_sequence_number function
+}
+
+fn match_deletes_to_data_file(&self, data_entry: &ManifestEntry, positional_delete_entries: &SortedList) -> VecManifestEntry> {
+    // implementation of match_deletes_to_data_file function
+}
+```
+
+Note that some functions like `build_manifest_evaluators`, `build_partition_evaluators`, `min_data_file_sequence_number`, `open_manifest`, `check_sequence_number`, and `match_deletes_to_data_file` are not implemented here as they are not provided in the given Python code. You need to implement them according to your needs.

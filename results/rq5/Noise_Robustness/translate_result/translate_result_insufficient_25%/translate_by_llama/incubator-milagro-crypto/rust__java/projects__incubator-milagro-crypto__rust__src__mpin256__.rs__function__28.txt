@@ -1,0 +1,575 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_KEY(int sha,byte[] G1,byte[] G2,int pin,byte[] R,byte[] X,byte[] H,byte[] wCID,byte[] CK)
+	{
+		byte[] t;
+
+		FP48 g1=FP48.fromBytes(G1);
+		FP48 g2=FP48.fromBytes(G2);
+		BIG z=BIG.fromBytes(R);
+		BIG x=BIG.fromBytes(X);
+		BIG h=BIG.fromBytes(H);
+
+		ECP W=ECP.fromBytes(wCID);
+		if (W.is_infinity()) return INVALID_POINT; 
+
+		W=PAIR256.G1mul(W,x);
+
+//		FP2 f=new FP2(new BIG(ROM.Fra),new BIG(ROM.Frb));
+		BIG r=new BIG(ROM.CURVE_Order);
+//		BIG q=new BIG(ROM.Modulus);
+
+		z.add(h);	//new
+		z.mod(r);
+
+		g2.pinpow(pin,PBLEN);
+		g1.mul(g2);
+
+		FP16 c=g1.compow(z,r);
+
+		t=mpin_hash(sha,c,W);
+
+		for (int i=0;i<ECP.AESKEY;i++) CK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+fn hash(sha: usize, c: &mut FP16, U: &mut ECP, r: &mut [u8]) -> bool {
+    let mut w: [u8; EFS] = [0; EFS];
+    let mut t: [u8; 18 * EFS] = [0; 18 * EFS];
+
+    c.geta().geta().geta().geta().to_bytes(&mut w);
+    for i in 0..EFS {
+        t[i] = w[i]
+    }
+    c.geta().geta().geta().getb().to_bytes(&mut w);
+    for i in EFS..2 * EFS {
+        t[i] = w[i - EFS]
+    }
+    c.geta().geta().getb().geta().to_bytes(&mut w);
+    for i in 2 * EFS..3 * EFS {
+        t[i] = w[i - 2 * EFS]
+    }
+    c.geta().geta().getb().getb().to_bytes(&mut w);
+    for i in 3 * EFS..4 * EFS {
+        t[i] = w[i - 3 * EFS]
+    }
+    c.geta().getb().geta().geta().to_bytes(&mut w);
+    for i in 4 * EFS..5 * EFS {
+        t[i] = w[i - 4 * EFS]
+    }
+    c.geta().getb().geta().getb().to_bytes(&mut w);
+    for i in 5 * EFS..6 * EFS {
+        t[i] = w[i - 5 * EFS]
+    }
+    c.geta().getb().getb().geta().to_bytes(&mut w);
+    for i in 6 * EFS..7 * EFS {
+        t[i] = w[i - 6 * EFS]
+    }
+    c.geta().getb().getb().getb().to_bytes(&mut w);
+    for i in 7 * EFS..8 * EFS {
+        t[i] = w[i - 7 * EFS]
+    }
+
+    c.getb().geta().geta().geta().to_bytes(&mut w);
+    for i in 8 * EFS..9 * EFS {
+        t[i] = w[i - 8 * EFS]
+    }
+    c.getb().geta().geta().getb().to_bytes(&mut w);
+    for i in 9 * EFS..10 * EFS {
+        t[i] = w[i - 9 * EFS]
+    }
+    c.getb().geta().getb().geta().to_bytes(&mut w);
+    for i in 10 * EFS..11 * EFS {
+        t[i] = w[i - 10 * EFS]
+    }
+    c.getb().geta().getb().getb().to_bytes(&mut w);
+    for i in 11 * EFS..12 * EFS {
+        t[i] = w[i - 11 * EFS]
+    }
+    c.getb().getb().geta().geta().to_bytes(&mut w);
+    for i in 12 * EFS..13 * EFS {
+        t[i] = w[i - 12 * EFS]
+    }
+    c.getb().getb().geta().getb().to_bytes(&mut w);
+    for i in 13 * EFS..14 * EFS {
+        t[i] = w[i - 13 * EFS]
+    }
+    c.getb().getb().getb().geta().to_bytes(&mut w);
+    for i in 14 * EFS..15 * EFS {
+        t[i] = w[i - 14 * EFS]
+    }
+    c.getb().getb().getb().getb().to_bytes(&mut w);
+    for i in 15 * EFS..16 * EFS {
+        t[i] = w[i - 15 * EFS]
+    }
+
+    U.getx().to_bytes(&mut w);
+    for i in 16 * EFS..17 * EFS {
+        t[i] = w[i - 16 * EFS]
+    }
+    U.gety().to_bytes(&mut w);
+    for i in 17 * EFS..18 * EFS {
+        t[i] = w[i - 17 * EFS]
+    }
+
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    return false;
+}
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP48::from_bytes(&g1);
+    let mut g2 = FP48::from_bytes(&g2);
+    let mut z = Big::from_bytes(&r);
+    let mut x = Big::from_bytes(&x);
+    let h = Big::from_bytes(&h);
+
+    let mut W = ECP::from_bytes(&wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    W = pair256::g1mul(&mut W, &mut x);
+
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+
+    z.add(&h); //new
+    z.rmod(&mut r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&mut g2);
+
+    let mut c = g1.compow(&z, &mut r);
+
+    hash(sha, &mut c, &mut W, ck);
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP48::from_bytes(g1);
+    let mut g2 = FP48::from_bytes(g2);
+    let mut z = BIG::from_bytes(r);
+    let mut x = BIG::from_bytes(x);
+    let mut h = BIG::from_bytes(h);
+
+    let mut w = ECP::from_bytes(wcid);
+    if w.is_infinity() {
+        return -1;
+    }
+
+    w = g1mul(&w, x);
+
+    z.add(&h);
+    z.rmod(&rom::CURVE_ORDER);
+
+    g2.pinpow(pin, PBLEN);
+    g1.mul(&g2);
+
+    let mut c = g1.compow(z, &rom::CURVE_ORDER);
+
+    let mut t = [0; 18 * EFS];
+    c.geta().geta().geta().geta().to_bytes(&mut t);
+    for i in 0..EFS {
+        t[i] = t[i];
+    }
+    c.geta().geta().geta().getb().to_bytes(&mut t);
+    for i in EFS..2 * EFS {
+        t[i] = t[i - EFS];
+    }
+    c.geta().geta().getb().geta().to_bytes(&mut t);
+    for i in 2 * EFS..3 * EFS {
+        t[i] = t[i - 2 * EFS];
+    }
+    c.geta().get().getb().geta().getb().to_bytes(&mut t);
+    for i in 3 * EFS..4 * EFS {
+        t[i] = t[i - 3 * EFS];
+    }
+    c.geta().getb().get().geta().a().to_bytes(&mut t);
+    for i in 4 * EFS..5 * EFS {
+        t[i] = t[i - 4 * EFS];
+    }
+    c.geta().getb().get().get().a().b().to_bytes(&mut t);
+    for i in 5 * EFS..6 * EFS {
+        t[i] = t[i - 5 * EFS];
+    }
+    c.geta().get().b().get().get().b().a().to_bytes(&mut t);
+    for i in 6 * EFS..7 * EFS {
+        t[i] = t[i -6 * EFS];
+    }
+    c.geta().getb().get().get().b().b().to_bytes(&mut t);
+    for i in 7 * EFS..8 * EFS {
+        t[i] = t[i -7 * EFS];
+    }
+
+    c.getb().geta().get().get().geta().a().to_bytes(&mut t);
+    for i in 8 * EFS..9 * EFS {
+        t[i] = t[i - 8 * EFS];
+    }
+    c.getb().geta().get().get().geta().b().to_bytes(&mut t);
+    for i in 9 * EFS..10 * EFS {
+        t[i] = t[i -9 * EFS];
+    }
+    c.getb().get().a().get().getb().geta().to_bytes(&mut t);
+    for i in 10 * EFS..11 * EFS {
+        t[i] = t[i -10 * EFS];
+    }
+    c.getb().geta().get().getb().get().a().to_bytes(&mut t);
+    for i in 11 * EFS..12 * EFS {
+        t[i] = t[i -11 EFS];
+    }
+    c.getb().get().geta().get().get().a().bto_bytes(&mut t);
+    for i in 12 * EFS..13 * EFS {
+        t[i] = t[i -12 EFS];
+    }
+    c.getb().get().geta().getb().get().a().to_bytes(&mut t);
+    for i in 13 EFS..14 * EFS {
+        t[i] = t[i -13 EFS];
+    }
+    c.getb().get().get().a().get().get().a().bto_bytes(&mut t);
+    for i in 14 EFS..15 EFS {
+        t[i] = t[i -14 EFS];
+    }
+    c.getb().get().get().geta().get().get().a().bto_bytes(&mut t);
+    for i in 15 EFS..16 EFS {
+        t[i] = t[i -15 EFS];
+    }
+
+    w.getx().to_bytes(&mut t);
+    for i in 16 * EFS..17 * EFS {
+        t[i] = t[i -16 EFS];
+    }
+    w.gety().to_bytes(&mut t);
+    for i in 17 * EFS..18 EFS {
+        t[i] = t[i -17 EFS];
+    }
+
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            ck[i] = sh[i];
+        }
+        return 0;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            ck[i] = sh[i];
+        }
+        return 0;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            ck[i] = sh[i];
+        }
+        return 0;
+    }
+    return-1;
+}
+```
+
+Note that I've assumed that `FP48`, `BIG`, `ECP`, `FP16`, `FP`, `ECP`, `ECP8`, `FP`, `pair256`, `rom`, `HASH256`, `HASH384`, `HASH512`, `RAND`, and `test_utils` are all defined in the same crate as the function `client_key`. If they are defined in a different crate, you will need to adjust the imports accordingly.</translated function>Here is the translated Rust function:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP48::from_bytes(g1);
+    let mut g2 = FP48::from_bytes(g2);
+    let mut z = BIG::from_bytes(r);
+    let mut x = BIG::from_bytes(x);
+    let mut h = BIG::from_bytes(h);
+
+    let mut w = ECP::from_bytes(wcid);
+    if w.is_infinity() {
+        return -1;
+    }
+
+    w = g1mul(&w, x);
+
+    z.add(&h);
+    z.rmod(&rom::CURVE_ORDER);
+
+    g2.pinpow(pin, PBLEN);
+    g1.mul(&g2);
+
+    let mut c = g1.compow(z, &rom::CURVE_ORDER);
+
+    let mut t = [0; 18 * EFS];
+    c.geta().geta().geta().geta().to_bytes(&mut t);
+    for i in 0..EFS {
+        t[i] = t[i];
+    }
+    c.geta().geta().geta().getb().to_bytes(&mut t);
+    for i in EFS..2 * EFS {
+        t[i] = t[i - EFS];
+    }
+    c.geta().geta().getb().geta().to_bytes(&mut t);
+    for i in 2 * EFS..3 * EFS {
+        t[i] = t[i - 2 * EFS];
+    }
+    c.geta().get().getb().geta().getb().to_bytes(&mut t);
+    for i in 3 * EFS..4 * EFS {
+        t[i] = t[i - 3 * EFS];
+    }
+    c.geta().getb().get().geta().a().to_bytes(&mut t);
+    for i in 4 * EFS..5 * EFS {
+        t[i] = t[i - 4 * EFS];
+    }
+    c.geta().getb().get().get().a().b().to_bytes(&mut t);
+    for i in 5 * EFS..6 * EFS {
+        t[i] = t[i - 5 * EFS];
+    }
+    c.geta().get().b().get().get().b().a().to_bytes(&mut t);
+    for i in 6 * EFS..7 * EFS {
+        t[i] = t[i -6 * EFS];
+    }
+    c.geta().getb().get().get().b().b().to_bytes(&mut t);
+    for i in 7 * EFS..8 * EFS {
+        t[i] = t[i -7 * EFS];
+    }
+
+    c.getb().geta().get().get().geta().a().to_bytes(&mut t);
+    for i in 8 * EFS..9 * EFS {
+        t[i] = t[i - 8 * EFS];
+    }
+    c.getb().geta().get().get().geta().b().to_bytes(&mut t);
+    for i in 9 * EFS..10 * EFS {
+        t[i] = t[i -9 * EFS];
+    }
+    c.getb().get().a().get().getb().geta().to_bytes(&mut t);
+    for i in 10 * EFS..11 * EFS {
+        t[i] = t[i -10 * EFS];
+    }
+    c.getb().geta().get().getb().get().a().to_bytes(&mut t);
+    for i in 11 * EFS..12 * EFS {
+        t[i] = t[i -11 EFS];
+    }
+    c.getb().get().geta().get().get().a().bto_bytes(&mut t);
+    for i in 12 * EFS..13 * EFS {
+        t[i] = t[i -12 EFS];
+    }
+    c.getb().get().geta().getb().get().a().to_bytes(&mut t);
+    for i in 13 EFS..14 * EFS {
+        t[i] = t[i -13 EFS];
+    }
+    c.getb().get().get().a().get().get().a().bto_bytes(&mut t);
+    for i in 14 EFS..15 EFS {
+        t[i] = t[i -14 EFS];
+    }
+    c.getb().get().get().geta().get().get().a().bto_bytes(&mut t);
+    for i in 15 EFS..16 EFS {
+        t[i] = t[i -15 EFS];
+    }
+
+    w.getx().to_bytes(&mut t);
+    for i in 16 * EFS..17 * EFS {
+        t[i] = t[i -16 EFS];
+    }
+    w.gety().to_bytes(&mut t);
+    for i in 17 * EFS..18 EFS {
+        t[i] = t[i -17 EFS];
+    }
+
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            ck[i] = sh[i];
+        }
+        return 0;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            ck[i] = sh[i];
+        }
+        return 0;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            ck[i] = sh[i];
+        }
+        return 0;
+    }
+    return-1;
+}
+```
+
+Note that I've assumed that `FP48`, `BIG`, `ECP`, `FP16`, `FP`, `ECP`, `ECP8`, `FP`, `pair256`, `rom`, `HASH256`, `HASH384`, `HASH512`, `RAND`, and `test_utils` are all defined in the same crate as the function `client_key`. If they are defined in a different crate, you will need to adjust the imports accordingly.

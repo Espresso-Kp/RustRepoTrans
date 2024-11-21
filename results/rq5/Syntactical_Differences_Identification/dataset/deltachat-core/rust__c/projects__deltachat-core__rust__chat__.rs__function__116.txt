@@ -1,0 +1,89 @@
+<path>
+projects/deltachat-core/rust/chat.rs
+</path>
+<function>
+pub async fn get_chat_media(
+    context: &Context,
+    chat_id: Option<ChatId>,
+    msg_type: Viewtype,
+    msg_type2: Viewtype,
+    msg_type3: Viewtype,
+) -> Result<Vec<MsgId>> {
+    // TODO This query could/should be converted to `AND type IN (?, ?, ?)`.
+    let list = context
+        .sql
+        .query_map(
+            "SELECT id
+               FROM msgs
+              WHERE (1=? OR chat_id=?)
+                AND chat_id != ?
+                AND (type=? OR type=? OR type=?)
+                AND hidden=0
+              ORDER BY timestamp, id;",
+            (
+                chat_id.is_none(),
+                chat_id.unwrap_or_else(|| ChatId::new(0)),
+                DC_CHAT_ID_TRASH,
+                msg_type,
+                if msg_type2 != Viewtype::Unknown {
+                    msg_type2
+                } else {
+                    msg_type
+                },
+                if msg_type3 != Viewtype::Unknown {
+                    msg_type3
+                } else {
+                    msg_type
+                },
+            ),
+            |row| row.get::<_, MsgId>(0),
+            |ids| Ok(ids.flatten().collect()),
+        )
+        .await?;
+    Ok(list)
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chat.c
+</path>
+<function>
+ * The result must be dc_array_unref()'d
+ *
+ * The list is already sorted and starts with the oldest message.
+ * Clients should not try to re-sort the list as this would be an expensive action
+ * and would result in inconsistencies between clients.
+ *
+ * @memberof dc_context_t
+ * @param context The context object as returned from dc_context_new().
+ * @param chat_id The chat ID to get all messages with media from.
+ * @param msg_type Specify a message type to query here, one of the DC_MSG_* constats.
+ * @param msg_type2 Alternative message type to search for. 0 to skip.
+ * @param msg_type3 Alternative message type to search for. 0 to skip.
+ * @return An array with messages from the given chat ID that have the wanted message types.
+ */
+dc_array_t* dc_get_chat_media(dc_context_t* context, uint32_t chat_id,
+                              int msg_type, int msg_type2, int msg_type3)
+{
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		return NULL;
+	}
+
+	dc_array_t* ret = dc_array_new(context, 100);
+
+	sqlite3_stmt* stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT id FROM msgs WHERE chat_id=? AND chat_id != ? AND (type=? OR type=? OR type=?) ORDER BY timestamp, id;");
+	sqlite3_bind_int(stmt, 1, chat_id);
+    sqlite3_bind_int(stmt, 2, DC_CHAT_ID_TRASH);
+	sqlite3_bind_int(stmt, 3, msg_type);
+	sqlite3_bind_int(stmt, 4, msg_type2>0? msg_type2 : msg_type);
+	sqlite3_bind_int(stmt, 5, msg_type3>0? msg_type3 : msg_type);
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+	sqlite3_finalize(stmt);
+
+	return ret;
+}
+</function>

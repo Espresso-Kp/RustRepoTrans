@@ -1,0 +1,54 @@
+<path>
+projects/iceberg/rust/crates/iceberg/src/transaction.rs
+</path>
+<function>
+    pub fn upgrade_table_version(mut self, format_version: FormatVersion) -> Result<Self> {
+        let current_version = self.table.metadata().format_version();
+        match current_version.cmp(&format_version) {
+            Ordering::Greater => {
+                return Err(Error::new(
+                    ErrorKind::DataInvalid,
+                    format!(
+                        "Cannot downgrade table version from {} to {}",
+                        current_version, format_version
+                    ),
+                ));
+            }
+            Ordering::Less => {
+                self.append_updates(vec![UpgradeFormatVersion { format_version }])?;
+            }
+            Ordering::Equal => {
+                // Do nothing.
+            }
+        }
+        Ok(self)
+    }
+</function>
+------
+
+<path>
+projects/iceberg/java/core/src/main/java/org/apache/iceberg/TableMetadata.java
+</path>
+<function>
+    public Builder upgradeFormatVersion(int newFormatVersion) {
+      Preconditions.checkArgument(
+          newFormatVersion <= SUPPORTED_TABLE_FORMAT_VERSION,
+          "Cannot upgrade table to unsupported format version: v%s (supported: v%s)",
+          newFormatVersion,
+          SUPPORTED_TABLE_FORMAT_VERSION);
+      Preconditions.checkArgument(
+          newFormatVersion >= formatVersion,
+          "Cannot downgrade v%s table to v%s",
+          formatVersion,
+          newFormatVersion);
+
+      if (newFormatVersion == formatVersion) {
+        return this;
+      }
+
+      this.formatVersion = newFormatVersion;
+      changes.add(new MetadataUpdate.UpgradeFormatVersion(newFormatVersion));
+
+      return this;
+    }
+</function>

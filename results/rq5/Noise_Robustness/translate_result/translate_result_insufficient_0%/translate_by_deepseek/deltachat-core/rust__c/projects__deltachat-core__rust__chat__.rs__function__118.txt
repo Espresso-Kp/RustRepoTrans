@@ -1,0 +1,186 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+dc_array_t* dc_get_chat_contacts(dc_context_t* context, uint32_t chat_id)
+{
+	/* Normal chats do not include SELF.  Group chats do (as it may happen that one is deleted from a
+	groupchat but the chats stays visible, moreover, this makes displaying lists easier) */
+	dc_array_t*   ret = dc_array_new(context, 100);
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT cc.contact_id FROM chats_contacts cc"
+			" LEFT JOIN contacts c ON c.id=cc.contact_id"
+			" WHERE cc.chat_id=?"
+			" ORDER BY c.id=1, c.last_seen DESC, c.id DESC;");
+	sqlite3_bind_int(stmt, 1, chat_id);
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> {
+    // Normal chats do not include SELF.  Group chats do (as it may happen that one is deleted from a
+    // groupchat but the chats stays visible, moreover, this makes displaying lists easier)
+
+    let list = context
+        .sql
+        .query_map(
+            "SELECT cc.contact_id
+               FROM chats_contacts cc
+               LEFT JOIN contacts c
+                      ON c.id=cc.contact_id
+              WHERE cc.chat_id=?
+              ORDER BY c.id=1, c.last_seen DESC, c.id DESC;",
+            (chat_id,),
+            |row| row.get::<_, ContactId>(0),
+            |ids| ids.collect::<Result<Vec<_>, _>>().map_err(Into::into),
+        )
+        .await?;
+
+    Ok(list)
+}
+</function>
+<translated function>
+ ```rust
+use crate::context::Context;
+use crate::contact::ContactId;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> {
+    let ret = Arc::new(Mutex::new(Vec::new()));
+    let context_clone = context.clone();
+    let chat_id_clone = chat_id.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let mut ret = Vec::new();
+        let stmt = context.sql.prepare(
+            "SELECT cc.contact_id FROM chats_contacts cc \
+             LEFT JOIN contacts c ON c.id=cc.contact_id \
+             WHERE cc.chat_id=? \
+             ORDER BY c.id=1, c.last_seen DESC, c.id DESC;",
+        )?;
+        stmt.bind(&[Value::Integer(chat_id_clone as i64)])?;
+
+        while let Some(row) = stmt.next()? {
+            ret.push(row.get::<_, i64>(0)? as ContactId);
+        }
+
+        Ok(ret)
+    })
+    .await?
+    .unwrap()
+}
+```</translated function> ```rust
+use crate::context::Context;
+use crate::contact::ContactId;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> {
+    let ret = Arc::new(Mutex::new(Vec::new()));
+    let context_clone = context.clone();
+    let chat_id_clone = chat_id.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let mut ret = Vec::new();
+        let stmt = context.sql.prepare(
+            "SELECT cc.contact_id FROM chats_contacts cc \
+             LEFT JOIN contacts c ON c.id=cc.contact_id \
+             WHERE cc.chat_id=? \
+             ORDER BY c.id=1, c.last_seen DESC, c.id DESC;",
+        )?;
+        stmt.bind(&[Value::Integer(chat_id_clone as i64)])?;
+
+        while let Some(row) = stmt.next()? {
+            ret.push(row.get::<_, i64>(0)? as ContactId);
+        }
+
+        Ok(ret)
+    })
+    .await?
+    .unwrap()
+}
+```

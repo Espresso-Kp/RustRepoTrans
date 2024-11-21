@@ -1,0 +1,101 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int dc_get_archived_cnt(dc_context_t* context)
+{
+	int ret = 0;
+	sqlite3_stmt* stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM chats WHERE blocked=0 AND archived=1;");
+	if (sqlite3_step(stmt)==SQLITE_ROW) {
+		ret = sqlite3_column_int(stmt, 0);
+	}
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_archived_cnt(context: &Context) -> Result<usize> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+pub async fn count(&self, query: &str, params: impl rusqlite::Params + Send) -> Result<usize> {
+        let count: isize = self.query_row(query, params, |row| row.get(0)).await?;
+        Ok(usize::try_from(count)?)
+    }
+pub enum Blocked {
+    #[default]
+    Not = 0,
+    Yes = 1,
+    Request = 2,
+}
+pub enum ChatVisibility {
+    /// Chat is neither archived nor pinned.
+    Normal = 0,
+
+    /// Chat is archived.
+    Archived = 1,
+
+    /// Chat is pinned to the top of the chatlist.
+    Pinned = 2,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use anyhow::{ensure, Context as _, Result};
+use once_cell::sync::Lazy;
+use crate::chat::{update_special_chat_names, Chat, ChatId, ChatVisibility};
+use crate::constants::{
+    Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK, DC_GCL_ADD_ALLDONE_HINT,
+    DC_GCL_ARCHIVED_ONLY, DC_GCL_FOR_FORWARDING, DC_GCL_NO_SPECIALS,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::message::{Message, MessageState, MsgId};
+use crate::param::{Param, Params};
+use crate::stock_str;
+use crate::summary::Summary;
+use crate::tools::IsNoneOrEmpty;
+use super::*;
+use crate::chat::{
+        add_contact_to_chat, create_group_chat, get_chat_contacts, remove_contact_from_chat,
+        send_text_msg, ProtectionStatus,
+    };
+use crate::message::Viewtype;
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::TestContext;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_archived_cnt(context: &Context) -> Result<usize> {
+    let count = context
+        .sql
+        .count(
+            "SELECT COUNT(*) FROM chats WHERE blocked!=? AND archived=?;",
+            (Blocked::Yes, ChatVisibility::Archived),
+        )
+        .await?;
+    Ok(count)
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+pub async fn get_archived_cnt(context: &Context) -> Result<usize> {
+    let query = "SELECT COUNT(*) FROM chats WHERE blocked=? AND archived=?";
+    let params = rusqlite::params![Blocked::Not as i32, ChatVisibility::Archived as i32];
+    
+    context.inner.sql.count(query, params).await
+}</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+pub async fn get_archived_cnt(context: &Context) -> Result<usize> {
+    let query = "SELECT COUNT(*) FROM chats WHERE blocked=? AND archived=?";
+    let params = rusqlite::params![Blocked::Not as i32, ChatVisibility::Archived as i32];
+    
+    context.inner.sql.count(query, params).await
+}

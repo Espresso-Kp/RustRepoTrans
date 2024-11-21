@@ -1,0 +1,262 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def coherence_ratio(
+    decoded_sequence: str, threshold: float = 0.1, lg_inclusion: Optional[str] = None
+) -> CoherenceMatches:
+    """
+    Detect ANY language that can be identified in given sequence. The sequence will be analysed by layers.
+    A layer = Character extraction by alphabets/ranges.
+    """
+
+    results: List[Tuple[str, float]] = []
+    ignore_non_latin: bool = False
+
+    sufficient_match_count: int = 0
+
+    lg_inclusion_list = lg_inclusion.split(",") if lg_inclusion is not None else []
+    if "Latin Based" in lg_inclusion_list:
+        ignore_non_latin = True
+        lg_inclusion_list.remove("Latin Based")
+
+    for layer in alpha_unicode_split(decoded_sequence):
+        sequence_frequencies: TypeCounter[str] = Counter(layer)
+        most_common = sequence_frequencies.most_common()
+
+        character_count: int = sum(o for c, o in most_common)
+
+        if character_count <= TOO_SMALL_SEQUENCE:
+            continue
+
+        popular_character_ordered: List[str] = [c for c, o in most_common]
+
+        for language in lg_inclusion_list or alphabet_languages(
+            popular_character_ordered, ignore_non_latin
+        ):
+            ratio: float = characters_popularity_compare(
+                language, popular_character_ordered
+            )
+
+            if ratio < threshold:
+                continue
+            elif ratio >= 0.8:
+                sufficient_match_count += 1
+
+            results.append((language, round(ratio, 4)))
+
+            if sufficient_match_count >= 3:
+                break
+
+    return sorted(
+        filter_alt_coherence_matches(results), key=lambda x: x[1], reverse=True
+    )
+</python function>
+<rust function signature>
+pub(crate) fn coherence_ratio(
+    decoded_sequence: String,
+    threshold: Option<OrderedFloat<f32>>,
+    include_languages: Option<Vec<&'static Language>>,
+) -> Result<CoherenceMatches, String> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn coherence_ratio(
+    decoded_sequence: String,
+    threshold: Option<OrderedFloat<f32>>,
+    include_languages: Option<Vec<&'static Language>>,
+) -> Result<CoherenceMatches, String> {
+    let threshold = f32::from(threshold.unwrap_or(OrderedFloat(0.1)));
+    let mut include_languages: Vec<&Language> = include_languages.unwrap_or_default();
+    let ignore_non_latin = include_languages == vec![&Language::Unknown];
+    if ignore_non_latin {
+        include_languages.clear();
+    }
+
+    let mut results: CoherenceMatches = vec![];
+    let mut sufficient_match_count: u64 = 0;
+
+    for layer in alpha_unicode_split(&decoded_sequence) {
+        if layer.chars().count() <= TOO_SMALL_SEQUENCE {
+            continue;
+        }
+        let most_common = layer.chars().collect::<Counter<_>>().most_common_ordered();
+        let popular_character_ordered: Vec<char> = most_common.iter().map(|(ch, _)| *ch).collect();
+
+        let languages = if include_languages.is_empty() {
+            alphabet_languages(&popular_character_ordered, ignore_non_latin)
+        } else {
+            include_languages.clone()
+        };
+
+        let popular_character_ordered_as_string: String =
+            popular_character_ordered.iter().collect();
+
+        // Convert the String into a &str
+        for language in languages {
+            let ratio: f32 =
+                characters_popularity_compare(language, &popular_character_ordered_as_string)?;
+
+            match ratio {
+                r if r < threshold => continue,
+                r if r >= 0.8 => sufficient_match_count += 1,
+                _ => {}
+            }
+
+            results.push(CoherenceMatch {
+                language,
+                score: ratio,
+            });
+
+            if sufficient_match_count >= 3 {
+                break;
+            }
+        }
+    }
+    results = filter_alt_coherence_matches(&results);
+    results.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+    Ok(results)
+}
+</function>
+<translated function>
+Here is the translated Python function into Rust according to the provided Rust function signature, related variables, functions, and data type declarations:
+
+```rust
+pub(crate) fn coherence_ratio(
+    decoded_sequence: String,
+    threshold: Option<OrderedFloat<f32>>,
+    include_languages: Option<Vec<&'static Language>>,
+) -> Result<CoherenceMatches, String> {
+    let mut results: Vec<(String, f32)> = Vec::new();
+    let mut ignore_non_latin = false;
+    let mut sufficient_match_count = 0;
+
+    let include_languages_list = include_languages.unwrap_or_else(Vec::new);
+    if include_languages_list.contains(&"Latin Based") {
+        ignore_non_latin = true;
+        include_languages_list.retain(|&x| x != "Latin Based");
+    }
+
+    for layer in alpha_unicode_split(decoded_sequence) {
+        let sequence_frequencies: Counter<_> = Counter::init(layer.chars());
+        let most_common = sequence_frequencies.most_common();
+
+        let character_count: usize = most_common.iter().map(|(_, &val)| val).sum();
+
+        if character_count <= TOO_SMALL_SEQUENCE {
+            continue;
+        }
+
+        let mut popular_character_ordered: Vec<char> = most_common.iter().map(|(&key, _)| key).collect();
+
+        for language in include_languages_list.unwrap_or(alphabet_languages(
+            &popular_character_ordered, ignore_non_latin
+        )) {
+            let ratio: f32 = characters_popularity_compare(
+                &language, &popular_character_ordered
+            );
+
+            if ratio < threshold.unwrap_or(OrderedFloat::from_inner(0.1)).into_inner() {
+                continue;
+            } else if ratio >= 0.8 {
+                sufficient_match_count += 1;
+            }
+
+            results.push((language.to_string(), ratio.round()));
+
+            if sufficient_match_count >= 3 {
+                break;
+            }
+        }
+    }
+
+    Ok(results.into_iter()
+        .filter(filter_alt_coherence_matches)
+        .sorted_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .collect::<CoherenceMatches>())
+}
+```
+
+Note: This uses several helper functions (`alpha_unicode_split`, `alphabet_languages`, `characters_popularity_compare`, `filter_alt_coherence_matches`) that appear in the Python code but are not defined in the Rust code. You'll need to write or import these helper functions for this code to compile and run correctly.</translated function>Here is the translated Python function into Rust according to the provided Rust function signature, related variables, functions, and data type declarations:
+
+```rust
+pub(crate) fn coherence_ratio(
+    decoded_sequence: String,
+    threshold: Option<OrderedFloat<f32>>,
+    include_languages: Option<Vec<&'static Language>>,
+) -> Result<CoherenceMatches, String> {
+    let mut results: Vec<(String, f32)> = Vec::new();
+    let mut ignore_non_latin = false;
+    let mut sufficient_match_count = 0;
+
+    let include_languages_list = include_languages.unwrap_or_else(Vec::new);
+    if include_languages_list.contains(&"Latin Based") {
+        ignore_non_latin = true;
+        include_languages_list.retain(|&x| x != "Latin Based");
+    }
+
+    for layer in alpha_unicode_split(decoded_sequence) {
+        let sequence_frequencies: Counter<_> = Counter::init(layer.chars());
+        let most_common = sequence_frequencies.most_common();
+
+        let character_count: usize = most_common.iter().map(|(_, &val)| val).sum();
+
+        if character_count <= TOO_SMALL_SEQUENCE {
+            continue;
+        }
+
+        let mut popular_character_ordered: Vec<char> = most_common.iter().map(|(&key, _)| key).collect();
+
+        for language in include_languages_list.unwrap_or(alphabet_languages(
+            &popular_character_ordered, ignore_non_latin
+        )) {
+            let ratio: f32 = characters_popularity_compare(
+                &language, &popular_character_ordered
+            );
+
+            if ratio < threshold.unwrap_or(OrderedFloat::from_inner(0.1)).into_inner() {
+                continue;
+            } else if ratio >= 0.8 {
+                sufficient_match_count += 1;
+            }
+
+            results.push((language.to_string(), ratio.round()));
+
+            if sufficient_match_count >= 3 {
+                break;
+            }
+        }
+    }
+
+    Ok(results.into_iter()
+        .filter(filter_alt_coherence_matches)
+        .sorted_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .collect::<CoherenceMatches>())
+}
+```
+
+Note: This uses several helper functions (`alpha_unicode_split`, `alphabet_languages`, `characters_popularity_compare`, `filter_alt_coherence_matches`) that appear in the Python code but are not defined in the Rust code. You'll need to write or import these helper functions for this code to compile and run correctly.

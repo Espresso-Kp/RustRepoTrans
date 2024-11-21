@@ -1,0 +1,88 @@
+<path>
+projects/deltachat-core/rust/contact.rs
+</path>
+<function>
+    pub async fn add_address_book(context: &Context, addr_book: &str) -> Result<usize> {
+        let mut modify_cnt = 0;
+
+        for (name, addr) in split_address_book(addr_book) {
+            let (name, addr) = sanitize_name_and_addr(name, addr);
+            match ContactAddress::new(&addr) {
+                Ok(addr) => {
+                    match Contact::add_or_lookup(context, &name, &addr, Origin::AddressBook).await {
+                        Ok((_, modified)) => {
+                            if modified != Modifier::None {
+                                modify_cnt += 1
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                context,
+                                "Failed to add address {} from address book: {}", addr, err
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(context, "{:#}.", err);
+                }
+            }
+        }
+        if modify_cnt > 0 {
+            context.emit_event(EventType::ContactsChanged(None));
+        }
+
+        Ok(modify_cnt)
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_contact.c
+</path>
+<function>
+ *      unless it was edited manually by dc_create_contact() before.
+ * @return The number of modified or added contacts.
+ */
+int dc_add_address_book(dc_context_t* context, const char* adr_book)
+{
+	carray* lines = NULL;
+	size_t  i = 0;
+	size_t  iCnt = 0;
+	int     sth_modified = 0;
+	int     modify_cnt = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || adr_book==NULL) {
+		goto cleanup;
+	}
+
+	if ((lines=dc_split_into_lines(adr_book))==NULL) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_begin_transaction(context->sql);
+
+		iCnt = carray_count(lines);
+		for (i = 0; i+1 < iCnt; i += 2) {
+			char* name = (char*)carray_get(lines, i);
+			char* addr = (char*)carray_get(lines, i+1);
+			dc_normalize_name(name);
+            dc_normalize_addr(addr);
+			dc_add_or_lookup_contact(context, name, addr, DC_ORIGIN_ADRESS_BOOK, &sth_modified);
+			if (sth_modified) {
+				modify_cnt++;
+			}
+		}
+
+	dc_sqlite3_commit(context->sql);
+
+	if (modify_cnt) {
+		context->cb(context, DC_EVENT_CONTACTS_CHANGED, 0, 0);
+	}
+
+cleanup:
+	dc_free_splitted_lines(lines);
+
+	return modify_cnt;
+}
+</function>

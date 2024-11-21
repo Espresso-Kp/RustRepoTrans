@@ -1,0 +1,69 @@
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn g2mul(P: &ECP8, e: &Big) -> ECP8 {
+    if rom::USE_GS_G2 {
+        let mut Q: [ECP8; 16] = [
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+        ];
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut u = gs(e);
+
+        let f = ECP8::frob_constants();
+
+        Q[0] = P.clone();
+        for i in 1..16 {
+            Q[i] = Q[i - 1].clone();
+            Q[i].frob(&f, 1);
+        }
+        for i in 0..16 {
+            let np = u[i].nbits();
+            let t = Big::modneg(&mut u[i], &q);
+            let nn = t.nbits();
+            if nn < np {
+                u[i] = t.clone();
+                Q[i].neg();
+            }
+            u[i].norm();
+        }
+
+        ECP8::mul16(&mut Q, &u)
+    } else {
+        P.mul(e)
+    }
+}
+------
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

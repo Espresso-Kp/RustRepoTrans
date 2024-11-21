@@ -1,0 +1,41 @@
+<path>
+projects/deltachat-core/rust/context.rs
+</path>
+<function>
+    pub(crate) async fn alloc_ongoing(&self) -> Result<Receiver<()>> {
+        let mut s = self.running_state.write().await;
+        ensure!(
+            matches!(*s, RunningState::Stopped),
+            "There is already another ongoing process running."
+        );
+
+        let (sender, receiver) = channel::bounded(1);
+        *s = RunningState::Running {
+            cancel_sender: sender,
+        };
+
+        Ok(receiver)
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_configure.c
+</path>
+<function>
+int dc_alloc_ongoing(dc_context_t* context)
+{
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		return 0;
+	}
+
+	if (dc_has_ongoing(context)) {
+		dc_log_warning(context, 0, "There is already another ongoing process running.");
+		return 0;
+	}
+
+	context->ongoing_running    = 1;
+	context->shall_stop_ongoing = 0;
+	return 1;
+}
+</function>

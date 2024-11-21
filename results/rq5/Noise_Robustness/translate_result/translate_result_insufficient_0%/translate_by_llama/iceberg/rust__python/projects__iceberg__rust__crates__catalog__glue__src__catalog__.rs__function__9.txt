@@ -1,0 +1,104 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def drop_namespace(self, namespace: Union[str, Identifier]) -> None:
+        """Drop a namespace.
+
+        A Glue namespace can only be dropped if it is empty.
+
+        Args:
+            namespace: Namespace identifier.
+
+        Raises:
+            NoSuchNamespaceError: If a namespace with the given name does not exist, or the identifier is invalid.
+            NamespaceNotEmptyError: If the namespace is not empty.
+        """
+        database_name = self.identifier_to_database(namespace, NoSuchNamespaceError)
+        try:
+            table_list = self.list_tables(namespace=database_name)
+        except NoSuchNamespaceError as e:
+            raise NoSuchNamespaceError(f"Database does not exist: {database_name}") from e
+
+        if len(table_list) > 0:
+            raise NamespaceNotEmptyError(f"Database {database_name} is not empty")
+
+        self.glue.delete_database(Name=database_name)
+</python function>
+<rust function signature>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+        let db_name = validate_namespace(namespace)?;
+        let table_list = self.list_tables(namespace).await?;
+
+        if !table_list.is_empty() {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} is not empty", &db_name),
+            ));
+        }
+
+        let builder = self.client.0.delete_database().name(db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    let database_name = convert_to_database(namespace)?;
+    let table_list = self.list_tables(database_name).await?;
+    if!table_list.is_empty() {
+        return Err(Error::new(ErrorKind::NamespaceNotEmptyError, format!("Database {} is not empty", database_name)));
+    }
+    self.glue.delete_database(Name = database_name).await?;
+    Ok(())
+}
+```
+Note that I've assumed that the `list_tables` method returns a `Vec` of tables, and that the `delete_database` method returns a `Result` that can be awaited. I've also assumed that the `Error` type is defined in the `crate::error` module, and that the `ErrorKind` enum is defined in the same module. If these assumptions are incorrect, please let me know and I'll adjust the code accordingly.</translated function>Here is the translated Rust function:
+```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    let database_name = convert_to_database(namespace)?;
+    let table_list = self.list_tables(database_name).await?;
+    if!table_list.is_empty() {
+        return Err(Error::new(ErrorKind::NamespaceNotEmptyError, format!("Database {} is not empty", database_name)));
+    }
+    self.glue.delete_database(Name = database_name).await?;
+    Ok(())
+}
+```
+Note that I've assumed that the `list_tables` method returns a `Vec` of tables, and that the `delete_database` method returns a `Result` that can be awaited. I've also assumed that the `Error` type is defined in the `crate::error` module, and that the `ErrorKind` enum is defined in the same module. If these assumptions are incorrect, please let me know and I'll adjust the code accordingly.

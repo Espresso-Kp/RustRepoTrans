@@ -1,0 +1,323 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+dc_array_t* dc_get_chat_contacts(dc_context_t* context, uint32_t chat_id)
+{
+	/* Normal chats do not include SELF.  Group chats do (as it may happen that one is deleted from a
+	groupchat but the chats stays visible, moreover, this makes displaying lists easier) */
+	dc_array_t*   ret = dc_array_new(context, 100);
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT cc.contact_id FROM chats_contacts cc"
+			" LEFT JOIN contacts c ON c.id=cc.contact_id"
+			" WHERE cc.chat_id=?"
+			" ORDER BY c.id=1, c.last_seen DESC, c.id DESC;");
+	sqlite3_bind_int(stmt, 1, chat_id);
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+
+pub async fn query_map<T, F, G, H>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+        mut g: G,
+    ) -> Result<H>
+    where
+        F: Send + FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+        G: Send + FnMut(rusqlite::MappedRows<F>) -> Result<H>,
+        H: Send + 'static,
+    {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let res = stmt.query_map(params, f)?;
+            g(res)
+        })
+        .await
+    }
+    
+pub struct ChatId(u32);
+
+pub struct ContactId(u32);
+
+
+pub async fn query_row<T, F>(
+        &self,
+        query: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+    ) -> Result<T>
+    where
+        F: FnOnce(&rusqlite::Row) -> rusqlite::Result<T> + Send,
+        T: Send + 'static,
+    {
+        self.call(move |conn| {
+            let res = conn.query_row(query, params, f)?;
+            Ok(res)
+        })
+        .await
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> {
+    // Normal chats do not include SELF.  Group chats do (as it may happen that one is deleted from a
+    // groupchat but the chats stays visible, moreover, this makes displaying lists easier)
+
+    let list = context
+        .sql
+        .query_map(
+            "SELECT cc.contact_id
+               FROM chats_contacts cc
+               LEFT JOIN contacts c
+                      ON c.id=cc.contact_id
+              WHERE cc.chat_id=?
+              ORDER BY c.id=1, c.last_seen DESC, c.id DESC;",
+            (chat_id,),
+            |row| row.get::<_, ContactId>(0),
+            |ids| ids.collect::<Result<Vec<_>, _>>().map_err(Into::into),
+        )
+        .await?;
+
+    Ok(list)
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> {
+    let sql = "SELECT cc.contact_id FROM chats_contacts cc
+               LEFT JOIN contacts c ON c.id=cc.contact_id
+               WHERE cc.chat_id=?
+               ORDER BY c.id=1, c.last_seen DESC, c.id DESC;";
+
+    context.inner.sql.query_map(
+        sql,
+        [chat_id.0],
+        |row| Ok(ContactId(row.get(0)?)),
+        |rows| {
+            let mut contacts = Vec::new();
+            for contact_id in rows {
+                contacts.push(contact_id?);
+            }
+            Ok(contacts)
+        },
+    )
+    .await
+}
+```
+
+This Rust function does the following:
+
+1. It uses the provided SQL query to fetch the contact IDs for the given chat.
+2. It uses the `query_map` method from the `Sql` struct, which is part of the `Context`.
+3. The function maps the SQL rows to `ContactId` structs.
+4. It collects the results into a `Vec<ContactId>`.
+5. The function returns a `Result<Vec<ContactId>>`, which aligns with the provided function signature.
+
+Note that this translation makes a few assumptions:
+
+- The `Context` struct has an `inner` field that contains the `sql` field of type `Sql`.
+- The `Sql` struct has a `query_map` method that works similarly to the one described in the provided dependencies.
+- The `ChatId` and `ContactId` structs have a public `0` field that contains the ID as a `u32`.
+
+If any of these assumptions are incorrect, you may need to adjust the code accordingly.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn get_chat_contacts(context: &Context, chat_id: ChatId) -> Result<Vec<ContactId>> {
+    let sql = "SELECT cc.contact_id FROM chats_contacts cc
+               LEFT JOIN contacts c ON c.id=cc.contact_id
+               WHERE cc.chat_id=?
+               ORDER BY c.id=1, c.last_seen DESC, c.id DESC;";
+
+    context.inner.sql.query_map(
+        sql,
+        [chat_id.0],
+        |row| Ok(ContactId(row.get(0)?)),
+        |rows| {
+            let mut contacts = Vec::new();
+            for contact_id in rows {
+                contacts.push(contact_id?);
+            }
+            Ok(contacts)
+        },
+    )
+    .await
+}
+```
+
+This Rust function does the following:
+
+1. It uses the provided SQL query to fetch the contact IDs for the given chat.
+2. It uses the `query_map` method from the `Sql` struct, which is part of the `Context`.
+3. The function maps the SQL rows to `ContactId` structs.
+4. It collects the results into a `Vec<ContactId>`.
+5. The function returns a `Result<Vec<ContactId>>`, which aligns with the provided function signature.
+
+Note that this translation makes a few assumptions:
+
+- The `Context` struct has an `inner` field that contains the `sql` field of type `Sql`.
+- The `Sql` struct has a `query_map` method that works similarly to the one described in the provided dependencies.
+- The `ChatId` and `ContactId` structs have a public `0` field that contains the ID as a `u32`.
+
+If any of these assumptions are incorrect, you may need to adjust the code accordingly.

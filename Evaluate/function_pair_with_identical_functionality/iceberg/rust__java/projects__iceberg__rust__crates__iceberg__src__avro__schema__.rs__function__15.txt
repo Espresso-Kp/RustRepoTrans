@@ -1,0 +1,109 @@
+<path>
+projects/iceberg/rust/crates/iceberg/src/avro/schema.rs
+</path>
+<function>
+    fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> {
+        let typ = match schema {
+            AvroSchema::Decimal(decimal) => {
+                Type::decimal(decimal.precision as u32, decimal.scale as u32)?
+            }
+            AvroSchema::Date => Type::Primitive(PrimitiveType::Date),
+            AvroSchema::TimeMicros => Type::Primitive(PrimitiveType::Time),
+            AvroSchema::TimestampMicros => Type::Primitive(PrimitiveType::Timestamp),
+            AvroSchema::Boolean => Type::Primitive(PrimitiveType::Boolean),
+            AvroSchema::Int => Type::Primitive(PrimitiveType::Int),
+            AvroSchema::Long => Type::Primitive(PrimitiveType::Long),
+            AvroSchema::Float => Type::Primitive(PrimitiveType::Float),
+            AvroSchema::Double => Type::Primitive(PrimitiveType::Double),
+            AvroSchema::String | AvroSchema::Enum(_) => Type::Primitive(PrimitiveType::String),
+            AvroSchema::Fixed(fixed) => {
+                if let Some(logical_type) = fixed.attributes.get(LOGICAL_TYPE) {
+                    let logical_type = logical_type.as_str().ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::DataInvalid,
+                            "logicalType in attributes of avro schema is not a string type",
+                        )
+                    })?;
+                    match logical_type {
+                        UUID_LOGICAL_TYPE => Type::Primitive(PrimitiveType::Uuid),
+                        ty => {
+                            return Err(Error::new(
+                                ErrorKind::FeatureUnsupported,
+                                format!(
+                                    "Logical type {ty} is not support in iceberg primitive type.",
+                                ),
+                            ))
+                        }
+                    }
+                } else {
+                    Type::Primitive(PrimitiveType::Fixed(fixed.size as u64))
+                }
+            }
+            AvroSchema::Bytes => Type::Primitive(PrimitiveType::Binary),
+            AvroSchema::Null => return Ok(None),
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::Unexpected,
+                    "Unable to convert avro {schema} to iceberg primitive type.",
+                ))
+            }
+        };
+
+        Ok(Some(typ))
+    }
+</function>
+------
+
+<path>
+projects/iceberg/java/core/src/main/java/org/apache/iceberg/avro/SchemaToType.java
+</path>
+<function>
+  public Type primitive(Schema primitive) {
+    // first check supported logical types
+    LogicalType logical = primitive.getLogicalType();
+    if (logical != null) {
+      String name = logical.getName();
+      if (logical instanceof LogicalTypes.Decimal) {
+        return Types.DecimalType.of(
+            ((LogicalTypes.Decimal) logical).getPrecision(),
+            ((LogicalTypes.Decimal) logical).getScale());
+
+      } else if (logical instanceof LogicalTypes.Date) {
+        return Types.DateType.get();
+
+      } else if (logical instanceof LogicalTypes.TimeMicros) {
+        return Types.TimeType.get();
+
+      } else if (logical instanceof LogicalTypes.TimestampMicros) {
+        return Types.TimestampType.get();
+
+      } else if (LogicalTypes.uuid().getName().equals(name)) {
+        return Types.UUIDType.get();
+      }
+    }
+
+    switch (primitive.getType()) {
+      case BOOLEAN:
+        return Types.BooleanType.get();
+      case INT:
+        return Types.IntegerType.get();
+      case LONG:
+        return Types.LongType.get();
+      case FLOAT:
+        return Types.FloatType.get();
+      case DOUBLE:
+        return Types.DoubleType.get();
+      case STRING:
+      case ENUM:
+        return Types.StringType.get();
+      case FIXED:
+        return Types.FixedType.ofLength(primitive.getFixedSize());
+      case BYTES:
+        return Types.BinaryType.get();
+      case NULL:
+        return null;
+    }
+
+    throw new UnsupportedOperationException("Unsupported primitive type: " + primitive);
+  }
+</function>

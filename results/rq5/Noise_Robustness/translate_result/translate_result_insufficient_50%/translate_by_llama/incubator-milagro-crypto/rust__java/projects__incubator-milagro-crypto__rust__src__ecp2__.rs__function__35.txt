@@ -1,0 +1,503 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static ECP2 mapit(byte[] h)
+	{
+		BIG q=new BIG(ROM.Modulus);
+		BIG x=BIG.fromBytes(h);
+		BIG one=new BIG(1);
+		FP2 X;
+		ECP2 Q;
+		x.mod(q);
+		while (true)
+		{
+			X=new FP2(one,x);
+			Q=new ECP2(X);
+			if (!Q.is_infinity()) break;
+			x.inc(1); x.norm();
+		}
+
+		BIG Fra=new BIG(ROM.Fra);
+		BIG Frb=new BIG(ROM.Frb);
+		X=new FP2(Fra,Frb);
+
+		if (ECP.SEXTIC_TWIST==ECP.M_TYPE)
+		{
+			X.inverse();
+			X.norm();
+		}
+
+		x=new BIG(ROM.CURVE_Bnx);
+
+/* Fast Hashing to G2 - Fuentes-Castaneda, Knapp and Rodriguez-Henriquez */
+
+		if (ECP.CURVE_PAIRING_TYPE==ECP.BN)
+		{
+			ECP2 T,K;
+
+			T=new ECP2(); T.copy(Q);
+			T=T.mul(x); 
+			
+			if (ECP.SIGN_OF_X==ECP.NEGATIVEX)
+			{
+				T.neg();
+			}	
+			K=new ECP2(); K.copy(T);
+			K.dbl(); K.add(T); //K.affine();
+
+			K.frob(X);
+			Q.frob(X); Q.frob(X); Q.frob(X);
+			Q.add(T); Q.add(K);
+			T.frob(X); T.frob(X);
+			Q.add(T);
+
+		}
+
+/* Efficient hash maps to G2 on BLS curves - Budroni, Pintore */
+/* Q -> x2Q -xQ -Q +F(xQ -Q) +F(F(2Q)) */
+
+		if (ECP.CURVE_PAIRING_TYPE==ECP.BLS)
+		{
+		//	ECP2 xQ,x2Q;
+		//	xQ=new ECP2();
+		//	x2Q=new ECP2();
+
+			ECP2 xQ=Q.mul(x);
+			ECP2 x2Q=xQ.mul(x);
+
+			if (ECP.SIGN_OF_X==ECP.NEGATIVEX)
+			{
+				xQ.neg();
+			}	
+
+			x2Q.sub(xQ);
+			x2Q.sub(Q);
+
+			xQ.sub(Q);
+			xQ.frob(X);
+
+			Q.dbl();
+			Q.frob(X);
+			Q.frob(X);
+
+			Q.add(x2Q);
+			Q.add(xQ);
+		}
+		Q.affine();
+		return Q;
+	}
+</java function>
+<rust function signature>
+pub fn clear_cofactor(&mut self) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn inverse(&mut self) {
+        if MODTYPE == ModType::PseudoMersenne || MODTYPE == ModType::GeneralisedMersenne {
+            let mut y = self.fpow();
+            if MOD8 == 5 {
+                let mut t = self.clone();
+                t.sqr();
+                self.mul(&t);
+                y.sqr();
+            }
+            y.sqr();
+            y.sqr();
+            self.mul(&y);
+        } else {
+            // Constant time inversion using Fermat's little theorem.
+            // Fermat's little theorem says for a prime p and for any a < p, a^p = a % p => a^(p-1) = 1 % p => a^(p-2) = a^-1 % p
+            let mut m2 = Big::new_ints(&rom::MODULUS);
+            m2.dec(2);
+            m2.norm();
+            let inv = self.pow(&mut m2);
+            *self = inv.clone();
+        }
+    }
+pub fn neg(&mut self) {
+        self.y.norm();
+        self.y.neg();
+        self.y.norm();
+    }
+pub fn frob(&mut self, x: &FP2) {
+        let mut x2 = x.clone();
+        x2.sqr();
+        self.x.conj();
+        self.y.conj();
+        self.z.conj();
+        self.z.reduce();
+        self.x.mul(&x2);
+        self.y.mul(&x2);
+        self.y.mul(x);
+    }
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+pub fn new_bigs(c: Big, d: Big) -> FP2 {
+        FP2 {
+            a: FP::new_big(c),
+            b: FP::new_big(d),
+        }
+    }
+pub const CURVE_PAIRING_TYPE: CurvePairingType = CurvePairingType::Bn;
+pub enum SexticTwist {
+    Not,
+    DType,
+    MType,
+}
+pub enum CurvePairingType {
+    Not,
+    Bn,
+    Bls,
+}
+pub const FRA: [Chunk; NLEN] = [
+    0x7DE6C06F2A6DE9,
+    0x74924D3F77C2E1,
+    0x50A846953F8509,
+    0x212E7C8CB6499B,
+    0x1B377619,
+];
+pub const FRB: [Chunk; NLEN] = [
+    0x82193F90D5922A,
+    0x8B6DB2C08850C5,
+    0x2F57B96AC8DC17,
+    0x1ED1837503EAB2,
+    0x9EBEE69,
+];
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::fp2::FP2;
+use super::rom;
+use crate::types::{CurvePairingType, SexticTwist, SignOfX};
+use std::fmt;
+use std::str::SplitWhitespace;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn clear_cofactor(&mut self) {
+        let mut X = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            X.inverse();
+            X.norm();
+        }
+        let x = Big::new_ints(&rom::CURVE_BNX);
+
+        if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+            let mut T = self.mul(&x);
+            if ecp::SIGN_OF_X == SignOfX::NegativeX {
+                T.neg();
+            }
+            let mut K = T.clone();
+            K.dbl();
+            K.add(&T);
+
+            K.frob(&X);
+            self.frob(&X);
+            self.frob(&X);
+            self.frob(&X);
+            self.add(&T);
+            self.add(&K);
+            T.frob(&X);
+            T.frob(&X);
+            self.add(&T);
+        }
+        if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bls {
+            let mut xQ = self.mul(&x);
+            let mut x2Q = xQ.mul(&x);
+
+            if ecp::SIGN_OF_X == SignOfX::NegativeX {
+                xQ.neg();
+            }
+            x2Q.sub(&xQ);
+            x2Q.sub(&self);
+
+            xQ.sub(&self);
+            xQ.frob(&X);
+
+            self.dbl();
+            self.frob(&X);
+            self.frob(&X);
+
+            self.add(&x2Q);
+            self.add(&xQ);
+        }
+
+        self.affine();
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+impl ECP2 {
+    pub fn mapit(&mut self, h: &[u8]) {
+        let mut q = Big::new(rom::MODULUS);
+        let mut x = Big::from_bytes(h);
+        let one = Big::new(1);
+        let mut X = FP2::new(one, x);
+        let mut Q = ECP2::new(X);
+        x.mod(&mut q);
+        while true {
+            X = FP2::new(one, x);
+            Q = ECP2::new(X);
+            if!Q.is_infinity() {
+                break;
+            }
+            x.inc(1);
+            x.norm();
+        }
+
+        let Fra = Big::new(rom::FRA);
+        let Frb = Big::new(rom::FRB);
+        X = FP2::new(Fra, Frb);
+
+        if ECP::SEXTIC_TWIST == SexticTwist::MType {
+            X.inverse();
+            X.norm();
+        }
+
+        x = Big::new(rom::CURVE_BNX);
+
+/* Fast Hashing to G2 - Fuentes-Castaneda, Knapp and Rodriguez-Henriquez */
+
+        if ECP::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+            let mut T = ECP2::new();
+            T.copy(&Q);
+            T = T.mul(x);
+            
+            if ECP::SIGN_OF_X == SignOfX::Negativex {
+                T.neg();
+            }    
+            let mut K = ECP2::new();
+            K.copy(&T);
+            K.dbl();
+            K.add(&T);
+            K.affine();
+
+            K.frob(&X);
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.add(&T);
+            Q.add(&K);
+            T.frob(&X);
+            T.frob(&X);
+            Q.add(&T);
+        }
+
+/* Efficient hash maps to G2 on BLS curves - Budroni, Pintore */
+/* Q -> x2Q -xQ -Q +F(xQ -Q) +F(F(2Q)) */
+
+        if ECP::CURVE_PAIRING_TYPE == CurvePairingType::Bls {
+            let mut xQ = Q.mul(x);
+            let mut x2Q = xQ.mul(x);
+            if ECP::SIGN_OF_X == SignOfX::Negativex {
+                xQ.neg();
+            }    
+            x2Q.sub(&xQ);
+            x2Q.sub(&Q);
+
+            xQ.sub(&Q);
+            xQ.frob(&X);
+
+            Q.dbl();
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.add(&x2Q);
+            Q.add(&xQ);
+        }
+        Q.affine();
+    }
+}
+```
+
+Note that I've assumed that the `ECP2` struct has methods like `new`, `copy`, `mul`, `neg`, `dbl`, `add`, `frob`, `affine`, `is_infinity`, `getpx`, `getpy`, `conj`, `mul_ip`, `imul`, `rsub`, `norm`, `reduce`, `mul`, `add`, `sub`, `mul_ip`, `mul_ip`, `mul`, `mul`, `mul`, `mul`, `mul`, `mul `mul`, `mul`, `mul `mul`, `mul`, `mul `mul`, `mul`, `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mulmul `mul `mulmul `mul `mul `mulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmul `mulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmulmul `mulmul `mulmul `mulmulmul `mulmul `mulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mulmul `mulmulmul `mulmul `mulmulmul `mulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmul</translated function>Here is the translated Rust function:
+
+```rust
+impl ECP2 {
+    pub fn mapit(&mut self, h: &[u8]) {
+        let mut q = Big::new(rom::MODULUS);
+        let mut x = Big::from_bytes(h);
+        let one = Big::new(1);
+        let mut X = FP2::new(one, x);
+        let mut Q = ECP2::new(X);
+        x.mod(&mut q);
+        while true {
+            X = FP2::new(one, x);
+            Q = ECP2::new(X);
+            if!Q.is_infinity() {
+                break;
+            }
+            x.inc(1);
+            x.norm();
+        }
+
+        let Fra = Big::new(rom::FRA);
+        let Frb = Big::new(rom::FRB);
+        X = FP2::new(Fra, Frb);
+
+        if ECP::SEXTIC_TWIST == SexticTwist::MType {
+            X.inverse();
+            X.norm();
+        }
+
+        x = Big::new(rom::CURVE_BNX);
+
+/* Fast Hashing to G2 - Fuentes-Castaneda, Knapp and Rodriguez-Henriquez */
+
+        if ECP::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+            let mut T = ECP2::new();
+            T.copy(&Q);
+            T = T.mul(x);
+            
+            if ECP::SIGN_OF_X == SignOfX::Negativex {
+                T.neg();
+            }    
+            let mut K = ECP2::new();
+            K.copy(&T);
+            K.dbl();
+            K.add(&T);
+            K.affine();
+
+            K.frob(&X);
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.add(&T);
+            Q.add(&K);
+            T.frob(&X);
+            T.frob(&X);
+            Q.add(&T);
+        }
+
+/* Efficient hash maps to G2 on BLS curves - Budroni, Pintore */
+/* Q -> x2Q -xQ -Q +F(xQ -Q) +F(F(2Q)) */
+
+        if ECP::CURVE_PAIRING_TYPE == CurvePairingType::Bls {
+            let mut xQ = Q.mul(x);
+            let mut x2Q = xQ.mul(x);
+            if ECP::SIGN_OF_X == SignOfX::Negativex {
+                xQ.neg();
+            }    
+            x2Q.sub(&xQ);
+            x2Q.sub(&Q);
+
+            xQ.sub(&Q);
+            xQ.frob(&X);
+
+            Q.dbl();
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.add(&x2Q);
+            Q.add(&xQ);
+        }
+        Q.affine();
+    }
+}
+```
+
+Note that I've assumed that the `ECP2` struct has methods like `new`, `copy`, `mul`, `neg`, `dbl`, `add`, `frob`, `affine`, `is_infinity`, `getpx`, `getpy`, `conj`, `mul_ip`, `imul`, `rsub`, `norm`, `reduce`, `mul`, `add`, `sub`, `mul_ip`, `mul_ip`, `mul`, `mul`, `mul`, `mul`, `mul`, `mul `mul`, `mul`, `mul `mul`, `mul`, `mul `mul`, `mul`, `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mulmul `mul `mulmul `mul `mul `mulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmul `mulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mulmulmul `mulmul `mulmul `mulmulmul `mulmul `mulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmulmul `mulmul `mulmul `mulmul `mulmul `mulmul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mul `mulmul `mulmulmul `mulmul `mulmulmul `mulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmulmul

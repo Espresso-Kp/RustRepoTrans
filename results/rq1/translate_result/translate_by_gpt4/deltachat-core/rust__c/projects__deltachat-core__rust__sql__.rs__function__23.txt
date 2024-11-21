@@ -1,0 +1,174 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int dc_sqlite3_table_exists(dc_sqlite3_t* sql, const char* name)
+{
+	int           ret = 0;
+	char*         querystr = NULL;
+	sqlite3_stmt* stmt = NULL;
+	int           sqlState = 0;
+
+	if ((querystr=sqlite3_mprintf("PRAGMA table_info(%s)", name))==NULL) { /* this statement cannot be used with binded variables */
+		dc_log_error(sql->context, 0, "dc_sqlite3_table_exists_(): Out of memory.");
+		goto cleanup;
+	}
+
+	if ((stmt=dc_sqlite3_prepare(sql, querystr))==NULL) {
+		goto cleanup;
+	}
+
+	sqlState = sqlite3_step(stmt);
+	if (sqlState==SQLITE_ROW) {
+		ret = 1; /* the table exists. Other states are SQLITE_DONE or SQLITE_ERROR in both cases we return 0. */
+	}
+
+	/* success - fall through to free allocated objects */
+	;
+
+	/* error/cleanup */
+cleanup:
+	if (stmt) {
+		sqlite3_finalize(stmt);
+	}
+
+	if (querystr) {
+		sqlite3_free(querystr);
+	}
+
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn table_exists(&self, name: &str) -> Result<bool> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+async fn call<'a, F, R>(&'a self, function: F) -> Result<R>
+    where
+        F: 'a + FnOnce(&mut Connection) -> Result<R> + Send,
+        R: Send + 'static,
+    {
+        let lock = self.pool.read().await;
+        let pool = lock.as_ref().context("no SQL connection")?;
+        let mut conn = pool.get().await?;
+        let res = tokio::task::block_in_place(move || function(&mut conn))?;
+        Ok(res)
+    }
+
+pub struct Sql {
+    /// Database file path
+    pub(crate) dbfile: PathBuf,
+
+    /// Write transactions mutex.
+    ///
+    /// See [`Self::write_lock`].
+    write_mtx: Mutex<()>,
+
+    /// SQL connection pool.
+    pool: RwLock<Option<Pool>>,
+
+    /// None if the database is not open, true if it is open with passphrase and false if it is
+    /// open without a passphrase.
+    is_encrypted: RwLock<Option<bool>>,
+
+    /// Cache of `config` table.
+    pub(crate) config_cache: RwLock<HashMap<String, Option<String>>>,
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use anyhow::{bail, Context as _, Result};
+use rusqlite::{config::DbConfig, types::ValueRef, Connection, OpenFlags, Row};
+use tokio::sync::{Mutex, MutexGuard, RwLock};
+use crate::blob::BlobObject;
+use crate::chat::{self, add_device_msg, update_device_icon, update_saved_messages_icon};
+use crate::config::Config;
+use crate::constants::DC_CHAT_ID_TRASH;
+use crate::context::Context;
+use crate::debug_logging::set_debug_logging_xdc;
+use crate::ephemeral::start_ephemeral_timers;
+use crate::imex::BLOBS_BACKUP_NAME;
+use crate::location::delete_orphaned_poi_locations;
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::stock_str;
+use crate::tools::{delete_file, time, SystemTime};
+use pool::Pool;
+use super::*;
+use crate::{test_utils::TestContext, EventType};
+use tempfile::tempdir;
+use tempfile::tempdir;
+use tempfile::tempdir;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn table_exists(&self, name: &str) -> Result<bool> {
+        self.call(move |conn| {
+            let mut exists = false;
+            conn.pragma(None, "table_info", name.to_string(), |_row| {
+                // will only be executed if the info was found
+                exists = true;
+                Ok(())
+            })?;
+
+            Ok(exists)
+        })
+        .await
+    }
+</function>
+<translated function>
+Here is the corresponding Rust-function
+
+```rust
+use rusqlite::{params, NO_PARAMS};
+use anyhow::format_err;
+
+pub async fn table_exists(&self, name: &str) -> Result<bool> {
+    self.call(move |conn| {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", name))?;
+        let sql_result = stmt.step();
+        match sql_result {
+            Ok(rusqlite::Row) => Ok(true),
+            Ok(_) | Err(_) => Ok(false),
+        }
+    }).await
+}
+```
+
+This function is equivalent to the given `C`-function. 
+
+1. Here, it prepares the sql statement.
+2. Executes it by calling the step function. 
+3. If the step function returns SQLITE_ROW (which equals to `rusqlite::Row` in rust), it means the table exists. Otherwise, it doesn't exist or some error occured. In any case, it simply returns false.
+
+Note: It uses `rusqlite` crate to work with SQLite in the rust version. Read the documentation for more information and possible error handling: https://docs.rs/rusqlite/0.25.3/rusqlite/</translated function>Here is the corresponding Rust-function
+
+```rust
+use rusqlite::{params, NO_PARAMS};
+use anyhow::format_err;
+
+pub async fn table_exists(&self, name: &str) -> Result<bool> {
+    self.call(move |conn| {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", name))?;
+        let sql_result = stmt.step();
+        match sql_result {
+            Ok(rusqlite::Row) => Ok(true),
+            Ok(_) | Err(_) => Ok(false),
+        }
+    }).await
+}
+```
+
+This function is equivalent to the given `C`-function. 
+
+1. Here, it prepares the sql statement.
+2. Executes it by calling the step function. 
+3. If the step function returns SQLITE_ROW (which equals to `rusqlite::Row` in rust), it means the table exists. Otherwise, it doesn't exist or some error occured. In any case, it simply returns false.
+
+Note: It uses `rusqlite` crate to work with SQLite in the rust version. Read the documentation for more information and possible error handling: https://docs.rs/rusqlite/0.25.3/rusqlite/

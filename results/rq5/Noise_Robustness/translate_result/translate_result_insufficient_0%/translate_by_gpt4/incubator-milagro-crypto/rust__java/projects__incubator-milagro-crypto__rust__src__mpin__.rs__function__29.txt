@@ -1,0 +1,241 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int SERVER_KEY(int sha,byte[] Z,byte[] SST,byte[] W,byte[] H,byte[] HID,byte[] xID,byte[] xCID,byte[] SK)
+	{
+		byte[] t;
+
+		ECP2 sQ=ECP2.fromBytes(SST);
+		if (sQ.is_infinity()) return INVALID_POINT; 
+		ECP R=ECP.fromBytes(Z);
+		if (R.is_infinity()) return INVALID_POINT; 
+		ECP A=ECP.fromBytes(HID);
+		if (A.is_infinity()) return INVALID_POINT; 
+
+		ECP U;
+		if (xCID!=null)
+			U=ECP.fromBytes(xCID);
+		else
+			U=ECP.fromBytes(xID);
+		if (U.is_infinity()) return INVALID_POINT; 
+
+		BIG w=BIG.fromBytes(W);
+		BIG h=BIG.fromBytes(H);
+		A=PAIR.G1mul(A,h);	// new
+		R.add(A); //R.affine();
+
+		U=PAIR.G1mul(U,w);
+		FP12 g=PAIR.ate(sQ,R);
+		g=PAIR.fexp(g);
+
+		FP4 c=g.trace();
+
+		t=mpin_hash(sha,c,U);
+
+		for (int i=0;i<ECP.AESKEY;i++) SK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let sQ = ECP2::from_bytes(&sst);
+    if sQ.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut R = ECP::from_bytes(&z);
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut A = ECP::from_bytes(&hid);
+    if A.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut U = if let Some(rxcid) = xcid {
+        ECP::from_bytes(&rxcid)
+    } else {
+        ECP::from_bytes(&xid)
+    };
+
+    if U.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut w = Big::from_bytes(&w);
+    let mut h = Big::from_bytes(&h);
+    A = pair::g1mul(&A, &mut h); // new
+    R.add(&A);
+
+    U = pair::g1mul(&U, &mut w);
+    let mut g = pair::ate(&sQ, &R);
+    g = pair::fexp(&g);
+
+    let mut c = g.trace();
+
+    hash(sha, &mut c, &mut U, sk);
+
+    0
+}
+</function>
+<translated function>
+Here is the translation of the provided Java function to Rust:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let mut t: Vec<u8>;
+
+    let mut sq = ECP2::fromBytes(sst);
+    if sq.is_infinity() { return INVALID_POINT; }
+    let mut r = ECP::fromBytes(z);
+    if r.is_infinity() { return INVALID_POINT; }
+    let mut a = ECP::fromBytes(hid);
+    if a.is_infinity() { return INVALID_POINT; }
+
+    let u = match xcid {
+        Some(xcid) => ECP::fromBytes(xcid),
+        None => ECP::fromBytes(xid),
+    };
+    if u.is_infinity() { return INVALID_POINT; }
+
+    let w_big = Big::fromBytes(w);
+    let h_big = Big::fromBytes(h);
+    a = pair::g1mul(&a, &h_big);
+    
+    r.add(&a);
+
+    let u = pair::g1mul(&u, &w_big);
+    let mut g = pair::ate(&sq, &r);
+    g = pair::fexp(&g);
+
+    let c = g.trace();
+
+    t = mpin_hash(sha, c, u);
+
+    for i in 0..ECP::AESKEY {
+        sk[i] = t[i];
+    }
+
+    0
+}
+```
+
+Please note that this code assumes that `INVALID_POINT` is defined somewhere in the code, `mpin_hash` function is defined and compatible, `ECP::AESKEY` is defined and accurate, and the code is placed in the correct module where imports like `ECP`, `ECP2`, `FP12`, `FP4`, `pair`, `Big` are accessible. It also assumes that all types are implementing or deriving Copy trait, otherwise some `clone()` calls might be needed. 
+
+The differences between Java and Rust and their type systems and conventions can lead to some necessary changes in the translation. In particular, error handling in Rust is usually done through Result and Option types, rather than through returning special error values. However, to remain as true as possible to the Java code, the function continues to return an error code.
+</translated function>Here is the translation of the provided Java function to Rust:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let mut t: Vec<u8>;
+
+    let mut sq = ECP2::fromBytes(sst);
+    if sq.is_infinity() { return INVALID_POINT; }
+    let mut r = ECP::fromBytes(z);
+    if r.is_infinity() { return INVALID_POINT; }
+    let mut a = ECP::fromBytes(hid);
+    if a.is_infinity() { return INVALID_POINT; }
+
+    let u = match xcid {
+        Some(xcid) => ECP::fromBytes(xcid),
+        None => ECP::fromBytes(xid),
+    };
+    if u.is_infinity() { return INVALID_POINT; }
+
+    let w_big = Big::fromBytes(w);
+    let h_big = Big::fromBytes(h);
+    a = pair::g1mul(&a, &h_big);
+    
+    r.add(&a);
+
+    let u = pair::g1mul(&u, &w_big);
+    let mut g = pair::ate(&sq, &r);
+    g = pair::fexp(&g);
+
+    let c = g.trace();
+
+    t = mpin_hash(sha, c, u);
+
+    for i in 0..ECP::AESKEY {
+        sk[i] = t[i];
+    }
+
+    0
+}
+```
+
+Please note that this code assumes that `INVALID_POINT` is defined somewhere in the code, `mpin_hash` function is defined and compatible, `ECP::AESKEY` is defined and accurate, and the code is placed in the correct module where imports like `ECP`, `ECP2`, `FP12`, `FP4`, `pair`, `Big` are accessible. It also assumes that all types are implementing or deriving Copy trait, otherwise some `clone()` calls might be needed. 
+
+The differences between Java and Rust and their type systems and conventions can lead to some necessary changes in the translation. In particular, error handling in Rust is usually done through Result and Option types, rather than through returning special error values. However, to remain as true as possible to the Java code, the function continues to return an error code.

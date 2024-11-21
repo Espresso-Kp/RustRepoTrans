@@ -1,0 +1,369 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static ECP2 mapit(byte[] h)
+	{
+		BIG q=new BIG(ROM.Modulus);
+		BIG x=BIG.fromBytes(h);
+		BIG one=new BIG(1);
+		FP2 X;
+		ECP2 Q;
+		x.mod(q);
+		while (true)
+		{
+			X=new FP2(one,x);
+			Q=new ECP2(X);
+			if (!Q.is_infinity()) break;
+			x.inc(1); x.norm();
+		}
+
+		BIG Fra=new BIG(ROM.Fra);
+		BIG Frb=new BIG(ROM.Frb);
+		X=new FP2(Fra,Frb);
+
+		if (ECP.SEXTIC_TWIST==ECP.M_TYPE)
+		{
+			X.inverse();
+			X.norm();
+		}
+
+		x=new BIG(ROM.CURVE_Bnx);
+
+/* Fast Hashing to G2 - Fuentes-Castaneda, Knapp and Rodriguez-Henriquez */
+
+		if (ECP.CURVE_PAIRING_TYPE==ECP.BN)
+		{
+			ECP2 T,K;
+
+			T=new ECP2(); T.copy(Q);
+			T=T.mul(x); 
+			
+			if (ECP.SIGN_OF_X==ECP.NEGATIVEX)
+			{
+				T.neg();
+			}	
+			K=new ECP2(); K.copy(T);
+			K.dbl(); K.add(T); //K.affine();
+
+			K.frob(X);
+			Q.frob(X); Q.frob(X); Q.frob(X);
+			Q.add(T); Q.add(K);
+			T.frob(X); T.frob(X);
+			Q.add(T);
+
+		}
+
+/* Efficient hash maps to G2 on BLS curves - Budroni, Pintore */
+/* Q -> x2Q -xQ -Q +F(xQ -Q) +F(F(2Q)) */
+
+		if (ECP.CURVE_PAIRING_TYPE==ECP.BLS)
+		{
+		//	ECP2 xQ,x2Q;
+		//	xQ=new ECP2();
+		//	x2Q=new ECP2();
+
+			ECP2 xQ=Q.mul(x);
+			ECP2 x2Q=xQ.mul(x);
+
+			if (ECP.SIGN_OF_X==ECP.NEGATIVEX)
+			{
+				xQ.neg();
+			}	
+
+			x2Q.sub(xQ);
+			x2Q.sub(Q);
+
+			xQ.sub(Q);
+			xQ.frob(X);
+
+			Q.dbl();
+			Q.frob(X);
+			Q.frob(X);
+
+			Q.add(x2Q);
+			Q.add(xQ);
+		}
+		Q.affine();
+		return Q;
+	}
+</java function>
+<rust function signature>
+pub fn clear_cofactor(&mut self) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn neg(&mut self) {
+        self.y.norm();
+        self.y.neg();
+        self.y.norm();
+    }
+pub fn new_bigs(c: Big, d: Big) -> FP2 {
+        FP2 {
+            a: FP::new_big(c),
+            b: FP::new_big(d),
+        }
+    }
+pub const CURVE_PAIRING_TYPE: CurvePairingType = CurvePairingType::Bn;
+pub enum SexticTwist {
+    Not,
+    DType,
+    MType,
+}
+pub const FRB: [Chunk; NLEN] = [
+    0x82193F90D5922A,
+    0x8B6DB2C08850C5,
+    0x2F57B96AC8DC17,
+    0x1ED1837503EAB2,
+    0x9EBEE69,
+];
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::fp2::FP2;
+use super::rom;
+use crate::types::{CurvePairingType, SexticTwist, SignOfX};
+use std::fmt;
+use std::str::SplitWhitespace;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn clear_cofactor(&mut self) {
+        let mut X = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            X.inverse();
+            X.norm();
+        }
+        let x = Big::new_ints(&rom::CURVE_BNX);
+
+        if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+            let mut T = self.mul(&x);
+            if ecp::SIGN_OF_X == SignOfX::NegativeX {
+                T.neg();
+            }
+            let mut K = T.clone();
+            K.dbl();
+            K.add(&T);
+
+            K.frob(&X);
+            self.frob(&X);
+            self.frob(&X);
+            self.frob(&X);
+            self.add(&T);
+            self.add(&K);
+            T.frob(&X);
+            T.frob(&X);
+            self.add(&T);
+        }
+        if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bls {
+            let mut xQ = self.mul(&x);
+            let mut x2Q = xQ.mul(&x);
+
+            if ecp::SIGN_OF_X == SignOfX::NegativeX {
+                xQ.neg();
+            }
+            x2Q.sub(&xQ);
+            x2Q.sub(&self);
+
+            xQ.sub(&self);
+            xQ.frob(&X);
+
+            self.dbl();
+            self.frob(&X);
+            self.frob(&X);
+
+            self.add(&x2Q);
+            self.add(&xQ);
+        }
+
+        self.affine();
+    }
+</function>
+<translated function>
+ ```rust
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::fp2::FP2;
+use super::rom;
+use crate::types::{CurvePairingType, SexticTwist, SignOfX};
+use std::fmt;
+use std::str::SplitWhitespace;
+
+pub fn mapit(h: &[u8]) -> ECP2 {
+    let q = Big::from_bytes(h);
+    let one = Big::new(1);
+    let mut x = q.clone();
+    let fra = Big::new_from_slice(&rom::FRA);
+    let frb = Big::new_from_slice(&rom::FRB);
+    let mut x_mod = x.clone();
+    x_mod.modulus(&q);
+
+    loop {
+        let x_fp = FP2::new_bigs(one.clone(), x_mod.clone());
+        let q_ecp = ECP2::new(x_fp);
+        if !q_ecp.is_infinity() {
+            break;
+        }
+        x_mod.inc(1);
+        x_mod.norm();
+    }
+
+    let x_fp = FP2::new_bigs(fra.clone(), frb.clone());
+    if rom::CURVE_PAIRING_TYPE == CurvePairingType::MType {
+        x_fp.inverse();
+        x_fp.norm();
+    }
+
+    let curve_bnx = Big::new_from_slice(&rom::CURVE_BNX);
+
+    if rom::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        let mut t = ECP2::new();
+        t.copy(&q_ecp);
+        t.mul(&curve_bnx);
+
+        if rom::SIGN_OF_X == SignOfX::NegativeX {
+            t.neg();
+        }
+
+        let mut k = ECP2::new();
+        k.copy(&t);
+        k.dbl();
+        k.add(&t); // k.affine();
+
+        k.frob(&x_fp);
+        q_ecp.frob(&x_fp);
+        q_ecp.frob(&x_fp);
+        q_ecp.frob(&x_fp);
+        q_ecp.add(&t);
+        q_ecp.add(&k);
+
+        t.frob(&x_fp);
+        t.frob(&x_fp);
+        q_ecp.add(&t);
+    }
+
+    if rom::CURVE_PAIRING_TYPE == CurvePairingType::Bls {
+        let xq = q_ecp.mul(&curve_bnx);
+        let x2q = xq.mul(&curve_bnx);
+
+        if rom::SIGN_OF_X == SignOfX::NegativeX {
+            xq.neg();
+        }
+
+        let mut x2q_sub = x2q.clone();
+        x2q_sub.sub(&xq);
+        x2q_sub.sub(&q_ecp);
+
+        let mut xq_sub = xq.clone();
+        xq_sub.sub(&q_ecp);
+        xq_sub.frob(&x_fp);
+
+        q_ecp.dbl();
+        q_ecp.frob(&x_fp);
+        q_ecp.frob(&x_fp);
+
+        q_ecp.add(&x2q_sub);
+        q_ecp.add(&xq_sub);
+    }
+
+    q_ecp.affine();
+    q_ecp
+}
+```</translated function> ```rust
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::fp2::FP2;
+use super::rom;
+use crate::types::{CurvePairingType, SexticTwist, SignOfX};
+use std::fmt;
+use std::str::SplitWhitespace;
+
+pub fn mapit(h: &[u8]) -> ECP2 {
+    let q = Big::from_bytes(h);
+    let one = Big::new(1);
+    let mut x = q.clone();
+    let fra = Big::new_from_slice(&rom::FRA);
+    let frb = Big::new_from_slice(&rom::FRB);
+    let mut x_mod = x.clone();
+    x_mod.modulus(&q);
+
+    loop {
+        let x_fp = FP2::new_bigs(one.clone(), x_mod.clone());
+        let q_ecp = ECP2::new(x_fp);
+        if !q_ecp.is_infinity() {
+            break;
+        }
+        x_mod.inc(1);
+        x_mod.norm();
+    }
+
+    let x_fp = FP2::new_bigs(fra.clone(), frb.clone());
+    if rom::CURVE_PAIRING_TYPE == CurvePairingType::MType {
+        x_fp.inverse();
+        x_fp.norm();
+    }
+
+    let curve_bnx = Big::new_from_slice(&rom::CURVE_BNX);
+
+    if rom::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        let mut t = ECP2::new();
+        t.copy(&q_ecp);
+        t.mul(&curve_bnx);
+
+        if rom::SIGN_OF_X == SignOfX::NegativeX {
+            t.neg();
+        }
+
+        let mut k = ECP2::new();
+        k.copy(&t);
+        k.dbl();
+        k.add(&t); // k.affine();
+
+        k.frob(&x_fp);
+        q_ecp.frob(&x_fp);
+        q_ecp.frob(&x_fp);
+        q_ecp.frob(&x_fp);
+        q_ecp.add(&t);
+        q_ecp.add(&k);
+
+        t.frob(&x_fp);
+        t.frob(&x_fp);
+        q_ecp.add(&t);
+    }
+
+    if rom::CURVE_PAIRING_TYPE == CurvePairingType::Bls {
+        let xq = q_ecp.mul(&curve_bnx);
+        let x2q = xq.mul(&curve_bnx);
+
+        if rom::SIGN_OF_X == SignOfX::NegativeX {
+            xq.neg();
+        }
+
+        let mut x2q_sub = x2q.clone();
+        x2q_sub.sub(&xq);
+        x2q_sub.sub(&q_ecp);
+
+        let mut xq_sub = xq.clone();
+        xq_sub.sub(&q_ecp);
+        xq_sub.frob(&x_fp);
+
+        q_ecp.dbl();
+        q_ecp.frob(&x_fp);
+        q_ecp.frob(&x_fp);
+
+        q_ecp.add(&x2q_sub);
+        q_ecp.add(&xq_sub);
+    }
+
+    q_ecp.affine();
+    q_ecp
+}
+```

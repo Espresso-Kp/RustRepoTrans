@@ -1,0 +1,207 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def create_namespace(self, namespace: Union[str, Identifier], properties: Properties = EMPTY_DICT) -> None:
+        namespace_tuple = self._check_valid_namespace_identifier(namespace)
+        payload = {"namespace": namespace_tuple, "properties": properties}
+        response = self._session.post(self.url(Endpoints.create_namespace), json=payload)
+        try:
+            response.raise_for_status()
+        except HTTPError as exc:
+            self._handle_non_200_response(exc, {409: NamespaceAlreadyExistsError})
+</python function>
+<rust function signature>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn try_from(value: NamespaceSerde) -> std::result::Result<Self, Self::Error> {
+            Ok(super::Namespace::with_properties(
+                super::NamespaceIdent::from_vec(value.namespace)?,
+                value.properties.unwrap_or_default(),
+            ))
+        }
+pub(super) struct ErrorResponse {
+        error: ErrorModel,
+    }
+pub struct RestCatalog {
+    config: RestCatalogConfig,
+    client: HttpClient,
+}
+struct HttpClient(Client);
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use std::collections::HashMap;
+use std::str::FromStr;
+use async_trait::async_trait;
+use itertools::Itertools;
+use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, Request, Response, StatusCode, Url};
+use serde::de::DeserializeOwned;
+use typed_builder::TypedBuilder;
+use urlencoding::encode;
+use crate::catalog::_serde::{
+    CommitTableRequest, CommitTableResponse, CreateTableRequest, LoadTableResponse,
+};
+use iceberg::io::FileIO;
+use iceberg::table::Table;
+use iceberg::Result;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+};
+use self::_serde::{
+    CatalogConfig, ErrorResponse, ListNamespaceResponse, ListTableResponse, NamespaceSerde,
+    RenameTableRequest, TokenResponse, NO_CONTENT, OK,
+};
+use std::collections::HashMap;
+use serde_derive::{Deserialize, Serialize};
+use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
+use iceberg::{Error, ErrorKind, Namespace, TableIdent, TableRequirement, TableUpdate};
+use chrono::{TimeZone, Utc};
+use iceberg::spec::{
+        FormatVersion, NestedField, NullOrder, Operation, PrimitiveType, Schema, Snapshot,
+        SnapshotLog, SortDirection, SortField, SortOrder, Summary, Transform, Type,
+        UnboundPartitionField, UnboundPartitionSpec,
+    };
+use iceberg::transaction::Transaction;
+use mockito::{Mock, Server, ServerGuard};
+use serde_json::json;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+use uuid::uuid;
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let request = self
+            .client
+            .0
+            .post(self.config.namespaces_endpoint())
+            .json(&NamespaceSerde {
+                namespace: namespace.as_ref().clone(),
+                properties: Some(properties),
+            })
+            .build()?;
+
+        let resp = self
+            .client
+            .query::<NamespaceSerde, ErrorResponse, OK>(request)
+            .await?;
+
+        Namespace::try_from(resp)
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and library imports:
+
+```rust
+async fn create_namespace(
+    &self,
+    namespace: &NamespaceIdent,
+    properties: HashMap<String, String>,
+) -> Result<Namespace> {
+    let payload = serde_json::json!({
+        "namespace": namespace.to_vec(),
+        "properties": properties
+    });
+
+    let url = self.config.url.join("v1/namespaces").map_err(|e| Error::new(ErrorKind::BadRequest, e))?;
+    let response = self.client.post(url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| Error::new(ErrorKind::Network, e))?;
+
+    match response.status() {
+        StatusCode::OK => {
+            let namespace_serde: NamespaceSerde = response.json().await
+                .map_err(|e| Error::new(ErrorKind::Serialization, e))?;
+            Namespace::try_from(namespace_serde)
+                .map_err(|e| Error::new(ErrorKind::Serialization, e))
+        }
+        StatusCode::CONFLICT => Err(Error::new(ErrorKind::AlreadyExists, "Namespace already exists")),
+        _ => {
+            let error_response: ErrorResponse = response.json().await
+                .map_err(|e| Error::new(ErrorKind::Serialization, e))?;
+            Err(Error::new(ErrorKind::Server, error_response.error.message))
+        }
+    }
+}
+```
+
+This Rust function translation incorporates the following changes and considerations:
+
+1. It uses the `async` keyword and returns a `Result<Namespace>` as specified in the function signature.
+2. It uses the `NamespaceIdent` type for the `namespace` parameter instead of `Union[str, Identifier]`.
+3. It uses `HashMap<String, String>` for the `properties` parameter.
+4. It constructs the JSON payload using `serde_json::json!` macro.
+5. It uses the `self.config.url` to construct the full URL for the API endpoint.
+6. It uses the `self.client` (which is likely a `reqwest::Client`) to send the HTTP POST request.
+7. It handles different response status codes, including OK (200), CONFLICT (409), and other error cases.
+8. It uses the `NamespaceSerde` type for deserializing the response and converts it to `Namespace` using `try_from`.
+9. It returns appropriate `Error` types with relevant error kinds and messages.
+
+Note that this translation assumes the existence of certain types and methods (like `NamespaceSerde`, `ErrorResponse`, etc.) based on the provided dependencies and declarations. You may need to adjust some details depending on the exact implementation of these types in your Rust codebase.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and library imports:
+
+```rust
+async fn create_namespace(
+    &self,
+    namespace: &NamespaceIdent,
+    properties: HashMap<String, String>,
+) -> Result<Namespace> {
+    let payload = serde_json::json!({
+        "namespace": namespace.to_vec(),
+        "properties": properties
+    });
+
+    let url = self.config.url.join("v1/namespaces").map_err(|e| Error::new(ErrorKind::BadRequest, e))?;
+    let response = self.client.post(url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| Error::new(ErrorKind::Network, e))?;
+
+    match response.status() {
+        StatusCode::OK => {
+            let namespace_serde: NamespaceSerde = response.json().await
+                .map_err(|e| Error::new(ErrorKind::Serialization, e))?;
+            Namespace::try_from(namespace_serde)
+                .map_err(|e| Error::new(ErrorKind::Serialization, e))
+        }
+        StatusCode::CONFLICT => Err(Error::new(ErrorKind::AlreadyExists, "Namespace already exists")),
+        _ => {
+            let error_response: ErrorResponse = response.json().await
+                .map_err(|e| Error::new(ErrorKind::Serialization, e))?;
+            Err(Error::new(ErrorKind::Server, error_response.error.message))
+        }
+    }
+}
+```
+
+This Rust function translation incorporates the following changes and considerations:
+
+1. It uses the `async` keyword and returns a `Result<Namespace>` as specified in the function signature.
+2. It uses the `NamespaceIdent` type for the `namespace` parameter instead of `Union[str, Identifier]`.
+3. It uses `HashMap<String, String>` for the `properties` parameter.
+4. It constructs the JSON payload using `serde_json::json!` macro.
+5. It uses the `self.config.url` to construct the full URL for the API endpoint.
+6. It uses the `self.client` (which is likely a `reqwest::Client`) to send the HTTP POST request.
+7. It handles different response status codes, including OK (200), CONFLICT (409), and other error cases.
+8. It uses the `NamespaceSerde` type for deserializing the response and converts it to `Namespace` using `try_from`.
+9. It returns appropriate `Error` types with relevant error kinds and messages.
+
+Note that this translation assumes the existence of certain types and methods (like `NamespaceSerde`, `ErrorResponse`, etc.) based on the provided dependencies and declarations. You may need to adjust some details depending on the exact implementation of these types in your Rust codebase.

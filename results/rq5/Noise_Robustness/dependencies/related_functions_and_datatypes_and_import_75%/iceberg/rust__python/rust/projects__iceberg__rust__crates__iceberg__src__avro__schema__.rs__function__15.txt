@@ -1,0 +1,171 @@
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+struct SchemaToAvroSchema {
+    schema: String,
+}
+pub enum Type {
+    /// Primitive types
+    Primitive(PrimitiveType),
+    /// Struct type
+    Struct(StructType),
+    /// List type.
+    List(ListType),
+    /// Map type
+    Map(MapType),
+}
+pub enum PrimitiveType {
+    /// True or False
+    Boolean,
+    /// 32-bit signed integer
+    Int,
+    /// 64-bit signed integer
+    Long,
+    /// 32-bit IEEE 754 floating point.
+    Float,
+    /// 64-bit IEEE 754 floating point.
+    Double,
+    /// Fixed point decimal
+    Decimal {
+        /// Precision, must be 38 or less
+        precision: u32,
+        /// Scale
+        scale: u32,
+    },
+    /// Calendar date without timezone or time.
+    Date,
+    /// Time of day in microsecond precision, without date or timezone.
+    Time,
+    /// Timestamp in microsecond precision, without timezone
+    Timestamp,
+    /// Timestamp in microsecond precision, with timezone
+    Timestamptz,
+    /// Arbitrary-length character sequences encoded in utf-8
+    String,
+    /// Universally Unique Identifiers, should use 16-byte fixed
+    Uuid,
+    /// Fixed length byte array
+    Fixed(u64),
+    /// Arbitrary-length byte array.
+    Binary,
+}
+pub enum Schema {
+    /// A `null` Avro schema.
+    Null,
+    /// A `boolean` Avro schema.
+    Boolean,
+    /// An `int` Avro schema.
+    Int,
+    /// A `long` Avro schema.
+    Long,
+    /// A `float` Avro schema.
+    Float,
+    /// A `double` Avro schema.
+    Double,
+    /// A `bytes` Avro schema.
+    /// `Bytes` represents a sequence of 8-bit unsigned bytes.
+    Bytes,
+    /// A `string` Avro schema.
+    /// `String` represents a unicode character sequence.
+    String,
+    /// A `array` Avro schema. Avro arrays are required to have the same type for each element.
+    /// This variant holds the `Schema` for the array element type.
+    Array(Box<Schema>),
+    /// A `map` Avro schema.
+    /// `Map` holds a pointer to the `Schema` of its values, which must all be the same schema.
+    /// `Map` keys are assumed to be `string`.
+    Map(Box<Schema>),
+    /// A `union` Avro schema.
+    Union(UnionSchema),
+    /// A `record` Avro schema.
+    Record(RecordSchema),
+    /// An `enum` Avro schema.
+    Enum(EnumSchema),
+    /// A `fixed` Avro schema.
+    Fixed(FixedSchema),
+    /// Logical type which represents `Decimal` values. The underlying type is serialized and
+    /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
+    Decimal(DecimalSchema),
+    /// A universally unique identifier, annotating a string.
+    Uuid,
+    /// Logical type which represents the number of days since the unix epoch.
+    /// Serialization format is `Schema::Int`.
+    Date,
+    /// The time of day in number of milliseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMillis,
+    /// The time of day in number of microseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMicros,
+    /// An instant in time represented as the number of milliseconds after the UNIX epoch.
+    TimestampMillis,
+    /// An instant in time represented as the number of microseconds after the UNIX epoch.
+    TimestampMicros,
+    /// An instant in localtime represented as the number of milliseconds after the UNIX epoch.
+    LocalTimestampMillis,
+    /// An instant in local time represented as the number of microseconds after the UNIX epoch.
+    LocalTimestampMicros,
+    /// An amount of time defined by a number of months, days and milliseconds.
+    Duration,
+    /// A reference to another schema.
+    Ref { name: Name },
+}
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+const UUID_LOGICAL_TYPE: &str = "uuid";
+const LOGICAL_TYPE: &str = "logicalType";
+------
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;

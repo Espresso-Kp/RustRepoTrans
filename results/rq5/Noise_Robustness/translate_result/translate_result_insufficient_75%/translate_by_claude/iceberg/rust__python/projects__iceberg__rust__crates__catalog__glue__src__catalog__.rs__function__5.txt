@@ -1,0 +1,176 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def create_namespace(self, namespace: Union[str, Identifier], properties: Properties = EMPTY_DICT) -> None:
+        """Create a namespace in the catalog.
+
+        Args:
+            namespace: Namespace identifier.
+            properties: A string dictionary of properties for the given namespace.
+
+        Raises:
+            ValueError: If the identifier is invalid.
+            AlreadyExistsError: If a namespace with the given name already exists.
+        """
+        database_name = self.identifier_to_database(namespace)
+        try:
+            self.glue.create_database(DatabaseInput=_construct_database_input(database_name, properties))
+        except self.glue.exceptions.AlreadyExistsException as e:
+            raise NamespaceAlreadyExistsError(f"Database {database_name} already exists") from e
+</python function>
+<rust function signature>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) fn convert_to_database(
+    namespace: &NamespaceIdent,
+    properties: &HashMap<String, String>,
+) -> Result<DatabaseInput> {
+    let db_name = validate_namespace(namespace)?;
+    let mut builder = DatabaseInput::builder().name(db_name);
+
+    for (k, v) in properties.iter() {
+        match k.as_ref() {
+            DESCRIPTION => {
+                builder = builder.description(v);
+            }
+            LOCATION => {
+                builder = builder.location_uri(v);
+            }
+            _ => {
+                builder = builder.parameters(k, v);
+            }
+        }
+    }
+
+    builder.build().map_err(from_aws_build_error)
+}
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+pub fn with_properties(name: NamespaceIdent, properties: HashMap<String, String>) -> Self {
+        Self { name, properties }
+    }
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+
+        let builder = self.client.0.create_database().database_input(db_input);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(Namespace::with_properties(namespace.clone(), properties))
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+async fn create_namespace(
+    &self,
+    namespace: &NamespaceIdent,
+    properties: HashMap<String, String>,
+) -> Result<Namespace> {
+    let database_input = convert_to_database(namespace, &properties)?;
+
+    match self.client.create_database().set_database_input(Some(database_input)).send().await {
+        Ok(_) => Ok(Namespace::with_properties(namespace.clone(), properties)),
+        Err(err) => {
+            if let Some(aws_sdk_glue::error::SdkError::ServiceError(service_error)) = err.as_service_error() {
+                if let aws_sdk_glue::operation::create_database::CreateDatabaseErrorKind::AlreadyExistsException(_) = service_error.kind {
+                    let db_name = validate_namespace(namespace)?;
+                    return Err(Error::new(
+                        ErrorKind::AlreadyExists,
+                        format!("Database {} already exists", db_name),
+                    ));
+                }
+            }
+            Err(from_aws_sdk_error(err))
+        }
+    }
+}
+```
+
+This Rust function implements the same functionality as the Python function, with the following key points:
+
+1. It uses the provided `convert_to_database` function to create a `DatabaseInput` from the namespace and properties.
+2. It uses the `GlueClient` (assumed to be part of `self.client`) to create the database.
+3. It handles the "already exists" error by checking for the specific AWS SDK error type and converting it to an `AlreadyExists` error.
+4. It returns a `Result<Namespace>` with the created namespace on success, or an appropriate error on failure.
+5. It uses the `validate_namespace` function (assumed to be available) to validate the namespace.
+6. It uses the `Namespace::with_properties` method to create a new `Namespace` instance with the given properties.
+
+Note that this implementation assumes that the necessary error handling functions (`from_aws_sdk_error`) and utility functions (`validate_namespace`) are available in the current scope or imported from the appropriate modules.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+async fn create_namespace(
+    &self,
+    namespace: &NamespaceIdent,
+    properties: HashMap<String, String>,
+) -> Result<Namespace> {
+    let database_input = convert_to_database(namespace, &properties)?;
+
+    match self.client.create_database().set_database_input(Some(database_input)).send().await {
+        Ok(_) => Ok(Namespace::with_properties(namespace.clone(), properties)),
+        Err(err) => {
+            if let Some(aws_sdk_glue::error::SdkError::ServiceError(service_error)) = err.as_service_error() {
+                if let aws_sdk_glue::operation::create_database::CreateDatabaseErrorKind::AlreadyExistsException(_) = service_error.kind {
+                    let db_name = validate_namespace(namespace)?;
+                    return Err(Error::new(
+                        ErrorKind::AlreadyExists,
+                        format!("Database {} already exists", db_name),
+                    ));
+                }
+            }
+            Err(from_aws_sdk_error(err))
+        }
+    }
+}
+```
+
+This Rust function implements the same functionality as the Python function, with the following key points:
+
+1. It uses the provided `convert_to_database` function to create a `DatabaseInput` from the namespace and properties.
+2. It uses the `GlueClient` (assumed to be part of `self.client`) to create the database.
+3. It handles the "already exists" error by checking for the specific AWS SDK error type and converting it to an `AlreadyExists` error.
+4. It returns a `Result<Namespace>` with the created namespace on success, or an appropriate error on failure.
+5. It uses the `validate_namespace` function (assumed to be available) to validate the namespace.
+6. It uses the `Namespace::with_properties` method to create a new `Namespace` instance with the given properties.
+
+Note that this implementation assumes that the necessary error handling functions (`from_aws_sdk_error`) and utility functions (`validate_namespace`) are available in the current scope or imported from the appropriate modules.

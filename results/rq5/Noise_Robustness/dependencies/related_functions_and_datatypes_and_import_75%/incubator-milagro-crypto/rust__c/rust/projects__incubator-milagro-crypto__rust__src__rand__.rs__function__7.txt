@@ -1,0 +1,81 @@
+fn sirand(&mut self, seed: u32) {
+        let mut m: u32 = 1;
+        let mut sd = seed;
+        self.borrow = 0;
+        self.rndptr = 0;
+        self.ira[0] ^= sd;
+        for i in 1..RAND_NK {
+            /* fill initialisation vector */
+            let inn = (RAND_NV * i) % RAND_NK;
+            self.ira[inn] ^= m; /* note XOR */
+            let t = m;
+            m = sd.wrapping_sub(m);
+            sd = t;
+        }
+        for _ in 0..10000 {
+            self.sbrand();
+        } /* "warm-up" & stir the generator */
+    }
+pub fn process(&mut self, byt: u8) {
+        /* process the next message byte */
+        let cnt = ((self.length[0] / 32) % 16) as usize;
+        self.w[cnt] <<= 8;
+        self.w[cnt] |= (byt & 0xFF) as u32;
+        self.length[0] += 8;
+        if self.length[0] == 0 {
+            self.length[1] += 1;
+            self.length[0] = 0
+        }
+        if (self.length[0] % 512) == 0 {
+            self.transform()
+        }
+    }
+fn fill_pool(&mut self) {
+        let mut sh = HASH256::new();
+        for _ in 0..128 {
+            sh.process((self.sbrand() & 0xff) as u8)
+        }
+        let w = sh.hash();
+        for i in 0..32 {
+            self.pool[i] = w[i]
+        }
+        self.pool_ptr = 0;
+    }
+pub fn hash(&mut self) -> [u8; HASH_BYTES] {
+        // pad message and finish - supply digest
+        let mut digest: [u8; 32] = [0; 32];
+        let len0 = self.length[0];
+        let len1 = self.length[1];
+        self.process(0x80);
+        while (self.length[0] % 512) != 448 {
+            self.process(0)
+        }
+        self.w[14] = len1;
+        self.w[15] = len0;
+        self.transform();
+        for i in 0..32 {
+            // convert to bytes
+            digest[i] = ((self.h[i / 4] >> (8 * (3 - i % 4))) & 0xff) as u8;
+        }
+        self.init();
+        return digest;
+    }
+pub fn new() -> HASH256 {
+        let mut nh = HASH256 {
+            length: [0; 2],
+            h: [0; 8],
+            w: [0; 64],
+        };
+        nh.init();
+        return nh;
+    }
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+------
+
+use crate::hash256::HASH256;

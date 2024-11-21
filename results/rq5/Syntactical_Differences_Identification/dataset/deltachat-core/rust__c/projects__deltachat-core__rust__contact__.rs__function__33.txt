@@ -1,0 +1,82 @@
+<path>
+projects/deltachat-core/rust/contact.rs
+</path>
+<function>
+    pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> {
+        ensure!(!contact_id.is_special(), "Can not delete special contact");
+
+        context
+            .sql
+            .transaction(move |transaction| {
+                // make sure, the transaction starts with a write command and becomes EXCLUSIVE by that -
+                // upgrading later may be impossible by races.
+                let deleted_contacts = transaction.execute(
+                    "DELETE FROM contacts WHERE id=?
+                     AND (SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?)=0;",
+                    (contact_id, contact_id),
+                )?;
+                if deleted_contacts == 0 {
+                    transaction.execute(
+                        "UPDATE contacts SET origin=? WHERE id=?;",
+                        (Origin::Hidden, contact_id),
+                    )?;
+                }
+                Ok(())
+            })
+            .await?;
+
+        context.emit_event(EventType::ContactsChanged(None));
+        Ok(())
+    }
+</function>
+------
+<path>
+projects/deltachat-core/c/dc_contact.c
+</path>
+<function>
+int dc_delete_contact(dc_context_t* context, uint32_t contact_id)
+{
+	int           success = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || contact_id<=DC_CONTACT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+	/* we can only delete contacts that are not in use anywhere; this function is mainly for the user who has just
+	created an contact manually and wants to delete it a moment later */
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_ROW || sqlite3_column_int(stmt, 0) >= 1) {
+		goto cleanup;
+	}
+	sqlite3_finalize(stmt);
+	stmt = NULL;
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM msgs WHERE from_id=? OR to_id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	sqlite3_bind_int(stmt, 2, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_ROW || sqlite3_column_int(stmt, 0) >= 1) {
+		goto cleanup;
+	}
+	sqlite3_finalize(stmt);
+	stmt = NULL;
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"DELETE FROM contacts WHERE id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_DONE) {
+		goto cleanup;
+	}
+
+	context->cb(context, DC_EVENT_CONTACTS_CHANGED, 0, 0);
+
+	success = 1;
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return success;
+}
+</function>

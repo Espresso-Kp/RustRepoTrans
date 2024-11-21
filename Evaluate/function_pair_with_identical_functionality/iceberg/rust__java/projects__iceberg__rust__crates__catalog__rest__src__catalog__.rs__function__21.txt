@@ -1,0 +1,47 @@
+<path>
+projects/iceberg/rust/crates/catalog/rest/src/catalog.rs
+</path>
+<function>
+    async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let request = self
+            .client
+            .0
+            .get(self.config.tables_endpoint(namespace))
+            .build()?;
+
+        let resp = self
+            .client
+            .query::<ListTableResponse, ErrorResponse, OK>(request)
+            .await?;
+
+        Ok(resp.identifiers)
+    }
+</function>
+------
+
+<path>
+projects/iceberg/java/core/src/main/java/org/apache/iceberg/rest/RESTSessionCatalog.java
+</path>
+<function>
+  public List<TableIdentifier> listTables(SessionContext context, Namespace ns) {
+    checkNamespaceIsValid(ns);
+    Map<String, String> queryParams = Maps.newHashMap();
+    ImmutableList.Builder<TableIdentifier> tables = ImmutableList.builder();
+    String pageToken = "";
+
+    do {
+      queryParams.put("pageToken", pageToken);
+      ListTablesResponse response =
+          client.get(
+              paths.tables(ns),
+              queryParams,
+              ListTablesResponse.class,
+              headers(context),
+              ErrorHandlers.namespaceErrorHandler());
+      pageToken = response.nextPageToken();
+      tables.addAll(response.identifiers());
+    } while (pageToken != null);
+
+    return tables.build();
+  }
+</function>

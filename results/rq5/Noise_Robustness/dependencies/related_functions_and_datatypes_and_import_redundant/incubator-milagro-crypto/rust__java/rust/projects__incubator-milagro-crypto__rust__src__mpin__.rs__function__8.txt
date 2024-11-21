@@ -1,0 +1,200 @@
+fn emap(u: &Big, cb: isize) -> ECP {
+    let mut P: ECP;
+    let mut x = u.clone();
+    let p = Big::new_ints(&rom::MODULUS);
+    x.rmod(&p);
+    loop {
+        P = ECP::new_bigint(&x, cb);
+        if !P.is_infinity() {
+            break;
+        }
+        x.inc(1);
+        x.norm();
+    }
+    return P;
+}
+
+pub fn gety(&self) -> FP2 {
+        let mut W = self.clone();
+        W.affine();
+        W.y.clone()
+    }
+
+pub fn getx(&self) -> FP2 {
+        let mut W = self.clone();
+        W.affine();
+        W.x.clone()
+    }
+
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+
+pub fn to_bytes(&self, b: &mut [u8]) {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let mut W = self.clone();
+
+        W.affine();
+        W.x.geta().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i] = t[i]
+        }
+        W.x.getb().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + mb] = t[i]
+        }
+
+        W.y.geta().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 2 * mb] = t[i]
+        }
+        W.y.getb().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 3 * mb] = t[i]
+        }
+    }
+
+pub const EFS: usize = big::MODBYTES as usize;
+
+pub const INVALID_POINT: isize = -14;
+
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+
+fn emap(u: &Big, cb: isize) -> ECP {
+    let mut P: ECP;
+    let mut x = u.clone();
+    let mut p = Big::new_ints(&rom::MODULUS);
+    x.rmod(&mut p);
+    loop {
+        P = ECP::new_bigint(&x, cb);
+        if !P.is_infinity() {
+            break;
+        }
+        x.inc(1);
+        x.norm();
+    }
+    return P;
+}
+pub struct RsaPublicKey {
+    e: isize,
+    n: FF,
+}
+------
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

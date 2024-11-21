@@ -1,0 +1,50 @@
+<path>
+projects/iceberg/rust/crates/iceberg/src/spec/schema.rs
+</path>
+<function>
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> {
+    let mut visitor = PruneColumn::new(HashSet::from_iter(selected), select_full_types);
+    let result = visit_schema(schema, &mut visitor);
+
+    match result {
+        Ok(s) => {
+            if let Some(struct_type) = s {
+                Ok(struct_type)
+            } else {
+                Ok(Type::Struct(StructType::default()))
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+</function>
+------
+
+<path>
+projects/iceberg/python/pyiceberg/schema.py
+</path>
+<function>
+def prune_columns(schema: Schema, selected: Set[int], select_full_types: bool = True) -> Schema:
+    """Prunes a column by only selecting a set of field-ids.
+
+    Args:
+        schema: The schema to be pruned.
+        selected: The field-ids to be included.
+        select_full_types: Return the full struct when a subset is recorded
+
+    Returns:
+        The pruned schema.
+    """
+    result = visit(schema.as_struct(), _PruneColumnsVisitor(selected, select_full_types))
+    return Schema(
+        *(result or StructType()).fields,
+        schema_id=schema.schema_id,
+        identifier_field_ids=list(selected.intersection(schema.identifier_field_ids)),
+    )
+
+
+</function>

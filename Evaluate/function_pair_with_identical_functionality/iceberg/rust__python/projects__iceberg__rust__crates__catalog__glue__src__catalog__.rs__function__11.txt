@@ -1,0 +1,85 @@
+<path>
+projects/iceberg/rust/crates/catalog/glue/src/catalog.rs
+</path>
+<function>
+    async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> {
+        let db_name = validate_namespace(namespace)?;
+        let table_name = creation.name.clone();
+
+        let location = match &creation.location {
+            Some(location) => location.clone(),
+            None => {
+                let ns = self.get_namespace(namespace).await?;
+                get_default_table_location(&ns, &db_name, &table_name, &self.config.warehouse)
+            }
+        };
+
+        let metadata = TableMetadataBuilder::from_table_creation(creation)?.build()?;
+        let metadata_location = create_metadata_location(&location, 0)?;
+
+        self.file_io
+            .new_output(&metadata_location)?
+            .write(serde_json::to_vec(&metadata)?.into())
+            .await?;
+
+        let glue_table = convert_to_glue_table(
+            &table_name,
+            metadata_location.clone(),
+            &metadata,
+            metadata.properties(),
+            None,
+        )?;
+
+        let builder = self
+            .client
+            .0
+            .create_table()
+            .database_name(&db_name)
+            .table_input(glue_table);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        let table = Table::builder()
+            .file_io(self.file_io())
+            .metadata_location(metadata_location)
+            .metadata(metadata)
+            .identifier(TableIdent::new(NamespaceIdent::new(db_name), table_name))
+            .build();
+
+        Ok(table)
+    }
+</function>
+------
+
+<path>
+projects/iceberg/python/pyiceberg/catalog/glue.py
+</path>
+<function>
+    def register_table(self, identifier: Union[str, Identifier], metadata_location: str) -> Table:
+        """Register a new table using existing metadata.
+
+        Args:
+            identifier Union[str, Identifier]: Table identifier for the table
+            metadata_location str: The location to the metadata
+
+        Returns:
+            Table: The newly registered table
+
+        Raises:
+            TableAlreadyExistsError: If the table already exists
+        """
+        database_name, table_name = self.identifier_to_database_and_table(identifier)
+        properties = EMPTY_DICT
+        io = self._load_file_io(location=metadata_location)
+        file = io.new_input(metadata_location)
+        metadata = FromInputFile.table_metadata(file)
+        table_input = _construct_table_input(table_name, metadata_location, properties, metadata)
+        self._create_glue_table(database_name=database_name, table_name=table_name, table_input=table_input)
+        return self.load_table(identifier=identifier)
+
+</function>

@@ -1,0 +1,215 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void dc_apeerstate_apply_header(dc_apeerstate_t* peerstate, const dc_aheader_t* header, time_t message_time)
+{
+	if (peerstate==NULL || header==NULL
+	 || peerstate->addr==NULL
+	 || header->addr==NULL || header->public_key->binary==NULL
+	 || strcasecmp(peerstate->addr, header->addr)!=0) {
+		return;
+	}
+
+	if (message_time > peerstate->last_seen_autocrypt)
+	{
+		peerstate->last_seen           = message_time;
+		peerstate->last_seen_autocrypt = message_time;
+
+		if ((header->prefer_encrypt==DC_PE_MUTUAL || header->prefer_encrypt==DC_PE_NOPREFERENCE) /*this also switches from DC_PE_RESET to DC_PE_NOPREFERENCE, which is just fine as the function is only called _if_ the Autocrypt:-header is preset at all */
+		 &&  header->prefer_encrypt!=peerstate->prefer_encrypt)
+		{
+			peerstate->prefer_encrypt = header->prefer_encrypt;
+		}
+
+		if (peerstate->public_key==NULL) {
+			peerstate->public_key = dc_key_new();
+		}
+
+		if (!dc_key_equals(peerstate->public_key, header->public_key))
+		{
+			dc_key_set_from_key(peerstate->public_key, header->public_key);
+			dc_apeerstate_recalc_fingerprint(peerstate);
+		}
+	}
+}
+</c function>
+<rust function signature>
+pub fn apply_header(&mut self, header: &Aheader, message_time: i64) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub struct Peerstate {
+    /// E-mail address of the contact.
+    pub addr: String,
+
+    /// Timestamp of the latest peerstate update.
+    ///
+    /// Updated when a message is received from a contact,
+    /// either with or without `Autocrypt` header.
+    pub last_seen: i64,
+
+    /// Timestamp of the latest `Autocrypt` header reception.
+    pub last_seen_autocrypt: i64,
+
+    /// Encryption preference of the contact.
+    pub prefer_encrypt: EncryptPreference,
+
+    /// Public key of the contact received in `Autocrypt` header.
+    pub public_key: Option<SignedPublicKey>,
+
+    /// Fingerprint of the contact public key.
+    pub public_key_fingerprint: Option<Fingerprint>,
+
+    /// Public key of the contact received in `Autocrypt-Gossip` header.
+    pub gossip_key: Option<SignedPublicKey>,
+
+    /// Timestamp of the latest `Autocrypt-Gossip` header reception.
+    ///
+    /// It is stored to avoid applying outdated gossiped key
+    /// from delayed or reordered messages.
+    pub gossip_timestamp: i64,
+
+    /// Fingerprint of the contact gossip key.
+    pub gossip_key_fingerprint: Option<Fingerprint>,
+
+    /// Public key of the contact at the time it was verified,
+    /// either directly or via gossip from the verified contact.
+    pub verified_key: Option<SignedPublicKey>,
+
+    /// Fingerprint of the verified public key.
+    pub verified_key_fingerprint: Option<Fingerprint>,
+
+    /// The address that introduced this verified key.
+    pub verifier: Option<String>,
+
+    /// Secondary public verified key of the contact.
+    /// It could be a contact gossiped by another verified contact in a shared group
+    /// or a key that was previously used as a verified key.
+    pub secondary_verified_key: Option<SignedPublicKey>,
+
+    /// Fingerprint of the secondary verified public key.
+    pub secondary_verified_key_fingerprint: Option<Fingerprint>,
+
+    /// The address that introduced secondary verified key.
+    pub secondary_verifier: Option<String>,
+
+    /// Row ID of the key in the `keypairs` table
+    /// that we think the peer knows as verified.
+    pub backward_verified_key_id: Option<i64>,
+
+    /// True if it was detected
+    /// that the fingerprint of the key used in chats with
+    /// opportunistic encryption was changed after Peerstate creation.
+    pub fingerprint_changed: bool,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::mem;
+use anyhow::{Context as _, Error, Result};
+use deltachat_contact_tools::{addr_cmp, ContactAddress};
+use num_traits::FromPrimitive;
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::chat::{self, Chat};
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::constants::Chattype;
+use crate::contact::{Contact, Origin};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{DcKey, Fingerprint, SignedPublicKey};
+use crate::message::Message;
+use crate::mimeparser::SystemMessage;
+use crate::sql::Sql;
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::test_utils::alice_keypair;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn apply_header(&mut self, header: &Aheader, message_time: i64) {
+        if !addr_cmp(&self.addr, &header.addr) {
+            return;
+        }
+
+        if message_time >= self.last_seen {
+            self.last_seen = message_time;
+            self.last_seen_autocrypt = message_time;
+            if (header.prefer_encrypt == EncryptPreference::Mutual
+                || header.prefer_encrypt == EncryptPreference::NoPreference)
+                && header.prefer_encrypt != self.prefer_encrypt
+            {
+                self.prefer_encrypt = header.prefer_encrypt;
+            }
+
+            if self.public_key.as_ref() != Some(&header.public_key) {
+                self.public_key = Some(header.public_key.clone());
+                self.recalc_fingerprint();
+            }
+        }
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn apply_header(&mut self, header: &Aheader, message_time: i64) {
+    if self.addr.is_none() || header.addr.is_none() || header.public_key.is_none() {
+        return;
+    }
+
+    if message_time > self.last_seen_autocrypt {
+        self.last_seen = message_time;
+        self.last_seen_autocrypt = message_time;
+
+        if (header.prefer_encrypt == EncryptPreference::Mutual || header.prefer_encrypt == EncryptPreference::NoPreference)
+            && header.prefer_encrypt!= self.prefer_encrypt
+        {
+            self.prefer_encrypt = header.prefer_encrypt;
+        }
+
+        if self.public_key.is_none() {
+            self.public_key = Some(SignedPublicKey::new());
+        }
+
+        if self.public_key.as_ref().unwrap().fingerprint()!= header.public_key.as_ref().unwrap().fingerprint() {
+            self.public_key = Some(header.public_key.clone());
+            self.public_key_fingerprint = Some(header.public_key.as_ref().unwrap().fingerprint());
+            self.recalc_fingerprint();
+        }
+    }
+}
+```
+Note that I've assumed that the `dc_key_new` function is equivalent to `SignedPublicKey::new()`, and that the `dc_key_equals` function is equivalent to comparing the fingerprints of the public keys. I've also assumed that the `dc_key_set_from_key` function is equivalent to assigning the public key from the header to the peerstate's public key. Additionally, I've assumed that the `dc_apeerstate_recalc_fingerprint` function is equivalent to calling the `recalc_fingerprint` method on the peerstate.</translated function>Here is the translated Rust function:
+```rust
+pub fn apply_header(&mut self, header: &Aheader, message_time: i64) {
+    if self.addr.is_none() || header.addr.is_none() || header.public_key.is_none() {
+        return;
+    }
+
+    if message_time > self.last_seen_autocrypt {
+        self.last_seen = message_time;
+        self.last_seen_autocrypt = message_time;
+
+        if (header.prefer_encrypt == EncryptPreference::Mutual || header.prefer_encrypt == EncryptPreference::NoPreference)
+            && header.prefer_encrypt!= self.prefer_encrypt
+        {
+            self.prefer_encrypt = header.prefer_encrypt;
+        }
+
+        if self.public_key.is_none() {
+            self.public_key = Some(SignedPublicKey::new());
+        }
+
+        if self.public_key.as_ref().unwrap().fingerprint()!= header.public_key.as_ref().unwrap().fingerprint() {
+            self.public_key = Some(header.public_key.clone());
+            self.public_key_fingerprint = Some(header.public_key.as_ref().unwrap().fingerprint());
+            self.recalc_fingerprint();
+        }
+    }
+}
+```
+Note that I've assumed that the `dc_key_new` function is equivalent to `SignedPublicKey::new()`, and that the `dc_key_equals` function is equivalent to comparing the fingerprints of the public keys. I've also assumed that the `dc_key_set_from_key` function is equivalent to assigning the public key from the header to the peerstate's public key. Additionally, I've assumed that the `dc_apeerstate_recalc_fingerprint` function is equivalent to calling the `recalc_fingerprint` method on the peerstate.

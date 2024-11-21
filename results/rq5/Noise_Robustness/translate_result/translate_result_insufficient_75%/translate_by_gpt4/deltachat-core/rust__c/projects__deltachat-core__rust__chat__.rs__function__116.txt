@@ -1,0 +1,391 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+* The result must be dc_array_unref()'d
+ *
+ * The list is already sorted and starts with the oldest message.
+ * Clients should not try to re-sort the list as this would be an expensive action
+ * and would result in inconsistencies between clients.
+ *
+ * @memberof dc_context_t
+ * @param context The context object as returned from dc_context_new().
+ * @param chat_id The chat ID to get all messages with media from.
+ * @param msg_type Specify a message type to query here, one of the DC_MSG_* constats.
+ * @param msg_type2 Alternative message type to search for. 0 to skip.
+ * @param msg_type3 Alternative message type to search for. 0 to skip.
+ * @return An array with messages from the given chat ID that have the wanted message types.
+ */
+dc_array_t* dc_get_chat_media(dc_context_t* context, uint32_t chat_id,
+                              int msg_type, int msg_type2, int msg_type3)
+{
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		return NULL;
+	}
+
+	dc_array_t* ret = dc_array_new(context, 100);
+
+	sqlite3_stmt* stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT id FROM msgs WHERE chat_id=? AND chat_id != ? AND (type=? OR type=? OR type=?) ORDER BY timestamp, id;");
+	sqlite3_bind_int(stmt, 1, chat_id);
+    sqlite3_bind_int(stmt, 2, DC_CHAT_ID_TRASH);
+	sqlite3_bind_int(stmt, 3, msg_type);
+	sqlite3_bind_int(stmt, 4, msg_type2>0? msg_type2 : msg_type);
+	sqlite3_bind_int(stmt, 5, msg_type3>0? msg_type3 : msg_type);
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+	sqlite3_finalize(stmt);
+
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_chat_media(
+    context: &Context,
+    chat_id: Option<ChatId>,
+    msg_type: Viewtype,
+    msg_type2: Viewtype,
+    msg_type3: Viewtype,
+) -> Result<Vec<MsgId>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+pub async fn query_map<T, F, G, H>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+        mut g: G,
+    ) -> Result<H>
+    where
+        F: Send + FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+        G: Send + FnMut(rusqlite::MappedRows<F>) -> Result<H>,
+        H: Send + 'static,
+    {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let res = stmt.query_map(params, f)?;
+            g(res)
+        })
+        .await
+    }
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+pub struct MsgId(u32);
+pub struct ChatId(u32);
+impl ChatId {
+    /// Create a new [ChatId].
+    pub const fn new(id: u32) -> ChatId {
+        ChatId(id)
+    }
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_chat_media(
+    context: &Context,
+    chat_id: Option<ChatId>,
+    msg_type: Viewtype,
+    msg_type2: Viewtype,
+    msg_type3: Viewtype,
+) -> Result<Vec<MsgId>> {
+    // TODO This query could/should be converted to `AND type IN (?, ?, ?)`.
+    let list = context
+        .sql
+        .query_map(
+            "SELECT id
+               FROM msgs
+              WHERE (1=? OR chat_id=?)
+                AND chat_id != ?
+                AND (type=? OR type=? OR type=?)
+                AND hidden=0
+              ORDER BY timestamp, id;",
+            (
+                chat_id.is_none(),
+                chat_id.unwrap_or_else(|| ChatId::new(0)),
+                DC_CHAT_ID_TRASH,
+                msg_type,
+                if msg_type2 != Viewtype::Unknown {
+                    msg_type2
+                } else {
+                    msg_type
+                },
+                if msg_type3 != Viewtype::Unknown {
+                    msg_type3
+                } else {
+                    msg_type
+                },
+            ),
+            |row| row.get::<_, MsgId>(0),
+            |ids| Ok(ids.flatten().collect()),
+        )
+        .await?;
+    Ok(list)
+}
+</function>
+<translated function>
+Here is the translated code in Rust:
+
+```rust
+pub async fn get_chat_media(
+    context: &Context,
+    chat_id: Option<u32>,
+    msg_type: Viewtype,
+    msg_type2: Viewtype,
+    msg_type3: Viewtype,
+) -> Result<Vec<u32>> {
+    if chat_id.is_none() {
+        return Ok(vec![]);
+    }
+    
+    let chat_id = chat_id.unwrap();
+    let res = context
+        .sql
+        .query_map(
+            "SELECT id FROM msgs WHERE chat_id=? AND chat_id != ? AND (type=? OR type=? OR type=?) ORDER BY timestamp, id;",
+            params![chat_id, DC_CHAT_ID_TRASH, msg_type, msg_type2, msg_type3],
+            |row| row.get::<_, u32>(0),
+            |ids| {
+                let mut ret = Vec::new();
+                for id in ids {
+                    ret.push(id?);
+                }
+                Ok(ret)
+            },
+        )
+        .await?;
+    Ok(res)
+
+}
+```
+
+Please note that if there may be a need to convert `Viewtype` datatype to the corresponding integer value as used in the database. Also, the magic check inside C function is intentionally ignored as it seems to be a specific check not applicable in the Rust context.</translated function>Here is the translated code in Rust:
+
+```rust
+pub async fn get_chat_media(
+    context: &Context,
+    chat_id: Option<u32>,
+    msg_type: Viewtype,
+    msg_type2: Viewtype,
+    msg_type3: Viewtype,
+) -> Result<Vec<u32>> {
+    if chat_id.is_none() {
+        return Ok(vec![]);
+    }
+    
+    let chat_id = chat_id.unwrap();
+    let res = context
+        .sql
+        .query_map(
+            "SELECT id FROM msgs WHERE chat_id=? AND chat_id != ? AND (type=? OR type=? OR type=?) ORDER BY timestamp, id;",
+            params![chat_id, DC_CHAT_ID_TRASH, msg_type, msg_type2, msg_type3],
+            |row| row.get::<_, u32>(0),
+            |ids| {
+                let mut ret = Vec::new();
+                for id in ids {
+                    ret.push(id?);
+                }
+                Ok(ret)
+            },
+        )
+        .await?;
+    Ok(res)
+
+}
+```
+
+Please note that if there may be a need to convert `Viewtype` datatype to the corresponding integer value as used in the database. Also, the magic check inside C function is intentionally ignored as it seems to be a specific check not applicable in the Rust context.

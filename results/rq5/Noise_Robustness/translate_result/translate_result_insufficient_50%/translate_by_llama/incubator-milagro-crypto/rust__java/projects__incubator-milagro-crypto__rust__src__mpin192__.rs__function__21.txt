@@ -1,0 +1,168 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static void SERVER_1(int sha,int date,byte[] CID,byte[] HID,byte[] HTID)
+	{
+		byte[] h=hashit(sha,0,CID,EFS);
+		ECP R,P=ECP.mapit(h);
+
+		P.toBytes(HID,false);   // new
+		if (date!=0)
+		{
+	//		if (HID!=null) P.toBytes(HID,false);
+			h=hashit(sha,date,h,EFS);
+			R=ECP.mapit(h);
+			P.add(R); //P.affine();
+			P.toBytes(HTID,false);
+		}
+	//	else P.toBytes(HID,false);
+	}
+</java function>
+<rust function signature>
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn mapit(h: &[u8]) -> ECP {
+        let q = Big::new_ints(&rom::MODULUS);
+        let mut x = Big::from_bytes(h);
+        x.rmod(&q);
+        let mut P: ECP;
+
+        loop {
+            loop {
+                if CURVETYPE != CurveType::Montgomery {
+                    P = ECP::new_bigint(&x, 0);
+                } else {
+                    P = ECP::new_big(&x);
+                }
+                x.inc(1);
+                x.norm();
+                if !P.is_infinity() {
+                    break;
+                }
+            }
+            P.cfp();
+            if !P.is_infinity() {
+                break;
+            }
+        }
+
+        return P;
+    }
+pub fn to_bytes(&self, b: &mut [u8], compress: bool) {
+        let mb = big::MODBYTES as usize;
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mut W = self.clone();
+
+        W.affine();
+        W.x.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 1] = t[i]
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            b[0] = 0x06;
+            return;
+        }
+
+        if compress {
+            b[0] = 0x02;
+            if W.y.redc().parity() == 1 {
+                b[0] = 0x03
+            }
+            return;
+        }
+
+        b[0] = 0x04;
+
+        W.y.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + mb + 1] = t[i]
+        }
+    }
+pub const MODBYTES: usize = 32;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    const RM: usize = big::MODBYTES as usize;
+    let mut h: [u8; RM] = [0; RM];
+
+    hashit(sha, 0, cid, &mut h);
+
+    let mut P = ECP::mapit(&h);
+
+    P.to_bytes(hid, false);
+    if date != 0 {
+        let mut h2: [u8; RM] = [0; RM];
+        hashit(sha, date, &h, &mut h2);
+        let mut R = ECP::mapit(&h2);
+        P.add(&mut R);
+        if let Some(rhtid) = htid {
+            P.to_bytes(rhtid, false);
+        }
+    }
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    let h = hashit(sha, 0, cid, EFS);
+    let R = ECP::mapit(&h);
+    R.to_bytes(hid, false);
+
+    if date!= 0 {
+        let h = hashit(sha, date, &h, EFS);
+        let R = ECP::mapit(&h);
+        R.add(&R);
+        R.to_bytes(hid, false);
+        if let Some(htid) = htid {
+            R.to_bytes(htid, false);
+        }
+    }
+}
+```
+Note that I've assumed that `hashit` is a function that takes four arguments and returns a byte array, and that `EFS` is a constant or a function that returns a byte array. I've also assumed that `ECP` has methods `mapit`, `to_bytes`, and `add`, and that `Big` has methods `new_ints`, `from_bytes`, `rmod`, `inc`, and `norm`. If these assumptions are incorrect, please let me know and I'll be happy to adjust the translation accordingly.</translated function>Here is the translated Rust function:
+```rust
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    let h = hashit(sha, 0, cid, EFS);
+    let R = ECP::mapit(&h);
+    R.to_bytes(hid, false);
+
+    if date!= 0 {
+        let h = hashit(sha, date, &h, EFS);
+        let R = ECP::mapit(&h);
+        R.add(&R);
+        R.to_bytes(hid, false);
+        if let Some(htid) = htid {
+            R.to_bytes(htid, false);
+        }
+    }
+}
+```
+Note that I've assumed that `hashit` is a function that takes four arguments and returns a byte array, and that `EFS` is a constant or a function that returns a byte array. I've also assumed that `ECP` has methods `mapit`, `to_bytes`, and `add`, and that `Big` has methods `new_ints`, `from_bytes`, `rmod`, `inc`, and `norm`. If these assumptions are incorrect, please let me know and I'll be happy to adjust the translation accordingly.

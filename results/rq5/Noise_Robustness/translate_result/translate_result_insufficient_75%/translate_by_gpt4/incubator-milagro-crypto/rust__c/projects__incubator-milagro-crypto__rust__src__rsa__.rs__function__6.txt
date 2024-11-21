@@ -1,0 +1,221 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int PKCS15(int sha,const octet *m,octet *w)
+{
+    int olen=w->max;
+    int hlen=sha;
+    int idlen=19;
+    char h[64];
+    octet H= {0,sizeof(h),h};
+
+    if (olen<idlen+hlen+10) return 1;
+    hashit(sha,m,-1,&H);
+
+    OCT_empty(w);
+    OCT_jbyte(w,0x00,1);
+    OCT_jbyte(w,0x01,1);
+    OCT_jbyte(w,0xff,olen-idlen-hlen-3);
+    OCT_jbyte(w,0x00,1);
+
+    if (hlen==32) OCT_jbytes(w,(char *)SHA256ID,idlen);
+    if (hlen==48) OCT_jbytes(w,(char *)SHA384ID,idlen);
+    if (hlen==64) OCT_jbytes(w,(char *)SHA512ID,idlen);
+
+    OCT_joctet(w,&H);
+
+    return 0;
+}
+</c function>
+<rust function signature>
+pub fn pkcs15(sha: usize, m: &[u8], w: &mut [u8]) -> bool 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+const SHA256ID: [u8; 19] = [
+    0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0x04, 0x20,
+];
+const SHA384ID: [u8; 19] = [
+    0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05,
+    0x00, 0x04, 0x30,
+];
+const SHA512ID: [u8; 19] = [
+    0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05,
+    0x00, 0x04, 0x40,
+];
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn pkcs15(sha: usize, m: &[u8], w: &mut [u8]) -> bool {
+    let olen = ff::FF_BITS / 8;
+    let hlen = sha;
+    let idlen = 19;
+    let mut b: [u8; 64] = [0; 64]; /* Not good */
+
+    if olen < idlen + hlen + 10 {
+        return false;
+    }
+    hashit(sha, Some(m), -1, &mut b);
+
+    for i in 0..w.len() {
+        w[i] = 0
+    }
+    let mut i = 0;
+    w[i] = 0;
+    i += 1;
+    w[i] = 1;
+    i += 1;
+    for _ in 0..olen - idlen - hlen - 3 {
+        w[i] = 0xff;
+        i += 1
+    }
+    w[i] = 0;
+    i += 1;
+
+    if hlen == SHA256 {
+        for j in 0..idlen {
+            w[i] = SHA256ID[j];
+            i += 1
+        }
+    }
+    if hlen == SHA384 {
+        for j in 0..idlen {
+            w[i] = SHA384ID[j];
+            i += 1
+        }
+    }
+    if hlen == SHA512 {
+        for j in 0..idlen {
+            w[i] = SHA512ID[j];
+            i += 1
+        }
+    }
+    for j in 0..hlen {
+        w[i] = b[j];
+        i += 1
+    }
+
+    return true;
+}
+</function>
+<translated function>
+pub fn pkcs15(sha: usize, m: &[u8], w: &mut [u8]) -> bool {
+    let olen = w.len();
+    let hlen = sha;
+    let idlen = 19;
+    let mut h = [0u8; 64];
+
+    if olen < idlen + hlen + 10 {
+        return false;
+    }
+
+    let mut hash = HASH512::new();
+    match hlen {
+        32 => {
+            let mut hash256 = HASH256::new();
+            hash256.process_array(m);
+            h = hash256.hash();
+        }
+        48 => {
+            let mut hash384 = HASH384::new();
+            hash384.process_array(m);
+            h = hash384.hash();
+        }
+        64 => {
+            hash.process_array(m);
+            h = hash.hash();
+        }
+        _ => return false,
+    }
+
+    w[0] = 0x00;
+    w[1] = 0x01;
+    for i in (2..olen-idlen-hlen-3) {
+        w[i] = 0xff;
+    }
+    w[olen-idlen-hlen-3] = 0x00;
+
+    match hlen {
+        32 => {
+            w[(olen-idlen-hlen-3+1)..(olen-idlen-hlen-3+1+idlen)].clone_from_slice(&SHA256ID);
+        }
+        48 => {
+            w[(olen-idlen-hlen-3+1)..(olen-idlen-hlen-3+1+idlen)].clone_from_slice(&SHA384ID);
+        }
+        64 => {
+            w[(olen-idlen-hlen-3+1)..(olen-idlen-hlen-3+1+idlen)].clone_from_slice(&SHA512ID);
+        }
+        _ => return false,
+    }
+
+    w[(olen-hlen)..olen].clone_from_slice(&h[0..hlen]);
+
+    return true;
+}</translated function>pub fn pkcs15(sha: usize, m: &[u8], w: &mut [u8]) -> bool {
+    let olen = w.len();
+    let hlen = sha;
+    let idlen = 19;
+    let mut h = [0u8; 64];
+
+    if olen < idlen + hlen + 10 {
+        return false;
+    }
+
+    let mut hash = HASH512::new();
+    match hlen {
+        32 => {
+            let mut hash256 = HASH256::new();
+            hash256.process_array(m);
+            h = hash256.hash();
+        }
+        48 => {
+            let mut hash384 = HASH384::new();
+            hash384.process_array(m);
+            h = hash384.hash();
+        }
+        64 => {
+            hash.process_array(m);
+            h = hash.hash();
+        }
+        _ => return false,
+    }
+
+    w[0] = 0x00;
+    w[1] = 0x01;
+    for i in (2..olen-idlen-hlen-3) {
+        w[i] = 0xff;
+    }
+    w[olen-idlen-hlen-3] = 0x00;
+
+    match hlen {
+        32 => {
+            w[(olen-idlen-hlen-3+1)..(olen-idlen-hlen-3+1+idlen)].clone_from_slice(&SHA256ID);
+        }
+        48 => {
+            w[(olen-idlen-hlen-3+1)..(olen-idlen-hlen-3+1+idlen)].clone_from_slice(&SHA384ID);
+        }
+        64 => {
+            w[(olen-idlen-hlen-3+1)..(olen-idlen-hlen-3+1+idlen)].clone_from_slice(&SHA512ID);
+        }
+        _ => return false,
+    }
+
+    w[(olen-hlen)..olen].clone_from_slice(&h[0..hlen]);
+
+    return true;
+}

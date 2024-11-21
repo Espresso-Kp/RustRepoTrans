@@ -1,0 +1,219 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+void KDF2(int sha,const octet *z,const octet *p,int olen,octet *key)
+{
+    /* NOTE: the parameter olen is the length of the output k in bytes */
+    char h[64];
+    octet H= {0,sizeof(h),h};
+    int cthreshold;
+    int hlen=sha;
+
+    OCT_empty(key);
+
+    cthreshold=ROUNDUP(olen,hlen);
+
+    for (int counter=1; counter<=cthreshold; counter++)
+    {
+        ehashit(sha,z,counter,p,&H,0);
+        if (key->len+hlen>olen)  OCT_jbytes(key,H.val,olen%hlen);
+        else                     OCT_joctet(key,&H);
+    }
+
+}
+</c function>
+<rust function signature>
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn hashit(sha: usize, a: &[u8], n: usize, b: Option<&[u8]>, pad: usize, w: &mut [u8]) {
+    let mut r: [u8; 64] = [0; 64];
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+
+    if pad == 0 {
+        for i in 0..sha {
+            w[i] = r[i]
+        }
+    } else {
+        if pad <= sha {
+            for i in 0..pad {
+                w[i] = r[i]
+            }
+        } else {
+            for i in 0..sha {
+                w[i + pad - sha] = r[i]
+            }
+            for i in 0..(pad - sha) {
+                w[i] = 0
+            }
+        }
+    }
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    // NOTE: the parameter olen is the length of the output K in bytes
+    let hlen = sha;
+    let mut lk = 0;
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+
+    for counter in 1..=cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, z, counter, p, 0, &mut b);
+        if lk + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[lk] = b[i];
+                lk += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[lk] = b[i];
+                lk += 1
+            }
+        }
+    }
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    let mut h: [u8; 64] = [0; 64];
+    let hlen = sha;
+
+    k.fill(0);
+
+    let cthreshold = (olen + hlen - 1) / hlen; // Equivalent to ROUNDUP(olen, hlen)
+
+    for counter in 1..=cthreshold {
+        hashit(sha, z, counter, p, 0, &mut h);
+        let remaining = olen.saturating_sub(k.len());
+        if remaining < hlen {
+            k[k.len()..].copy_from_slice(&h[..remaining]);
+        } else {
+            k[k.len()..].copy_from_slice(&h[..hlen]);
+        }
+    }
+}
+```
+
+This Rust implementation follows the logic of the original C function while adhering to Rust's idioms and making use of the provided dependencies. Here are some key points about the translation:
+
+1. We use a fixed-size array `h` of 64 bytes, which is the maximum possible size for the hash output.
+
+2. Instead of `OCT_empty(key)`, we use `k.fill(0)` to clear the output buffer.
+
+3. The `ROUNDUP` macro is replaced with `(olen + hlen - 1) / hlen`, which achieves the same ceiling division.
+
+4. We use the provided `hashit` function instead of `ehashit`.
+
+5. Instead of `OCT_jbytes` and `OCT_joctet`, we use `copy_from_slice` to append data to the output buffer. We calculate the remaining space in the buffer and copy either the full hash or just the remaining portion as needed.
+
+6. We use `saturating_sub` to prevent underflow when calculating the remaining space in the buffer.
+
+This implementation should provide equivalent functionality to the original C function while taking advantage of Rust's safety features and idiomatic patterns.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    let mut h: [u8; 64] = [0; 64];
+    let hlen = sha;
+
+    k.fill(0);
+
+    let cthreshold = (olen + hlen - 1) / hlen; // Equivalent to ROUNDUP(olen, hlen)
+
+    for counter in 1..=cthreshold {
+        hashit(sha, z, counter, p, 0, &mut h);
+        let remaining = olen.saturating_sub(k.len());
+        if remaining < hlen {
+            k[k.len()..].copy_from_slice(&h[..remaining]);
+        } else {
+            k[k.len()..].copy_from_slice(&h[..hlen]);
+        }
+    }
+}
+```
+
+This Rust implementation follows the logic of the original C function while adhering to Rust's idioms and making use of the provided dependencies. Here are some key points about the translation:
+
+1. We use a fixed-size array `h` of 64 bytes, which is the maximum possible size for the hash output.
+
+2. Instead of `OCT_empty(key)`, we use `k.fill(0)` to clear the output buffer.
+
+3. The `ROUNDUP` macro is replaced with `(olen + hlen - 1) / hlen`, which achieves the same ceiling division.
+
+4. We use the provided `hashit` function instead of `ehashit`.
+
+5. Instead of `OCT_jbytes` and `OCT_joctet`, we use `copy_from_slice` to append data to the output buffer. We calculate the remaining space in the buffer and copy either the full hash or just the remaining portion as needed.
+
+6. We use `saturating_sub` to prevent underflow when calculating the remaining space in the buffer.
+
+This implementation should provide equivalent functionality to the original C function while taking advantage of Rust's safety features and idiomatic patterns.

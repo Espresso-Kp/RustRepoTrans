@@ -1,0 +1,948 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+dc_array_t* dc_get_contacts(dc_context_t* context, uint32_t listflags, const char* query)
+{
+	char*         self_addr = NULL;
+	char*         self_name = NULL;
+	char*         self_name2 = NULL;
+	int           add_self = 0;
+	dc_array_t*   ret = dc_array_new(context, 100);
+	char*         s3strLikeCmd = NULL;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	self_addr = dc_sqlite3_get_config(context->sql, "configured_addr", ""); /* we add DC_CONTACT_ID_SELF explicitly; so avoid doubles if the address is present as a normal entry for some case */
+
+	if ((listflags&DC_GCL_VERIFIED_ONLY) || query)
+	{
+		if ((s3strLikeCmd=sqlite3_mprintf("%%%s%%", query? query : ""))==NULL) {
+			goto cleanup;
+		}
+		// see comments in dc_search_msgs() about the LIKE operator
+		stmt = dc_sqlite3_prepare(context->sql,
+			"SELECT c.id FROM contacts c"
+				" LEFT JOIN acpeerstates ps ON c.addr=ps.addr "
+				" WHERE c.addr!=?1 AND c.id>?2 AND c.origin>=?3"
+				" AND c.blocked=0 AND (c.name LIKE ?4 OR c.addr LIKE ?5)"
+				" AND (1=?6 OR LENGTH(ps.verified_key_fingerprint)!=0) "
+				" ORDER BY LOWER(c.name||c.addr),c.id;");
+		sqlite3_bind_text(stmt, 1, self_addr, -1, SQLITE_STATIC);
+		sqlite3_bind_int (stmt, 2, DC_CONTACT_ID_LAST_SPECIAL);
+		sqlite3_bind_int (stmt, 3, DC_ORIGIN_MIN_CONTACT_LIST);
+		sqlite3_bind_text(stmt, 4, s3strLikeCmd, -1, SQLITE_STATIC);
+		sqlite3_bind_text(stmt, 5, s3strLikeCmd, -1, SQLITE_STATIC);
+		sqlite3_bind_int (stmt, 6, (listflags&DC_GCL_VERIFIED_ONLY)? 0/*force checking for verified_key*/ : 1/*force statement being always true*/);
+
+		self_name  = dc_sqlite3_get_config(context->sql, "displayname", "");
+		self_name2 = dc_stock_str(context, DC_STR_SELF);
+		if (query==NULL || dc_str_contains(self_addr, query) || dc_str_contains(self_name, query) || dc_str_contains(self_name2, query)) {
+			add_self = 1;
+		}
+	}
+	else
+	{
+		stmt = dc_sqlite3_prepare(context->sql,
+			"SELECT id FROM contacts"
+				" WHERE addr!=?1 AND id>?2 AND origin>=?3 AND blocked=0"
+				" ORDER BY LOWER(name||addr),id;");
+		sqlite3_bind_text(stmt, 1, self_addr, -1, SQLITE_STATIC);
+		sqlite3_bind_int (stmt, 2, DC_CONTACT_ID_LAST_SPECIAL);
+		sqlite3_bind_int (stmt, 3, DC_ORIGIN_MIN_CONTACT_LIST);
+
+		add_self = 1;
+	}
+
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+
+	/* to the end of the list, add self - this is to be in sync with member lists and to allow the user to start a self talk */
+	if ((listflags&DC_GCL_ADD_SELF) && add_self) {
+		dc_array_add_id(ret, DC_CONTACT_ID_SELF);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	sqlite3_free(s3strLikeCmd);
+	free(self_addr);
+	free(self_name);
+	free(self_name2);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_all(
+        context: &Context,
+        listflags: u32,
+        query: Option<&str>,
+    ) -> Result<Vec<ContactId>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub async fn get_config_bool(&self, key: Config) -> Result<bool> {
+        Ok(self.get_config_bool_opt(key).await?.unwrap_or_default())
+    }
+
+macro_rules! params_slice {
+    ($($param:expr),+) => {
+        [$(&$param as &dyn $crate::sql::ToSql),+]
+    };
+}
+
+pub(crate) fn params_iter(
+    iter: &[impl crate::sql::ToSql],
+) -> impl Iterator<Item = &dyn crate::sql::ToSql> {
+    iter.iter().map(|item| item as &dyn crate::sql::ToSql)
+}
+
+pub async fn query_map<T, F, G, H>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+        mut g: G,
+    ) -> Result<H>
+    where
+        F: Send + FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+        G: Send + FnMut(rusqlite::MappedRows<F>) -> Result<H>,
+        H: Send + 'static,
+    {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let res = stmt.query_map(params, f)?;
+            g(res)
+        })
+        .await
+    }
+
+pub async fn get_config(&self, key: Config) -> Result<Option<String>> {
+        let env_key = format!("DELTACHAT_{}", key.as_ref().to_uppercase());
+        if let Ok(value) = env::var(env_key) {
+            return Ok(Some(value));
+        }
+
+        let value = match key {
+            Config::Selfavatar => {
+                let rel_path = self.sql.get_raw_config(key.as_ref()).await?;
+                rel_path.map(|p| {
+                    get_abs_path(self, Path::new(&p))
+                        .to_string_lossy()
+                        .into_owned()
+                })
+            }
+            Config::SysVersion => Some((*DC_VERSION_STR).clone()),
+            Config::SysMsgsizeMaxRecommended => Some(format!("{RECOMMENDED_FILE_SIZE}")),
+            Config::SysConfigKeys => Some(get_config_keys_string()),
+            _ => self.sql.get_raw_config(key.as_ref()).await?,
+        };
+
+        if value.is_some() {
+            return Ok(value);
+        }
+
+        // Default values
+        match key {
+            Config::ConfiguredInboxFolder => Ok(Some("INBOX".to_owned())),
+            _ => Ok(key.get_str("default").map(|s| s.to_string())),
+        }
+    }
+
+pub(crate) async fn get_all_self_addrs(&self) -> Result<Vec<String>> {
+        let primary_addrs = self.get_config(Config::ConfiguredAddr).await?.into_iter();
+        let secondary_addrs = self.get_secondary_self_addrs().await?.into_iter();
+
+        Ok(primary_addrs.chain(secondary_addrs).collect())
+    }
+
+pub fn repeat_vars(count: usize) -> String {
+    let mut s = "?,".repeat(count);
+    s.pop(); // Remove trailing comma
+    s
+}
+
+pub(crate) async fn self_msg(context: &Context) -> String {
+    translated(context, StockMessage::SelfMsg).await
+}
+
+pub fn params_from_iter<I>(iter: I) -> ParamsFromIter<I>
+where
+    I: IntoIterator,
+    I::Item: ToSql,
+{
+    ParamsFromIter(iter)
+}
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+
+
+pub struct ContactId(u32);
+
+impl ContactId {
+    /// The owner of the account.
+    ///
+    /// The email-address is set by `set_config` using "addr".
+    pub const SELF: ContactId = ContactId::new(1);
+
+
+    /// ID of the contact for device messages.
+    pub const DEVICE: ContactId = ContactId::new(5);
+    pub(crate) const LAST_SPECIAL: ContactId = ContactId::new(9);
+}
+
+pub struct Contact {
+    /// The contact ID.
+    pub id: ContactId,
+
+    /// Contact name. It is recommended to use `Contact::get_name`,
+    /// `Contact::get_display_name` or `Contact::get_name_n_addr` to access this field.
+    /// May be empty, initially set to `authname`.
+    name: String,
+
+    /// Name authorized by the contact himself. Only this name may be spread to others,
+    /// e.g. in To:-lists. May be empty. It is recommended to use `Contact::get_authname`,
+    /// to access this field.
+    authname: String,
+
+    /// E-Mail-Address of the contact. It is recommended to use `Contact::get_addr` to access this field.
+    addr: String,
+
+    /// Blocked state. Use contact_is_blocked to access this field.
+    pub blocked: bool,
+
+    /// Time when the contact was seen last time, Unix time in seconds.
+    last_seen: i64,
+
+    /// The origin/source of the contact.
+    pub origin: Origin,
+
+    /// Parameters as Param::ProfileImage
+    pub param: Params,
+
+    /// Last seen message signature for this contact, to be displayed in the profile.
+    status: String,
+
+    /// If the contact is a bot.
+    is_bot: bool,
+}
+
+pub enum Config {
+    /// Email address, used in the `From:` field.
+    Addr,
+
+    /// IMAP server hostname.
+    MailServer,
+
+    /// IMAP server username.
+    MailUser,
+
+    /// IMAP server password.
+    MailPw,
+
+    /// IMAP server port.
+    MailPort,
+
+    /// IMAP server security (e.g. TLS, STARTTLS).
+    MailSecurity,
+
+    /// How to check IMAP server TLS certificates.
+    ImapCertificateChecks,
+
+    /// SMTP server hostname.
+    SendServer,
+
+    /// SMTP server username.
+    SendUser,
+
+    /// SMTP server password.
+    SendPw,
+
+    /// SMTP server port.
+    SendPort,
+
+    /// SMTP server security (e.g. TLS, STARTTLS).
+    SendSecurity,
+
+    /// How to check SMTP server TLS certificates.
+    SmtpCertificateChecks,
+
+    /// Whether to use OAuth 2.
+    ///
+    /// Historically contained other bitflags, which are now deprecated.
+    /// Should not be extended in the future, create new config keys instead.
+    ServerFlags,
+
+    /// True if SOCKS5 is enabled.
+    ///
+    /// Can be used to disable SOCKS5 without erasing SOCKS5 configuration.
+    Socks5Enabled,
+
+    /// SOCKS5 proxy server hostname or address.
+    Socks5Host,
+
+    /// SOCKS5 proxy server port.
+    Socks5Port,
+
+    /// SOCKS5 proxy server username.
+    Socks5User,
+
+    /// SOCKS5 proxy server password.
+    Socks5Password,
+
+    /// Own name to use in the `From:` field when sending messages.
+    Displayname,
+
+    /// Own status to display, sent in message footer.
+    Selfstatus,
+
+    /// Own avatar filename.
+    Selfavatar,
+
+    /// Send BCC copy to self.
+    ///
+    /// Should be enabled for multidevice setups.
+    #[strum(props(default = "1"))]
+    BccSelf,
+
+    /// True if encryption is preferred according to Autocrypt standard.
+    #[strum(props(default = "1"))]
+    E2eeEnabled,
+
+    /// True if Message Delivery Notifications (read receipts) should
+    /// be sent and requested.
+    #[strum(props(default = "1"))]
+    MdnsEnabled,
+
+    /// True if "Sent" folder should be watched for changes.
+    #[strum(props(default = "0"))]
+    SentboxWatch,
+
+    /// True if chat messages should be moved to a separate folder.
+    #[strum(props(default = "1"))]
+    MvboxMove,
+
+    /// Watch for new messages in the "Mvbox" (aka DeltaChat folder) only.
+    ///
+    /// This will not entirely disable other folders, e.g. the spam folder will also still
+    /// be watched for new messages.
+    #[strum(props(default = "0"))]
+    OnlyFetchMvbox,
+
+    /// Whether to show classic emails or only chat messages.
+    #[strum(props(default = "2"))] // also change ShowEmails.default() on changes
+    ShowEmails,
+
+    /// Quality of the media files to send.
+    #[strum(props(default = "0"))] // also change MediaQuality.default() on changes
+    MediaQuality,
+
+    /// If set to "1", on the first time `start_io()` is called after configuring,
+    /// the newest existing messages are fetched.
+    /// Existing recipients are added to the contact database regardless of this setting.
+    #[strum(props(default = "0"))]
+    FetchExistingMsgs,
+
+    /// If set to "1", then existing messages are considered to be already fetched.
+    /// This flag is reset after successful configuration.
+    #[strum(props(default = "1"))]
+    FetchedExistingMsgs,
+
+    /// Type of the OpenPGP key to generate.
+    #[strum(props(default = "0"))]
+    KeyGenType,
+
+    /// Timer in seconds after which the message is deleted from the
+    /// server.
+    ///
+    /// Equals to 0 by default, which means the message is never
+    /// deleted.
+    ///
+    /// Value 1 is treated as "delete at once": messages are deleted
+    /// immediately, without moving to DeltaChat folder.
+    #[strum(props(default = "0"))]
+    DeleteServerAfter,
+
+    /// Timer in seconds after which the message is deleted from the
+    /// device.
+    ///
+    /// Equals to 0 by default, which means the message is never
+    /// deleted.
+    #[strum(props(default = "0"))]
+    DeleteDeviceAfter,
+
+    /// Move messages to the Trash folder instead of marking them "\Deleted". Overrides
+    /// `ProviderOptions::delete_to_trash`.
+    DeleteToTrash,
+
+    /// Save raw MIME messages with headers in the database if true.
+    SaveMimeHeaders,
+
+    /// The primary email address. Also see `SecondaryAddrs`.
+    ConfiguredAddr,
+
+    /// Configured IMAP server hostname.
+    ConfiguredMailServer,
+
+    /// Configured IMAP server username.
+    ConfiguredMailUser,
+
+    /// Configured IMAP server password.
+    ConfiguredMailPw,
+
+    /// Configured IMAP server port.
+    ConfiguredMailPort,
+
+    /// Configured IMAP server security (e.g. TLS, STARTTLS).
+    ConfiguredMailSecurity,
+
+    /// How to check IMAP server TLS certificates.
+    ConfiguredImapCertificateChecks,
+
+    /// Configured SMTP server hostname.
+    ConfiguredSendServer,
+
+    /// Configured SMTP server username.
+    ConfiguredSendUser,
+
+    /// Configured SMTP server password.
+    ConfiguredSendPw,
+
+    /// Configured SMTP server port.
+    ConfiguredSendPort,
+
+    /// How to check SMTP server TLS certificates.
+    ConfiguredSmtpCertificateChecks,
+
+    /// Whether OAuth 2 is used with configured provider.
+    ConfiguredServerFlags,
+
+    /// Configured SMTP server security (e.g. TLS, STARTTLS).
+    ConfiguredSendSecurity,
+
+    /// Configured folder for incoming messages.
+    ConfiguredInboxFolder,
+
+    /// Configured folder for chat messages.
+    ConfiguredMvboxFolder,
+
+    /// Configured "Sent" folder.
+    ConfiguredSentboxFolder,
+
+    /// Configured "Trash" folder.
+    ConfiguredTrashFolder,
+
+    /// Unix timestamp of the last successful configuration.
+    ConfiguredTimestamp,
+
+    /// ID of the configured provider from the provider database.
+    ConfiguredProvider,
+
+    /// True if account is configured.
+    Configured,
+
+    /// True if account is a chatmail account.
+    IsChatmail,
+
+    /// All secondary self addresses separated by spaces
+    /// (`addr1@example.org addr2@example.org addr3@example.org`)
+    SecondaryAddrs,
+
+    /// Read-only core version string.
+    #[strum(serialize = "sys.version")]
+    SysVersion,
+
+    /// Maximal recommended attachment size in bytes.
+    #[strum(serialize = "sys.msgsize_max_recommended")]
+    SysMsgsizeMaxRecommended,
+
+    /// Space separated list of all config keys available.
+    #[strum(serialize = "sys.config_keys")]
+    SysConfigKeys,
+
+    /// True if it is a bot account.
+    Bot,
+
+    /// True when to skip initial start messages in groups.
+    #[strum(props(default = "0"))]
+    SkipStartMessages,
+
+    /// Whether we send a warning if the password is wrong (set to false when we send a warning
+    /// because we do not want to send a second warning)
+    #[strum(props(default = "0"))]
+    NotifyAboutWrongPw,
+
+    /// If a warning about exceeding quota was shown recently,
+    /// this is the percentage of quota at the time the warning was given.
+    /// Unset, when quota falls below minimal warning threshold again.
+    QuotaExceeding,
+
+    /// address to webrtc instance to use for videochats
+    WebrtcInstance,
+
+    /// Timestamp of the last time housekeeping was run
+    LastHousekeeping,
+
+    /// Timestamp of the last `CantDecryptOutgoingMsgs` notification.
+    LastCantDecryptOutgoingMsgs,
+
+    /// To how many seconds to debounce scan_all_folders. Used mainly in tests, to disable debouncing completely.
+    #[strum(props(default = "60"))]
+    ScanAllFoldersDebounceSecs,
+
+    /// Whether to avoid using IMAP IDLE even if the server supports it.
+    ///
+    /// This is a developer option for testing "fake idle".
+    #[strum(props(default = "0"))]
+    DisableIdle,
+
+    /// Defines the max. size (in bytes) of messages downloaded automatically.
+    /// 0 = no limit.
+    #[strum(props(default = "0"))]
+    DownloadLimit,
+
+    /// Enable sending and executing (applying) sync messages. Sending requires `BccSelf` to be set.
+    #[strum(props(default = "1"))]
+    SyncMsgs,
+
+    /// Space-separated list of all the authserv-ids which we believe
+    /// may be the one of our email server.
+    ///
+    /// See `crate::authres::update_authservid_candidates`.
+    AuthservIdCandidates,
+
+    /// Make all outgoing messages with Autocrypt header "multipart/signed".
+    SignUnencrypted,
+
+    /// Let the core save all events to the database.
+    /// This value is used internally to remember the MsgId of the logging xdc
+    #[strum(props(default = "0"))]
+    DebugLogging,
+
+    /// Last message processed by the bot.
+    LastMsgId,
+
+    /// How often to gossip Autocrypt keys in chats with multiple recipients, in seconds. 2 days by
+    /// default.
+    ///
+    /// This is not supposed to be changed by UIs and only used for testing.
+    #[strum(props(default = "172800"))]
+    GossipPeriod,
+
+    /// Feature flag for verified 1:1 chats; the UI should set it
+    /// to 1 if it supports verified 1:1 chats.
+    /// Regardless of this setting, `chat.is_protected()` returns true while the key is verified,
+    /// and when the key changes, an info message is posted into the chat.
+    /// 0=Nothing else happens when the key changes.
+    /// 1=After the key changed, `can_send()` returns false and `is_protection_broken()` returns true
+    /// until `chat_id.accept()` is called.
+    #[strum(props(default = "0"))]
+    VerifiedOneOnOneChats,
+
+    /// Row ID of the key in the `keypairs` table
+    /// used for signatures, encryption to self and included in `Autocrypt` header.
+    KeyId,
+
+    /// This key is sent to the self_reporting bot so that the bot can recognize the user
+    /// without storing the email address
+    SelfReportingId,
+
+    /// MsgId of webxdc map integration.
+    WebxdcIntegration,
+
+    /// Iroh secret key.
+    IrohSecretKey,
+}
+
+pub enum Origin {
+    /// Unknown origin. Can be used as a minimum origin to specify that the caller does not care
+    /// about origin of the contact.
+    #[default]
+    Unknown = 0,
+
+    /// The contact is a mailing list address, needed to unblock mailing lists
+    MailinglistAddress = 0x2,
+
+    /// Hidden on purpose, e.g. addresses with the word "noreply" in it
+    Hidden = 0x8,
+
+    /// From: of incoming messages of unknown sender
+    IncomingUnknownFrom = 0x10,
+
+    /// Cc: of incoming messages of unknown sender
+    IncomingUnknownCc = 0x20,
+
+    /// To: of incoming messages of unknown sender
+    IncomingUnknownTo = 0x40,
+
+    /// address scanned but not verified
+    UnhandledQrScan = 0x80,
+
+    /// Reply-To: of incoming message of known sender
+    /// Contacts with at least this origin value are shown in the contact list.
+    IncomingReplyTo = 0x100,
+
+    /// Cc: of incoming message of known sender
+    IncomingCc = 0x200,
+
+    /// additional To:'s of incoming message of known sender
+    IncomingTo = 0x400,
+
+    /// a chat was manually created for this user, but no message yet sent
+    CreateChat = 0x800,
+
+    /// message sent by us
+    OutgoingBcc = 0x1000,
+
+    /// message sent by us
+    OutgoingCc = 0x2000,
+
+    /// message sent by us
+    OutgoingTo = 0x4000,
+
+    /// internal use
+    Internal = 0x40000,
+
+    /// address is in our address book
+    AddressBook = 0x80000,
+
+    /// set on Alice's side for contacts like Bob that have scanned the QR code offered by her. Only means the contact has once been established using the "securejoin" procedure in the past, getting the current key verification status requires calling contact_is_verified() !
+    SecurejoinInvited = 0x0100_0000,
+
+    /// set on Bob's side for contacts scanned and verified from a QR code. Only means the contact has once been established using the "securejoin" procedure in the past, getting the current key verification status requires calling contact_is_verified() !
+    SecurejoinJoined = 0x0200_0000,
+
+    /// contact added manually by create_contact(), this should be the largest origin as otherwise the user cannot modify the names
+    ManuallyCreated = 0x0400_0000,
+}
+
+
+pub(crate) async fn no_messages(context: &Context) -> String {
+    translated(context, StockMessage::NoMessages).await
+}
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::cmp::{min, Reverse};
+use std::collections::BinaryHeap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use base64::Engine as _;
+use deltachat_contact_tools::may_be_valid_addr;
+use deltachat_contact_tools::{
+    self as contact_tools, addr_cmp, addr_normalize, sanitize_name_and_addr, strip_rtlo_characters,
+    ContactAddress, VcardContact,
+};
+use deltachat_derive::{FromSql, ToSql};
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use tokio::task;
+use tokio::time::{timeout, Duration};
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::blob::BlobObject;
+use crate::chat::{ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{Blocked, Chattype, DC_GCL_ADD_SELF, DC_GCL_VERIFIED_ONLY};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{load_self_public_key, DcKey, SignedPublicKey};
+use crate::log::LogExt;
+use crate::login_param::LoginParam;
+use crate::message::MessageState;
+use crate::mimeparser::AvatarAction;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::sql::{self, params_iter};
+use crate::sync::{self, Sync::*};
+use crate::tools::{
+    duration_to_str, get_abs_path, improve_single_line_input, smeared_time, time, SystemTime,
+};
+use crate::{chat, chatlist_events, stock_str};
+use deltachat_contact_tools::{may_be_valid_addr, normalize_name};
+use super::*;
+use crate::chat::{get_chat_contacts, send_text_msg, Chat};
+use crate::chatlist::Chatlist;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{self, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_all(
+        context: &Context,
+        listflags: u32,
+        query: Option<&str>,
+    ) -> Result<Vec<ContactId>> {
+        let self_addrs = context.get_all_self_addrs().await?;
+        let mut add_self = false;
+        let mut ret = Vec::new();
+        let flag_verified_only = (listflags & DC_GCL_VERIFIED_ONLY) != 0;
+        let flag_add_self = (listflags & DC_GCL_ADD_SELF) != 0;
+        let minimal_origin = if context.get_config_bool(Config::Bot).await? {
+            Origin::Unknown
+        } else {
+            Origin::IncomingReplyTo
+        };
+        if flag_verified_only || query.is_some() {
+            let s3str_like_cmd = format!("%{}%", query.unwrap_or(""));
+            context
+                .sql
+                .query_map(
+                    &format!(
+                        "SELECT c.id FROM contacts c \
+                 LEFT JOIN acpeerstates ps ON c.addr=ps.addr  \
+                 WHERE c.addr NOT IN ({})
+                 AND c.id>? \
+                 AND c.origin>=? \
+                 AND c.blocked=0 \
+                 AND (iif(c.name='',c.authname,c.name) LIKE ? OR c.addr LIKE ?) \
+                 AND (1=? OR LENGTH(ps.verified_key_fingerprint)!=0)  \
+                 ORDER BY c.last_seen DESC, c.id DESC;",
+                        sql::repeat_vars(self_addrs.len())
+                    ),
+                    rusqlite::params_from_iter(params_iter(&self_addrs).chain(params_slice![
+                        ContactId::LAST_SPECIAL,
+                        minimal_origin,
+                        s3str_like_cmd,
+                        s3str_like_cmd,
+                        if flag_verified_only { 0i32 } else { 1i32 }
+                    ])),
+                    |row| row.get::<_, ContactId>(0),
+                    |ids| {
+                        for id in ids {
+                            ret.push(id?);
+                        }
+                        Ok(())
+                    },
+                )
+                .await?;
+
+            if let Some(query) = query {
+                let self_addr = context
+                    .get_config(Config::ConfiguredAddr)
+                    .await?
+                    .unwrap_or_default();
+                let self_name = context
+                    .get_config(Config::Displayname)
+                    .await?
+                    .unwrap_or_default();
+                let self_name2 = stock_str::self_msg(context);
+
+                if self_addr.contains(query)
+                    || self_name.contains(query)
+                    || self_name2.await.contains(query)
+                {
+                    add_self = true;
+                }
+            } else {
+                add_self = true;
+            }
+        } else {
+            add_self = true;
+
+            context
+                .sql
+                .query_map(
+                    &format!(
+                        "SELECT id FROM contacts
+                 WHERE addr NOT IN ({})
+                 AND id>?
+                 AND origin>=?
+                 AND blocked=0
+                 ORDER BY last_seen DESC, id DESC;",
+                        sql::repeat_vars(self_addrs.len())
+                    ),
+                    rusqlite::params_from_iter(
+                        params_iter(&self_addrs)
+                            .chain(params_slice![ContactId::LAST_SPECIAL, minimal_origin]),
+                    ),
+                    |row| row.get::<_, ContactId>(0),
+                    |ids| {
+                        for id in ids {
+                            ret.push(id?);
+                        }
+                        Ok(())
+                    },
+                )
+                .await?;
+        }
+
+        if flag_add_self && add_self {
+            ret.push(ContactId::SELF);
+        }
+
+        Ok(ret)
+    }
+</function>
+<translated function>
+ ```rust
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use rusqlite::{params_iter, OptionalExtension};
+use crate::config::Config;
+use crate::context::Context;
+use crate::constants::{DC_CONTACT_ID_SELF, DC_ORIGIN_MIN_CONTACT_LIST};
+use crate::sql::{self, ToSql};
+use crate::ContactId;
+
+pub async fn get_contacts(
+    context: &Context,
+    listflags: u32,
+    query: Option<&str>,
+) -> Result<Vec<ContactId>, anyhow::Error> {
+    let context = context.inner.clone();
+    let self_addr = context.get_config(Config::ConfiguredAddr).await?.unwrap_or_default();
+    let self_name = context.get_config(Config::Displayname).await?.unwrap_or_default();
+    let self_name2 = context.stock_str(stock_str::DC_STR_SELF).await?;
+    let add_self = if query.is_none() || query.as_deref() == Some(self_addr.as_str()) || query.as_deref() == Some(self_name.as_str()) || query.as_deref() == Some(self_name2.as_str()) {
+        true
+    } else {
+        false
+    };
+
+    let sql_context = context.sql.clone();
+    let sql = sql_context.prepare(
+        "SELECT id FROM contacts WHERE addr!=?1 AND id>?2 AND origin>=?3 AND blocked=0 ORDER BY LOWER(name||addr),id;"
+    ).await?;
+    sql.bind(&[&self_addr as &dyn ToSql, &DC_CONTACT_ID_SELF, &DC_ORIGIN_MIN_CONTACT_LIST])?;
+
+    let mut contacts = Vec::new();
+    while let Some(row) = sql.next().await? {
+        contacts.push(ContactId(row.get(0)?));
+    }
+
+    if listflags & DC_GCL_ADD_SELF != 0 && add_self {
+        contacts.push(ContactId::SELF);
+    }
+
+    Ok(contacts)
+}
+```</translated function> ```rust
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use rusqlite::{params_iter, OptionalExtension};
+use crate::config::Config;
+use crate::context::Context;
+use crate::constants::{DC_CONTACT_ID_SELF, DC_ORIGIN_MIN_CONTACT_LIST};
+use crate::sql::{self, ToSql};
+use crate::ContactId;
+
+pub async fn get_contacts(
+    context: &Context,
+    listflags: u32,
+    query: Option<&str>,
+) -> Result<Vec<ContactId>, anyhow::Error> {
+    let context = context.inner.clone();
+    let self_addr = context.get_config(Config::ConfiguredAddr).await?.unwrap_or_default();
+    let self_name = context.get_config(Config::Displayname).await?.unwrap_or_default();
+    let self_name2 = context.stock_str(stock_str::DC_STR_SELF).await?;
+    let add_self = if query.is_none() || query.as_deref() == Some(self_addr.as_str()) || query.as_deref() == Some(self_name.as_str()) || query.as_deref() == Some(self_name2.as_str()) {
+        true
+    } else {
+        false
+    };
+
+    let sql_context = context.sql.clone();
+    let sql = sql_context.prepare(
+        "SELECT id FROM contacts WHERE addr!=?1 AND id>?2 AND origin>=?3 AND blocked=0 ORDER BY LOWER(name||addr),id;"
+    ).await?;
+    sql.bind(&[&self_addr as &dyn ToSql, &DC_CONTACT_ID_SELF, &DC_ORIGIN_MIN_CONTACT_LIST])?;
+
+    let mut contacts = Vec::new();
+    while let Some(row) = sql.next().await? {
+        contacts.push(ContactId(row.get(0)?));
+    }
+
+    if listflags & DC_GCL_ADD_SELF != 0 && add_self {
+        contacts.push(ContactId::SELF);
+    }
+
+    Ok(contacts)
+}
+```

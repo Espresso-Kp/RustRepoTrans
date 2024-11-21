@@ -1,0 +1,114 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_addr_equals_self(dc_context_t* context, const char* addr)
+{
+	int   ret             = 0;
+	char* normalized_addr = NULL;
+	char* self_addr       = NULL;
+
+	if (context==NULL || addr==NULL) {
+		goto cleanup;
+	}
+
+	normalized_addr = dc_addr_normalize(addr);
+
+	if (NULL==(self_addr=dc_sqlite3_get_config(context->sql, "configured_addr", NULL))) {
+		goto cleanup;
+	}
+
+	ret = strcasecmp(normalized_addr, self_addr)==0? 1 : 0;
+
+cleanup:
+	free(self_addr);
+	free(normalized_addr);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub(crate) async fn is_self_addr(&self, addr: &str) -> Result<bool> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::env;
+use std::path::Path;
+use std::str::FromStr;
+use anyhow::{ensure, Context as _, Result};
+use base64::Engine as _;
+use deltachat_contact_tools::addr_cmp;
+use serde::{Deserialize, Serialize};
+use strum::{EnumProperty, IntoEnumIterator};
+use strum_macros::{AsRefStr, Display, EnumIter, EnumString};
+use tokio::fs;
+use crate::blob::BlobObject;
+use crate::constants::{self, DC_VERSION_STR};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::log::LogExt;
+use crate::mimefactory::RECOMMENDED_FILE_SIZE;
+use crate::provider::{get_provider_by_id, Provider};
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{get_abs_path, improve_single_line_input};
+use num_traits::FromPrimitive;
+use super::*;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) async fn is_self_addr(&self, addr: &str) -> Result<bool> {
+        Ok(self
+            .get_config(Config::ConfiguredAddr)
+            .await?
+            .iter()
+            .any(|a| addr_cmp(addr, a))
+            || self
+                .get_secondary_self_addrs()
+                .await?
+                .iter()
+                .any(|a| addr_cmp(addr, a)))
+    }
+</function>
+<translated function>
+```rust
+pub(crate) async fn is_self_addr(&self, addr: &str) -> Result<bool> {
+    let self_addr = match self.sql.get_config("configured_addr").await {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+
+    let normalized_addr = dc_normalize_addr(addr);
+    let is_self = addr_cmp(&normalized_addr, &self_addr)==0;
+
+    Ok(is_self)
+}
+```
+In the Rust version, errors are handled through the `Result` type returned by the function. This is more idiomatic in Rust than using a `goto` statement like in C. Additionally, all the necessary cleanup is handled automatically by Rust, which enforces RAII (Resource Acquisition Is Initialization), so explicit freeing of memory isn't necessary.
+
+The `dc_normalize_addr` may need a proper translation based on the Rust equivalent function. Similarly the `addr_cmp` is substituted for C's `strcasecmp` since Rust strings are utf8 encoded. 
+
+For simplicity, I have not included any logging statements or notifications for when an address isn't found. Also, the function assumes that the `Context` struct has a `sql` field that has a `get_config` method.</translated function>```rust
+pub(crate) async fn is_self_addr(&self, addr: &str) -> Result<bool> {
+    let self_addr = match self.sql.get_config("configured_addr").await {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+
+    let normalized_addr = dc_normalize_addr(addr);
+    let is_self = addr_cmp(&normalized_addr, &self_addr)==0;
+
+    Ok(is_self)
+}
+```
+In the Rust version, errors are handled through the `Result` type returned by the function. This is more idiomatic in Rust than using a `goto` statement like in C. Additionally, all the necessary cleanup is handled automatically by Rust, which enforces RAII (Resource Acquisition Is Initialization), so explicit freeing of memory isn't necessary.
+
+The `dc_normalize_addr` may need a proper translation based on the Rust equivalent function. Similarly the `addr_cmp` is substituted for C's `strcasecmp` since Rust strings are utf8 encoded. 
+
+For simplicity, I have not included any logging statements or notifications for when an address isn't found. Also, the function assumes that the `Context` struct has a `sql` field that has a `get_config` method.

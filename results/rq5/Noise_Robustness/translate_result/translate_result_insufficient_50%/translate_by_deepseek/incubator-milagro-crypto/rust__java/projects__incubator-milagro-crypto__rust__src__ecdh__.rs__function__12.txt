@@ -1,0 +1,649 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int SP_DSA(int sha,RAND RNG,byte[] S,byte[] F,byte[] C,byte[] D)
+	{
+		byte[] T=new byte[EFS];
+		BIG r,s,f,c,d,u,vx,w;
+		ECP G,V;
+		byte[] B=hashit(sha,F,0,null,BIG.MODBYTES);
+
+		G=ECP.generator();
+		r=new BIG(ROM.CURVE_Order);
+
+		s=BIG.fromBytes(S);
+		f=BIG.fromBytes(B);
+
+		c=new BIG(0);
+		d=new BIG(0);
+		V=new ECP();
+
+		do {
+			u=BIG.randomnum(r,RNG);
+			w=BIG.randomnum(r,RNG); /* side channel masking */
+			//if (ROM.AES_S>0)
+			//{
+			//	u.mod2m(2*ROM.AES_S);
+			//}			
+			V.copy(G);
+			V=V.mul(u);   		
+			vx=V.getX();
+			c.copy(vx);
+			c.mod(r);
+			if (c.iszilch()) continue;
+
+			u.copy(BIG.modmul(u,w,r));
+
+			u.invmodp(r);
+			d.copy(BIG.modmul(s,c,r));
+			d.add(f);
+
+			d.copy(BIG.modmul(d,w,r));
+
+			d.copy(BIG.modmul(u,d,r));
+		} while (d.iszilch());
+       
+		c.toBytes(T);
+		for (int i=0;i<EFS;i++) C[i]=T[i];
+		d.toBytes(T);
+		for (int i=0;i<EFS;i++) D[i]=T[i];
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+pub fn invmodp(&mut self, p: &Big) {
+        self.rmod(p);
+        let mut u = self.clone();
+        let mut v = p.clone();
+        let mut x1 = Big::new_int(1);
+        let mut x2 = Big::new();
+        let one = Big::new_int(1);
+
+        while (Big::comp(&u, &one) != 0) && (Big::comp(&v, &one) != 0) {
+            while u.parity() == 0 {
+                u.fshr(1);
+                if x1.parity() != 0 {
+                    x1.add(p);
+                    x1.norm();
+                }
+                x1.fshr(1);
+            }
+            while v.parity() == 0 {
+                v.fshr(1);
+                if x2.parity() != 0 {
+                    x2.add(p);
+                    x2.norm();
+                }
+                x2.fshr(1);
+            }
+            if Big::comp(&u, &v) >= 0 {
+                u.sub(&v);
+                u.norm();
+                if Big::comp(&x1, &x2) >= 0 {
+                    x1.sub(&x2)
+                } else {
+                    let mut t = p.clone();
+                    t.sub(&x2);
+                    x1.add(&t);
+                }
+                x1.norm();
+            } else {
+                v.sub(&u);
+                v.norm();
+                if Big::comp(&x2, &x1) >= 0 {
+                    x2.sub(&x1)
+                } else {
+                    let mut t = p.clone();
+                    t.sub(&x1);
+                    x2.add(&t);
+                }
+                x2.norm();
+            }
+        }
+        if Big::comp(&u, &one) == 0 {
+            *self = x1
+        } else {
+            *self = x2
+        }
+    }
+pub fn getx(&self) -> Big {
+        let mut W = self.clone();
+        W.affine();
+        return W.x.redc();
+    }
+pub fn add(&mut self, Q: &ECP) {
+        if CURVETYPE == CurveType::Weierstrass {
+            if rom::CURVE_A == 0 {
+                let b = 3 * rom::CURVE_B_I;
+                let mut t0 = self.x.clone();
+                t0.mul(&Q.x);
+                let mut t1 = self.y.clone();
+                t1.mul(&Q.y);
+                let mut t2 = self.z.clone();
+                t2.mul(&Q.z);
+                let mut t3 = self.x.clone();
+                t3.add(&self.y);
+                t3.norm();
+                let mut t4 = Q.x.clone();
+                t4.add(&Q.y);
+                t4.norm();
+                t3.mul(&t4);
+                t4 = t0.clone();
+                t4.add(&t1);
+
+                t3.sub(&t4);
+                t3.norm();
+                t4 = self.getpy();
+                t4.add(&self.z);
+                t4.norm();
+                let mut x3 = Q.y.clone();
+                x3.add(&Q.z);
+                x3.norm();
+
+                t4.mul(&x3);
+                x3 = t1.clone();
+                x3.add(&t2);
+
+                t4.sub(&x3);
+                t4.norm();
+                x3 = self.getpx();
+                x3.add(&self.z);
+                x3.norm();
+                let mut y3 = Q.x.clone();
+                y3.add(&Q.z);
+                y3.norm();
+                x3.mul(&y3);
+                y3 = t0.clone();
+                y3.add(&t2);
+                y3.rsub(&x3);
+                y3.norm();
+                x3 = t0.clone();
+                x3.add(&t0);
+                t0.add(&x3);
+                t0.norm();
+                t2.imul(b);
+
+                let mut z3 = t1.clone();
+                z3.add(&t2);
+                z3.norm();
+                t1.sub(&t2);
+                t1.norm();
+                y3.imul(b);
+
+                x3 = y3.clone();
+                x3.mul(&t4);
+                t2 = t3.clone();
+                t2.mul(&t1);
+                x3.rsub(&t2);
+                y3.mul(&t0);
+                t1.mul(&z3);
+                y3.add(&t1);
+                t0.mul(&t3);
+                z3.mul(&t4);
+                z3.add(&t0);
+
+                self.x = x3.clone();
+                self.x.norm();
+                self.y = y3.clone();
+                self.y.norm();
+                self.z = z3.clone();
+                self.z.norm();
+            } else {
+                let mut t0 = self.x.clone();
+                let mut t1 = self.y.clone();
+                let mut t2 = self.z.clone();
+                let mut t3 = self.x.clone();
+                let mut t4 = Q.x.clone();
+                let mut y3 = Q.x.clone();
+                let mut x3 = Q.y.clone();
+                let mut b = FP::new();
+
+                if rom::CURVE_B_I == 0 {
+                    b = FP::new_big(Big::new_ints(&rom::CURVE_B));
+                }
+
+                t0.mul(&Q.x); //1
+                t1.mul(&Q.y); //2
+                t2.mul(&Q.z); //3
+
+                t3.add(&self.y);
+                t3.norm(); //4
+                t4.add(&Q.y);
+                t4.norm(); //5
+                t3.mul(&t4); //6
+                t4 = t0.clone();
+                t4.add(&t1); //7
+                t3.sub(&t4);
+                t3.norm(); //8
+                t4 = self.getpy();
+                t4.add(&self.z);
+                t4.norm(); //9
+                x3.add(&Q.z);
+                x3.norm(); //10
+                t4.mul(&x3); //11
+                x3 = t1.clone();
+                x3.add(&t2); //12
+
+                t4.sub(&x3);
+                t4.norm(); //13
+                x3 = self.getpx();
+                x3.add(&self.z);
+                x3.norm(); //14
+                y3.add(&Q.z);
+                y3.norm(); //15
+
+                x3.mul(&y3); //16
+                y3 = t0.clone();
+                y3.add(&t2); //17
+
+                y3.rsub(&x3);
+                y3.norm(); //18
+                let mut z3 = t2.clone();
+
+                if rom::CURVE_B_I == 0 {
+                    z3.mul(&b); //18
+                } else {
+                    z3.imul(rom::CURVE_B_I);
+                }
+
+                x3 = y3.clone();
+                x3.sub(&z3);
+                x3.norm(); //20
+                z3 = x3.clone();
+                z3.add(&x3); //21
+
+                x3.add(&z3); //22
+                z3 = t1.clone();
+                z3.sub(&x3);
+                z3.norm(); //23
+                x3.add(&t1);
+                x3.norm(); //24
+
+                if rom::CURVE_B_I == 0 {
+                    y3.mul(&b); //18
+                } else {
+                    y3.imul(rom::CURVE_B_I);
+                }
+
+                t1 = t2.clone();
+                t1.add(&t2); //t1.norm();//26
+                t2.add(&t1); //27
+
+                y3.sub(&t2); //28
+
+                y3.sub(&t0);
+                y3.norm(); //29
+                t1 = y3.clone();
+                t1.add(&y3); //30
+                y3.add(&t1);
+                y3.norm(); //31
+
+                t1 = t0.clone();
+                t1.add(&t0); //32
+                t0.add(&t1); //33
+                t0.sub(&t2);
+                t0.norm(); //34
+                t1 = t4.clone();
+                t1.mul(&y3); //35
+                t2 = t0.clone();
+                t2.mul(&y3); //36
+                y3 = x3.clone();
+                y3.mul(&z3); //37
+                y3.add(&t2); //y3.norm();//38
+                x3.mul(&t3); //39
+                x3.sub(&t1); //40
+                z3.mul(&t4); //41
+                t1 = t3.clone();
+                t1.mul(&t0); //42
+                z3.add(&t1);
+                self.x = x3.clone();
+                self.x.norm();
+                self.y = y3.clone();
+                self.y.norm();
+                self.z = z3.clone();
+                self.z.norm();
+            }
+        }
+        if CURVETYPE == CurveType::Edwards {
+            let bb = FP::new_big(Big::new_ints(&rom::CURVE_B));
+            let mut a = self.z.clone();
+            let mut c = self.x.clone();
+            let mut d = self.y.clone();
+
+            a.mul(&Q.z);
+            let mut b = a.clone();
+            b.sqr();
+            c.mul(&Q.x);
+            d.mul(&Q.y);
+
+            let mut e = c.clone();
+            e.mul(&d);
+            e.mul(&bb);
+            let mut f = b.clone();
+            f.sub(&e);
+            let mut g = b.clone();
+            g.add(&e);
+
+            if rom::CURVE_A == 1 {
+                e = d.clone();
+                e.sub(&c);
+            }
+            c.add(&d);
+
+            b = self.getpx();
+            b.add(&self.y);
+            d = Q.getpx();
+            d.add(&Q.y);
+            b.norm();
+            d.norm();
+            b.mul(&d);
+            b.sub(&c);
+            b.norm();
+            f.norm();
+            b.mul(&f);
+            self.x = a.clone();
+            self.x.mul(&b);
+            g.norm();
+            if rom::CURVE_A == 1 {
+                e.norm();
+                c = e.clone();
+                c.mul(&g);
+            }
+            if rom::CURVE_A == -1 {
+                c.norm();
+                c.mul(&g);
+            }
+            self.y = a.clone();
+            self.y.mul(&c);
+            self.z = f.clone();
+            self.z.mul(&g);
+        }
+        return;
+    }
+pub fn generator() -> ECP {
+        let G: ECP;
+
+        let gx = Big::new_ints(&rom::CURVE_GX);
+
+        if CURVETYPE != CurveType::Montgomery {
+            let gy = Big::new_ints(&rom::CURVE_GY);
+            G = ECP::new_bigs(&gx, &gy);
+        } else {
+            G = ECP::new_big(&gx);
+        }
+        return G;
+    }
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn new() -> Big {
+        Big { w: [0; NLEN] }
+    }
+pub fn randomnum(q: &Big, rng: &mut RAND) -> Big {
+        let mut d = DBig::new();
+        let mut j = 0;
+        let mut r: u8 = 0;
+        let t = q.clone();
+        for _ in 0..2 * t.nbits() {
+            if j == 0 {
+                r = rng.getbyte();
+            } else {
+                r >>= 1
+            }
+
+            let b = (r as Chunk) & 1;
+            d.shl(1);
+            d.w[0] += b;
+            j += 1;
+            j &= 7;
+        }
+        let m = d.dmod(q);
+        m
+    }
+pub const CURVE_ORDER: [Chunk; NLEN] = [
+    0xD,
+    0x800000000010A1,
+    0x8000000007FF9F,
+    0x40000001BA344D,
+    0x25236482,
+];
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize {
+    let mut t: [u8; EFS] = [0; EFS];
+    let mut b: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+
+    hashit(sha, f, 0, None, big::MODBYTES as usize, &mut b);
+
+    let G = ECP::generator();
+
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let sc = Big::from_bytes(s); // s or &s?
+    let fb = Big::from_bytes(&b);
+
+    let mut cb = Big::new();
+    let mut db = Big::new();
+
+    while db.is_zilch() {
+        let mut u = Big::randomnum(&r, rng);
+        let w = Big::randomnum(&r, rng); // side channel masking
+
+        let mut V = G.clone();
+        V = V.mul(&u);
+        let vx = V.getx();
+        cb = vx.clone();
+        cb.rmod(&r);
+        if cb.is_zilch() {
+            continue;
+        }
+
+        let mut tb = Big::modmul(&u, &w, &r);
+        u = tb.clone();
+
+        u.invmodp(&r);
+        db = Big::modmul(&sc, &cb, &r);
+        db.add(&fb);
+
+        tb = Big::modmul(&db, &w, &r);
+        db = tb.clone();
+
+        tb = Big::modmul(&u, &db, &r);
+        db = tb.clone();
+    }
+
+    cb.to_bytes(&mut t);
+    for i in 0..EFS {
+        c[i] = t[i]
+    }
+    db.to_bytes(&mut t);
+    for i in 0..EFS {
+        d[i] = t[i]
+    }
+    0
+}
+</function>
+<translated function>
+ ```rust
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize {
+    let mut t = vec![0u8; rom::EFS];
+    let mut r = Big::from_bytes(rom::CURVE_Order);
+    let mut s = Big::from_bytes(s);
+    let mut f = Big::from_bytes(f);
+    let mut c = Big::new();
+    let mut d = Big::new();
+    let mut v = ECP::generator();
+    let b = hashit(sha, F, 0, None, BIG.MODBYTES);
+
+    loop {
+        let mut u = Big::randomnum(&r, rng);
+        let mut w = Big::randomnum(&r, rng);
+        v.copy(&ECP::generator());
+        v = v.mul(&u);
+        let vx = v.getx();
+        c.copy(&vx);
+        c.modulus(&r);
+        if c.iszilch() {
+            continue;
+        }
+
+        u.copy(&Big::modmul(&u, &w, &r));
+        u.invmodp(&r);
+        d.copy(&Big::modmul(&s, &c, &r));
+        d.add(&f);
+        d.copy(&Big::modmul(&d, &w, &r));
+        d.copy(&Big::modmul(&u, &d, &r));
+
+        if d.iszilch() {
+            continue;
+        }
+
+        break;
+    }
+
+    c.to_bytes(&mut t);
+    for i in 0..rom::EFS {
+        c[i] = t[i];
+    }
+    d.to_bytes(&mut t);
+    for i in 0..rom::EFS {
+        d[i] = t[i];
+    }
+    0
+}
+```</translated function> ```rust
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize {
+    let mut t = vec![0u8; rom::EFS];
+    let mut r = Big::from_bytes(rom::CURVE_Order);
+    let mut s = Big::from_bytes(s);
+    let mut f = Big::from_bytes(f);
+    let mut c = Big::new();
+    let mut d = Big::new();
+    let mut v = ECP::generator();
+    let b = hashit(sha, F, 0, None, BIG.MODBYTES);
+
+    loop {
+        let mut u = Big::randomnum(&r, rng);
+        let mut w = Big::randomnum(&r, rng);
+        v.copy(&ECP::generator());
+        v = v.mul(&u);
+        let vx = v.getx();
+        c.copy(&vx);
+        c.modulus(&r);
+        if c.iszilch() {
+            continue;
+        }
+
+        u.copy(&Big::modmul(&u, &w, &r));
+        u.invmodp(&r);
+        d.copy(&Big::modmul(&s, &c, &r));
+        d.add(&f);
+        d.copy(&Big::modmul(&d, &w, &r));
+        d.copy(&Big::modmul(&u, &d, &r));
+
+        if d.iszilch() {
+            continue;
+        }
+
+        break;
+    }
+
+    c.to_bytes(&mut t);
+    for i in 0..rom::EFS {
+        c[i] = t[i];
+    }
+    d.to_bytes(&mut t);
+    for i in 0..rom::EFS {
+        d[i] = t[i];
+    }
+    0
+}
+```

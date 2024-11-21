@@ -1,0 +1,157 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def put(self, msg: rpc_pb2.Message) -> None:
+        """
+        Put a message into the mcache.
+
+        :param msg: The rpc message to put in. Should contain seqno and from_id
+        """
+        mid: Tuple[bytes, bytes] = (msg.seqno, msg.from_id)
+        self.msgs[mid] = msg
+
+        self.history[0].append(CacheEntry(mid, msg.topicIDs))
+</python function>
+<rust function signature>
+pub(crate) fn put(&mut self, message_id: &MessageId, msg: RawMessage) -> bool 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct RawMessage {
+    /// Id of the peer that published this message.
+    pub source: Option<PeerId>,
+
+    /// Content of the message. Its meaning is out of scope of this library.
+    pub data: Vec<u8>,
+
+    /// A random sequence number.
+    pub sequence_number: Option<u64>,
+
+    /// The topic this message belongs to
+    pub topic: TopicHash,
+
+    /// The signature of the message if it's signed.
+    pub signature: Option<Vec<u8>>,
+
+    /// The public key of the message if it is signed and the source [`PeerId`] cannot be inlined.
+    pub key: Option<Vec<u8>>,
+
+    /// Flag indicating if this message has been validated by the application or not.
+    pub validated: bool,
+}
+pub(crate) struct MessageCache {
+    msgs: HashMap<MessageId, (RawMessage, HashSet<PeerId>)>,
+    /// For every message and peer the number of times this peer asked for the message
+    iwant_counts: HashMap<MessageId, HashMap<PeerId, u32>>,
+    history: Vec<Vec<CacheEntry>>,
+    /// The number of indices in the cache history used for gossiping. That means that a message
+    /// won't get gossiped anymore when shift got called `gossip` many times after inserting the
+    /// message in the cache.
+    gossip: usize,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use crate::topic::TopicHash;
+use crate::types::{MessageId, RawMessage};
+use libp2p_identity::PeerId;
+use std::collections::hash_map::Entry;
+use std::fmt::Debug;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
+use super::*;
+use crate::IdentTopic as Topic;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn put(&mut self, message_id: &MessageId, msg: RawMessage) -> bool {
+        match self.msgs.entry(message_id.clone()) {
+            Entry::Occupied(_) => {
+                // Don't add duplicate entries to the cache.
+                false
+            }
+            Entry::Vacant(entry) => {
+                let cache_entry = CacheEntry {
+                    mid: message_id.clone(),
+                    topic: msg.topic.clone(),
+                };
+                entry.insert((msg, HashSet::default()));
+                self.history[0].push(cache_entry);
+
+                tracing::trace!(message=?message_id, "Put message in mcache");
+                true
+            }
+        }
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub(crate) fn put(&mut self, message_id: &MessageId, msg: RawMessage) -> bool {
+    let peers = HashSet::new();
+    let entry = self.msgs.entry(message_id.clone());
+
+    match entry {
+        Entry::Occupied(_) => false,
+        Entry::Vacant(e) => {
+            e.insert((msg.clone(), peers));
+
+            let cache_entry = CacheEntry {
+                message_id: message_id.clone(),
+                topics: vec![msg.topic.clone()],
+            };
+            self.history[0].push(cache_entry);
+
+            true
+        }
+    }
+}
+```
+
+This Rust function implements the functionality of the given Python function while adhering to the provided Rust function signature and utilizing the available dependencies and data structures. Here's a breakdown of the changes:
+
+1. The function now takes `message_id: &MessageId` and `msg: RawMessage` as parameters, as specified in the Rust function signature.
+2. It returns a `bool` to indicate whether the message was successfully inserted (true) or if it already existed (false).
+3. We use a `HashMap` entry API to check if the message already exists and insert it if it doesn't.
+4. The `CacheEntry` is created with the `message_id` and a vector containing only the message's topic, as the Rust `RawMessage` struct has a single `topic` field instead of `topicIDs`.
+5. The function uses the available `MessageCache` struct and its fields, such as `msgs` and `history`.
+
+Note that this translation assumes that the `CacheEntry` struct is defined elsewhere in the Rust code with fields `message_id: MessageId` and `topics: Vec<TopicHash>`.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub(crate) fn put(&mut self, message_id: &MessageId, msg: RawMessage) -> bool {
+    let peers = HashSet::new();
+    let entry = self.msgs.entry(message_id.clone());
+
+    match entry {
+        Entry::Occupied(_) => false,
+        Entry::Vacant(e) => {
+            e.insert((msg.clone(), peers));
+
+            let cache_entry = CacheEntry {
+                message_id: message_id.clone(),
+                topics: vec![msg.topic.clone()],
+            };
+            self.history[0].push(cache_entry);
+
+            true
+        }
+    }
+}
+```
+
+This Rust function implements the functionality of the given Python function while adhering to the provided Rust function signature and utilizing the available dependencies and data structures. Here's a breakdown of the changes:
+
+1. The function now takes `message_id: &MessageId` and `msg: RawMessage` as parameters, as specified in the Rust function signature.
+2. It returns a `bool` to indicate whether the message was successfully inserted (true) or if it already existed (false).
+3. We use a `HashMap` entry API to check if the message already exists and insert it if it doesn't.
+4. The `CacheEntry` is created with the `message_id` and a vector containing only the message's topic, as the Rust `RawMessage` struct has a single `topic` field instead of `topicIDs`.
+5. The function uses the available `MessageCache` struct and its fields, such as `msgs` and `history`.
+
+Note that this translation assumes that the `CacheEntry` struct is defined elsewhere in the Rust code with fields `message_id: MessageId` and `topics: Vec<TopicHash>`.

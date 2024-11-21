@@ -1,0 +1,618 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_get_oauth2_url(dc_context_t* context, const char* addr,
+                        const char* redirect_uri)
+{
+	#define CLIENT_ID     "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com"
+	oauth2_t*   oauth2 = NULL;
+	char*       oauth2_url = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || redirect_uri==NULL || redirect_uri[0]==0) {
+		goto cleanup;
+	}
+
+	oauth2 = get_info(addr);
+	if (oauth2==NULL) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_set_config(context->sql, "oauth2_pending_redirect_uri", redirect_uri);
+
+	oauth2_url = dc_strdup(oauth2->get_code);
+	replace_in_uri(&oauth2_url, "$CLIENT_ID", oauth2->client_id);
+	replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+cleanup:
+	free(oauth2);
+	return oauth2_url;
+}
+</c function>
+<rust function signature>
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+fn replace_in_uri(uri: &str, key: &str, value: &str) -> String {
+    let value_urlencoded = utf8_percent_encode(value, NON_ALPHANUMERIC).to_string();
+    uri.replace(key, &value_urlencoded)
+}
+async fn from_address(context: &Context, addr: &str, skip_mx: bool) -> Option<Self> {
+        let addr_normalized = normalize_addr(addr);
+        if let Some(domain) = addr_normalized
+            .find('@')
+            .map(|index| addr_normalized.split_at(index + 1).1)
+        {
+            if let Some(oauth2_authorizer) = provider::get_provider_info(context, domain, skip_mx)
+                .await
+                .and_then(|provider| provider.oauth2_authorizer.as_ref())
+            {
+                return Some(match oauth2_authorizer {
+                    Oauth2Authorizer::Gmail => OAUTH2_GMAIL,
+                    Oauth2Authorizer::Yandex => OAUTH2_YANDEX,
+                });
+            }
+        }
+        None
+    }
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+pub enum Config {
+    /// Email address, used in the `From:` field.
+    Addr,
+
+    /// IMAP server hostname.
+    MailServer,
+
+    /// IMAP server username.
+    MailUser,
+
+    /// IMAP server password.
+    MailPw,
+
+    /// IMAP server port.
+    MailPort,
+
+    /// IMAP server security (e.g. TLS, STARTTLS).
+    MailSecurity,
+
+    /// How to check IMAP server TLS certificates.
+    ImapCertificateChecks,
+
+    /// SMTP server hostname.
+    SendServer,
+
+    /// SMTP server username.
+    SendUser,
+
+    /// SMTP server password.
+    SendPw,
+
+    /// SMTP server port.
+    SendPort,
+
+    /// SMTP server security (e.g. TLS, STARTTLS).
+    SendSecurity,
+
+    /// How to check SMTP server TLS certificates.
+    SmtpCertificateChecks,
+
+    /// Whether to use OAuth 2.
+    ///
+    /// Historically contained other bitflags, which are now deprecated.
+    /// Should not be extended in the future, create new config keys instead.
+    ServerFlags,
+
+    /// True if SOCKS5 is enabled.
+    ///
+    /// Can be used to disable SOCKS5 without erasing SOCKS5 configuration.
+    Socks5Enabled,
+
+    /// SOCKS5 proxy server hostname or address.
+    Socks5Host,
+
+    /// SOCKS5 proxy server port.
+    Socks5Port,
+
+    /// SOCKS5 proxy server username.
+    Socks5User,
+
+    /// SOCKS5 proxy server password.
+    Socks5Password,
+
+    /// Own name to use in the `From:` field when sending messages.
+    Displayname,
+
+    /// Own status to display, sent in message footer.
+    Selfstatus,
+
+    /// Own avatar filename.
+    Selfavatar,
+
+    /// Send BCC copy to self.
+    ///
+    /// Should be enabled for multidevice setups.
+    #[strum(props(default = "1"))]
+    BccSelf,
+
+    /// True if encryption is preferred according to Autocrypt standard.
+    #[strum(props(default = "1"))]
+    E2eeEnabled,
+
+    /// True if Message Delivery Notifications (read receipts) should
+    /// be sent and requested.
+    #[strum(props(default = "1"))]
+    MdnsEnabled,
+
+    /// True if "Sent" folder should be watched for changes.
+    #[strum(props(default = "0"))]
+    SentboxWatch,
+
+    /// True if chat messages should be moved to a separate folder.
+    #[strum(props(default = "1"))]
+    MvboxMove,
+
+    /// Watch for new messages in the "Mvbox" (aka DeltaChat folder) only.
+    ///
+    /// This will not entirely disable other folders, e.g. the spam folder will also still
+    /// be watched for new messages.
+    #[strum(props(default = "0"))]
+    OnlyFetchMvbox,
+
+    /// Whether to show classic emails or only chat messages.
+    #[strum(props(default = "2"))] // also change ShowEmails.default() on changes
+    ShowEmails,
+
+    /// Quality of the media files to send.
+    #[strum(props(default = "0"))] // also change MediaQuality.default() on changes
+    MediaQuality,
+
+    /// If set to "1", on the first time `start_io()` is called after configuring,
+    /// the newest existing messages are fetched.
+    /// Existing recipients are added to the contact database regardless of this setting.
+    #[strum(props(default = "0"))]
+    FetchExistingMsgs,
+
+    /// If set to "1", then existing messages are considered to be already fetched.
+    /// This flag is reset after successful configuration.
+    #[strum(props(default = "1"))]
+    FetchedExistingMsgs,
+
+    /// Type of the OpenPGP key to generate.
+    #[strum(props(default = "0"))]
+    KeyGenType,
+
+    /// Timer in seconds after which the message is deleted from the
+    /// server.
+    ///
+    /// Equals to 0 by default, which means the message is never
+    /// deleted.
+    ///
+    /// Value 1 is treated as "delete at once": messages are deleted
+    /// immediately, without moving to DeltaChat folder.
+    #[strum(props(default = "0"))]
+    DeleteServerAfter,
+
+    /// Timer in seconds after which the message is deleted from the
+    /// device.
+    ///
+    /// Equals to 0 by default, which means the message is never
+    /// deleted.
+    #[strum(props(default = "0"))]
+    DeleteDeviceAfter,
+
+    /// Move messages to the Trash folder instead of marking them "\Deleted". Overrides
+    /// `ProviderOptions::delete_to_trash`.
+    DeleteToTrash,
+
+    /// Save raw MIME messages with headers in the database if true.
+    SaveMimeHeaders,
+
+    /// The primary email address. Also see `SecondaryAddrs`.
+    ConfiguredAddr,
+
+    /// Configured IMAP server hostname.
+    ConfiguredMailServer,
+
+    /// Configured IMAP server username.
+    ConfiguredMailUser,
+
+    /// Configured IMAP server password.
+    ConfiguredMailPw,
+
+    /// Configured IMAP server port.
+    ConfiguredMailPort,
+
+    /// Configured IMAP server security (e.g. TLS, STARTTLS).
+    ConfiguredMailSecurity,
+
+    /// How to check IMAP server TLS certificates.
+    ConfiguredImapCertificateChecks,
+
+    /// Configured SMTP server hostname.
+    ConfiguredSendServer,
+
+    /// Configured SMTP server username.
+    ConfiguredSendUser,
+
+    /// Configured SMTP server password.
+    ConfiguredSendPw,
+
+    /// Configured SMTP server port.
+    ConfiguredSendPort,
+
+    /// How to check SMTP server TLS certificates.
+    ConfiguredSmtpCertificateChecks,
+
+    /// Whether OAuth 2 is used with configured provider.
+    ConfiguredServerFlags,
+
+    /// Configured SMTP server security (e.g. TLS, STARTTLS).
+    ConfiguredSendSecurity,
+
+    /// Configured folder for incoming messages.
+    ConfiguredInboxFolder,
+
+    /// Configured folder for chat messages.
+    ConfiguredMvboxFolder,
+
+    /// Configured "Sent" folder.
+    ConfiguredSentboxFolder,
+
+    /// Configured "Trash" folder.
+    ConfiguredTrashFolder,
+
+    /// Unix timestamp of the last successful configuration.
+    ConfiguredTimestamp,
+
+    /// ID of the configured provider from the provider database.
+    ConfiguredProvider,
+
+    /// True if account is configured.
+    Configured,
+
+    /// True if account is a chatmail account.
+    IsChatmail,
+
+    /// All secondary self addresses separated by spaces
+    /// (`addr1@example.org addr2@example.org addr3@example.org`)
+    SecondaryAddrs,
+
+    /// Read-only core version string.
+    #[strum(serialize = "sys.version")]
+    SysVersion,
+
+    /// Maximal recommended attachment size in bytes.
+    #[strum(serialize = "sys.msgsize_max_recommended")]
+    SysMsgsizeMaxRecommended,
+
+    /// Space separated list of all config keys available.
+    #[strum(serialize = "sys.config_keys")]
+    SysConfigKeys,
+
+    /// True if it is a bot account.
+    Bot,
+
+    /// True when to skip initial start messages in groups.
+    #[strum(props(default = "0"))]
+    SkipStartMessages,
+
+    /// Whether we send a warning if the password is wrong (set to false when we send a warning
+    /// because we do not want to send a second warning)
+    #[strum(props(default = "0"))]
+    NotifyAboutWrongPw,
+
+    /// If a warning about exceeding quota was shown recently,
+    /// this is the percentage of quota at the time the warning was given.
+    /// Unset, when quota falls below minimal warning threshold again.
+    QuotaExceeding,
+
+    /// address to webrtc instance to use for videochats
+    WebrtcInstance,
+
+    /// Timestamp of the last time housekeeping was run
+    LastHousekeeping,
+
+    /// Timestamp of the last `CantDecryptOutgoingMsgs` notification.
+    LastCantDecryptOutgoingMsgs,
+
+    /// To how many seconds to debounce scan_all_folders. Used mainly in tests, to disable debouncing completely.
+    #[strum(props(default = "60"))]
+    ScanAllFoldersDebounceSecs,
+
+    /// Whether to avoid using IMAP IDLE even if the server supports it.
+    ///
+    /// This is a developer option for testing "fake idle".
+    #[strum(props(default = "0"))]
+    DisableIdle,
+
+    /// Defines the max. size (in bytes) of messages downloaded automatically.
+    /// 0 = no limit.
+    #[strum(props(default = "0"))]
+    DownloadLimit,
+
+    /// Enable sending and executing (applying) sync messages. Sending requires `BccSelf` to be set.
+    #[strum(props(default = "1"))]
+    SyncMsgs,
+
+    /// Space-separated list of all the authserv-ids which we believe
+    /// may be the one of our email server.
+    ///
+    /// See `crate::authres::update_authservid_candidates`.
+    AuthservIdCandidates,
+
+    /// Make all outgoing messages with Autocrypt header "multipart/signed".
+    SignUnencrypted,
+
+    /// Let the core save all events to the database.
+    /// This value is used internally to remember the MsgId of the logging xdc
+    #[strum(props(default = "0"))]
+    DebugLogging,
+
+    /// Last message processed by the bot.
+    LastMsgId,
+
+    /// How often to gossip Autocrypt keys in chats with multiple recipients, in seconds. 2 days by
+    /// default.
+    ///
+    /// This is not supposed to be changed by UIs and only used for testing.
+    #[strum(props(default = "172800"))]
+    GossipPeriod,
+
+    /// Feature flag for verified 1:1 chats; the UI should set it
+    /// to 1 if it supports verified 1:1 chats.
+    /// Regardless of this setting, `chat.is_protected()` returns true while the key is verified,
+    /// and when the key changes, an info message is posted into the chat.
+    /// 0=Nothing else happens when the key changes.
+    /// 1=After the key changed, `can_send()` returns false and `is_protection_broken()` returns true
+    /// until `chat_id.accept()` is called.
+    #[strum(props(default = "0"))]
+    VerifiedOneOnOneChats,
+
+    /// Row ID of the key in the `keypairs` table
+    /// used for signatures, encryption to self and included in `Autocrypt` header.
+    KeyId,
+
+    /// This key is sent to the self_reporting bot so that the bot can recognize the user
+    /// without storing the email address
+    SelfReportingId,
+
+    /// MsgId of webxdc map integration.
+    WebxdcIntegration,
+
+    /// Iroh secret key.
+    IrohSecretKey,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    let socks5_enabled = context.get_config_bool(Config::Socks5Enabled).await?;
+    if let Some(oauth2) = Oauth2::from_address(context, addr, socks5_enabled).await {
+        context
+            .sql
+            .set_raw_config("oauth2_pending_redirect_uri", Some(redirect_uri))
+            .await?;
+        let oauth2_url = replace_in_uri(oauth2.get_code, "$CLIENT_ID", oauth2.client_id);
+        let oauth2_url = replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+        Ok(Some(oauth2_url))
+    } else {
+        Ok(None)
+    }
+}
+</function>
+<translated function>
+ ```rust
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    const CLIENT_ID: &str = "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com";
+    let oauth2 = from_address(context, addr, false).await?;
+    if oauth2.is_none() {
+        return Ok(None);
+    }
+
+    let oauth2 = oauth2.unwrap();
+    dc_sqlite3_set_config(context.sql, "oauth2_pending_redirect_uri", redirect_uri);
+
+    let mut oauth2_url = oauth2.get_code.clone();
+    oauth2_url = replace_in_uri(&oauth2_url, "$CLIENT_ID", CLIENT_ID);
+    oauth2_url = replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+    Ok(Some(oauth2_url))
+}
+
+fn replace_in_uri(uri: &str, key: &str, value: &str) -> String {
+    let value_urlencoded = utf8_percent_encode(value, NON_ALPHANUMERIC).to_string();
+    uri.replace(key, &value_urlencoded)
+}
+
+async fn from_address(context: &Context, addr: &str, skip_mx: bool) -> Result<Oauth2Info> {
+    let addr_normalized = normalize_addr(addr);
+    if let Some(domain) = addr_normalized.find('@').map(|index| addr_normalized.split_at(index + 1).1) {
+        if let Some(oauth2_authorizer) = provider::get_provider_info(context, domain, skip_mx).await.and_then(|provider| provider.oauth2_authorizer.as_ref()) {
+            return Ok(match oauth2_authorizer {
+                Oauth2Authorizer::Gmail => OAUTH2_GMAIL,
+                Oauth2Authorizer::Yandex => OAUTH2_YANDEX,
+            });
+        }
+    }
+    Ok(Oauth2Info::default())
+}
+
+#[derive(Default, Deserialize)]
+struct Oauth2Info {
+    get_code: String,
+    client_id: String,
+}
+```</translated function> ```rust
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    const CLIENT_ID: &str = "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com";
+    let oauth2 = from_address(context, addr, false).await?;
+    if oauth2.is_none() {
+        return Ok(None);
+    }
+
+    let oauth2 = oauth2.unwrap();
+    dc_sqlite3_set_config(context.sql, "oauth2_pending_redirect_uri", redirect_uri);
+
+    let mut oauth2_url = oauth2.get_code.clone();
+    oauth2_url = replace_in_uri(&oauth2_url, "$CLIENT_ID", CLIENT_ID);
+    oauth2_url = replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+    Ok(Some(oauth2_url))
+}
+
+fn replace_in_uri(uri: &str, key: &str, value: &str) -> String {
+    let value_urlencoded = utf8_percent_encode(value, NON_ALPHANUMERIC).to_string();
+    uri.replace(key, &value_urlencoded)
+}
+
+async fn from_address(context: &Context, addr: &str, skip_mx: bool) -> Result<Oauth2Info> {
+    let addr_normalized = normalize_addr(addr);
+    if let Some(domain) = addr_normalized.find('@').map(|index| addr_normalized.split_at(index + 1).1) {
+        if let Some(oauth2_authorizer) = provider::get_provider_info(context, domain, skip_mx).await.and_then(|provider| provider.oauth2_authorizer.as_ref()) {
+            return Ok(match oauth2_authorizer {
+                Oauth2Authorizer::Gmail => OAUTH2_GMAIL,
+                Oauth2Authorizer::Yandex => OAUTH2_YANDEX,
+            });
+        }
+    }
+    Ok(Oauth2Info::default())
+}
+
+#[derive(Default, Deserialize)]
+struct Oauth2Info {
+    get_code: String,
+    client_id: String,
+}
+```

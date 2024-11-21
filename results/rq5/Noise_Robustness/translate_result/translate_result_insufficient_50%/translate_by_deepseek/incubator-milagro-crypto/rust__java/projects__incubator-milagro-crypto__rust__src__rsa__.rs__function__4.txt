@@ -1,0 +1,420 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static void KEY_PAIR(RAND rng,int e,private_key PRIV,public_key PUB)
+	{ /* IEEE1363 A16.11/A16.12 more or less */
+
+		int n=PUB.n.getlen()/2;
+		FF t = new FF(n);
+		FF p1=new FF(n);
+		FF q1=new FF(n);
+
+		for (;;)
+		{
+			PRIV.p.random(rng);
+			while (PRIV.p.lastbits(2)!=3) PRIV.p.inc(1);
+			while (!FF.prime(PRIV.p,rng)) PRIV.p.inc(4);
+
+			p1.copy(PRIV.p);
+			p1.dec(1);
+
+			if (p1.cfactor(e)) continue;
+			break;
+		}
+
+		for (;;)
+		{
+			PRIV.q.random(rng);
+			while (PRIV.q.lastbits(2)!=3) PRIV.q.inc(1);
+			while (!FF.prime(PRIV.q,rng)) PRIV.q.inc(4);
+			
+			q1.copy(PRIV.q);
+			q1.dec(1);
+
+			if (q1.cfactor(e)) continue;
+
+			break;
+		}
+
+		PUB.n=FF.mul(PRIV.p,PRIV.q);
+		PUB.e=e;
+
+		t.copy(p1);
+		t.shr();
+		PRIV.dp.set(e);
+		PRIV.dp.invmodp(t);
+		if (PRIV.dp.parity()==0) PRIV.dp.add(t);
+		PRIV.dp.norm();
+
+		t.copy(q1);
+		t.shr();
+		PRIV.dq.set(e);
+		PRIV.dq.invmodp(t);
+		if (PRIV.dq.parity()==0) PRIV.dq.add(t);
+		PRIV.dq.norm();
+
+		PRIV.c.copy(PRIV.p);
+		PRIV.c.invmodp(PRIV.q);
+
+		return;
+	}
+</java function>
+<rust function signature>
+pub fn key_pair(rng: &mut RAND, e: isize, prv: &mut RsaPrivateKey, pbc: &mut RsaPublicKey) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn set(&mut self, i: usize, x: Chunk) {
+        self.w[i] = x;
+    }
+pub fn getlen(&self) -> usize {
+        return self.length;
+    }
+pub fn lastbits(&mut self, n: usize) -> isize {
+        let msk = ((1 << n) - 1) as Chunk;
+        self.norm();
+        (self.w[0] & msk) as isize
+    }
+pub fn shr(&mut self, k: usize) {
+        let n = k % BASEBITS;
+        let m = k / BASEBITS;
+        for i in 0..NLEN - m - 1 {
+            self.w[i] = (self.w[m + i] >> n) | ((self.w[m + i + 1] << (BASEBITS - n)) & BMASK)
+        }
+        self.w[NLEN - m - 1] = self.w[NLEN - 1] >> n;
+        for i in NLEN - m..NLEN {
+            self.w[i] = 0
+        }
+    }
+pub fn invmodp(&mut self, p: &Big) {
+        self.rmod(p);
+        let mut u = self.clone();
+        let mut v = p.clone();
+        let mut x1 = Big::new_int(1);
+        let mut x2 = Big::new();
+        let one = Big::new_int(1);
+
+        while (Big::comp(&u, &one) != 0) && (Big::comp(&v, &one) != 0) {
+            while u.parity() == 0 {
+                u.fshr(1);
+                if x1.parity() != 0 {
+                    x1.add(p);
+                    x1.norm();
+                }
+                x1.fshr(1);
+            }
+            while v.parity() == 0 {
+                v.fshr(1);
+                if x2.parity() != 0 {
+                    x2.add(p);
+                    x2.norm();
+                }
+                x2.fshr(1);
+            }
+            if Big::comp(&u, &v) >= 0 {
+                u.sub(&v);
+                u.norm();
+                if Big::comp(&x1, &x2) >= 0 {
+                    x1.sub(&x2)
+                } else {
+                    let mut t = p.clone();
+                    t.sub(&x2);
+                    x1.add(&t);
+                }
+                x1.norm();
+            } else {
+                v.sub(&u);
+                v.norm();
+                if Big::comp(&x2, &x1) >= 0 {
+                    x2.sub(&x1)
+                } else {
+                    let mut t = p.clone();
+                    t.sub(&x1);
+                    x2.add(&t);
+                }
+                x2.norm();
+            }
+        }
+        if Big::comp(&u, &one) == 0 {
+            *self = x1
+        } else {
+            *self = x2
+        }
+    }
+pub fn copy(&mut self, b: &FF) {
+        for i in 0..self.length {
+            self.v[i] = b.v[i].clone();
+        }
+    }
+pub fn new_int(n: usize) -> FF {
+        let mut f = FF {
+            v: Vec::new(),
+            length: 0,
+        };
+        for _ in 0..n {
+            f.v.push(Big::new());
+        }
+        f.length = n;
+        return f;
+    }
+pub struct RsaPublicKey {
+    e: isize,
+    n: FF,
+}
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+pub struct RsaPrivateKey {
+    p: FF,
+    q: FF,
+    dp: FF,
+    dq: FF,
+    c: FF,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn key_pair(rng: &mut RAND, e: isize, prv: &mut RsaPrivateKey, pbc: &mut RsaPublicKey) {
+    /* IEEE1363 A16.11/A16.12 more or less */
+    let n = pbc.n.getlen() / 2;
+    let mut t = FF::new_int(n);
+    let mut p1 = FF::new_int(n);
+    let mut q1 = FF::new_int(n);
+
+    loop {
+        prv.p.random(rng);
+        while prv.p.lastbits(2) != 3 {
+            prv.p.inc(1)
+        }
+        while !FF::prime(&prv.p, rng) {
+            prv.p.inc(4);
+        }
+
+        p1.copy(&prv.p);
+        p1.dec(1);
+
+        if p1.cfactor(e) {
+            continue;
+        }
+        break;
+    }
+
+    loop {
+        prv.q.random(rng);
+        while prv.q.lastbits(2) != 3 {
+            prv.q.inc(1)
+        }
+        while !FF::prime(&prv.q, rng) {
+            prv.q.inc(4);
+        }
+
+        q1.copy(&prv.q);
+        q1.dec(1);
+
+        if q1.cfactor(e) {
+            continue;
+        }
+
+        break;
+    }
+
+    pbc.n = FF::mul(&prv.p, &prv.q);
+    pbc.e = e;
+
+    t.copy(&p1);
+    t.shr();
+    prv.dp.set(e);
+    prv.dp.invmodp(&t);
+    if prv.dp.parity() == 0 {
+        prv.dp.add(&t)
+    }
+    prv.dp.norm();
+
+    t.copy(&q1);
+    t.shr();
+    prv.dq.set(e);
+    prv.dq.invmodp(&t);
+    if prv.dq.parity() == 0 {
+        prv.dq.add(&t)
+    }
+    prv.dq.norm();
+
+    prv.c.copy(&prv.p);
+    prv.c.invmodp(&prv.q);
+}
+</function>
+<translated function>
+ ```rust
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+pub fn key_pair(rng: &mut RAND, e: isize, prv: &mut RsaPrivateKey, pbc: &mut RsaPublicKey) {
+    let n = pbc.n.getlen() / 2;
+    let mut t = FF::new_int(n);
+    let mut p1 = FF::new_int(n);
+    let mut q1 = FF::new_int(n);
+
+    loop {
+        prv.p.random(rng);
+        while prv.p.lastbits(2) != 3 {
+            prv.p.inc(1);
+        }
+        while !FF::prime(&prv.p, rng) {
+            prv.p.inc(4);
+        }
+
+        p1.copy(&prv.p);
+        p1.dec(1);
+
+        if p1.cfactor(e) {
+            continue;
+        }
+        break;
+    }
+
+    loop {
+        prv.q.random(rng);
+        while prv.q.lastbits(2) != 3 {
+            prv.q.inc(1);
+        }
+        while !FF::prime(&prv.q, rng) {
+            prv.q.inc(4);
+        }
+
+        q1.copy(&prv.q);
+        q1.dec(1);
+
+        if q1.cfactor(e) {
+            continue;
+        }
+        break;
+    }
+
+    pbc.n = FF::mul(&prv.p, &prv.q);
+    pbc.e = e;
+
+    t.copy(&p1);
+    t.shr(1);
+    prv.dp.set(e);
+    prv.dp.invmodp(&t);
+    if prv.dp.parity() == 0 {
+        prv.dp.add(&t);
+    }
+    prv.dp.norm();
+
+    t.copy(&q1);
+    t.shr(1);
+    prv.dq.set(e);
+    prv.dq.invmodp(&t);
+    if prv.dq.parity() == 0 {
+        prv.dq.add(&t);
+    }
+    prv.dq.norm();
+
+    prv.c.copy(&prv.p);
+    prv.c.invmodp(&prv.q);
+}
+```</translated function> ```rust
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+pub fn key_pair(rng: &mut RAND, e: isize, prv: &mut RsaPrivateKey, pbc: &mut RsaPublicKey) {
+    let n = pbc.n.getlen() / 2;
+    let mut t = FF::new_int(n);
+    let mut p1 = FF::new_int(n);
+    let mut q1 = FF::new_int(n);
+
+    loop {
+        prv.p.random(rng);
+        while prv.p.lastbits(2) != 3 {
+            prv.p.inc(1);
+        }
+        while !FF::prime(&prv.p, rng) {
+            prv.p.inc(4);
+        }
+
+        p1.copy(&prv.p);
+        p1.dec(1);
+
+        if p1.cfactor(e) {
+            continue;
+        }
+        break;
+    }
+
+    loop {
+        prv.q.random(rng);
+        while prv.q.lastbits(2) != 3 {
+            prv.q.inc(1);
+        }
+        while !FF::prime(&prv.q, rng) {
+            prv.q.inc(4);
+        }
+
+        q1.copy(&prv.q);
+        q1.dec(1);
+
+        if q1.cfactor(e) {
+            continue;
+        }
+        break;
+    }
+
+    pbc.n = FF::mul(&prv.p, &prv.q);
+    pbc.e = e;
+
+    t.copy(&p1);
+    t.shr(1);
+    prv.dp.set(e);
+    prv.dp.invmodp(&t);
+    if prv.dp.parity() == 0 {
+        prv.dp.add(&t);
+    }
+    prv.dp.norm();
+
+    t.copy(&q1);
+    t.shr(1);
+    prv.dq.set(e);
+    prv.dq.invmodp(&t);
+    if prv.dq.parity() == 0 {
+        prv.dq.add(&t);
+    }
+    prv.dq.norm();
+
+    prv.c.copy(&prv.p);
+    prv.c.invmodp(&prv.q);
+}
+```

@@ -1,0 +1,305 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public ECP2 mul(BIG e)
+	{
+/* fixed size windows */
+		int i,b,nb,m,s,ns;
+		BIG mt=new BIG();
+		BIG t=new BIG();
+		ECP2 P=new ECP2();
+		ECP2 Q=new ECP2();
+		ECP2 C=new ECP2();
+		ECP2[] W=new ECP2[8];
+		byte[] w=new byte[1+(BIG.NLEN*BIG.BASEBITS+3)/4];
+
+		if (is_infinity()) return new ECP2();
+
+		//affine();
+
+/* precompute table */
+		Q.copy(this);
+		Q.dbl();
+		W[0]=new ECP2();
+		W[0].copy(this);
+
+		for (i=1;i<8;i++)
+		{
+			W[i]=new ECP2();
+			W[i].copy(W[i-1]);
+			W[i].add(Q);
+		}
+
+/* make exponent odd - add 2P if even, P if odd */
+		t.copy(e);
+		s=t.parity();
+		t.inc(1); t.norm(); ns=t.parity(); mt.copy(t); mt.inc(1); mt.norm();
+		t.cmove(mt,s);
+		Q.cmove(this,ns);
+		C.copy(Q);
+
+		nb=1+(t.nbits()+3)/4;
+/* convert exponent to signed 4-bit window */
+		for (i=0;i<nb;i++)
+		{
+			w[i]=(byte)(t.lastbits(5)-16);
+			t.dec(w[i]); t.norm();
+			t.fshr(4);	
+		}
+		w[nb]=(byte)t.lastbits(5);
+	
+		P.copy(W[(w[nb]-1)/2]);  
+		for (i=nb-1;i>=0;i--)
+		{
+			Q.select(W,w[i]);
+			P.dbl();
+			P.dbl();
+			P.dbl();
+			P.dbl();
+			P.add(Q);
+		}
+		P.sub(C);
+		P.affine();
+		return P;
+	}
+</java function>
+<rust function signature>
+pub fn mul(&self, e: &Big) -> ECP2 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::fp2::FP2;
+use super::rom;
+use crate::types::{CurvePairingType, SexticTwist, SignOfX};
+use std::fmt;
+use std::str::SplitWhitespace;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn mul(&self, e: &Big) -> ECP2 {
+        if self.is_infinity() {
+            return ECP2::new();
+        }
+
+        let mut W: [ECP2; 8] = [
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+        ];
+
+        const CT: usize = 1 + (big::NLEN * (big::BASEBITS as usize) + 3) / 4;
+        let mut w: [i8; CT] = [0; CT];
+
+        /* precompute table */
+        let mut Q = self.clone();
+        Q.dbl();
+
+        W[0] = self.clone();
+
+        for i in 1..8 {
+            W[i] = W[i - 1].clone();
+            W[i].add(&Q);
+        }
+
+        /* make exponent odd - add 2P if even, P if odd */
+        let mut t = e.clone();
+        let s = t.parity();
+        t.inc(1);
+        t.norm();
+        let ns = t.parity();
+        let mut mt = t.clone();
+        mt.inc(1);
+        mt.norm();
+        t.cmove(&mt, s);
+        Q.cmove(&self, ns);
+        let C = Q.clone();
+
+        let nb = 1 + (t.nbits() + 3) / 4;
+
+        /* convert exponent to signed 4-bit window */
+        for i in 0..nb {
+            w[i] = (t.lastbits(5) - 16) as i8;
+            t.dec(w[i] as isize);
+            t.norm();
+            t.fshr(4);
+        }
+        w[nb] = (t.lastbits(5)) as i8;
+
+        let mut P = W[((w[nb] as usize) - 1) / 2].clone();
+        for i in (0..nb).rev() {
+            Q.selector(&W, w[i] as i32);
+            P.dbl();
+            P.dbl();
+            P.dbl();
+            P.dbl();
+            P.add(&Q);
+        }
+        P.sub(&C);
+        P.affine();
+        P
+    }
+</function>
+<translated function>
+Here is the translated Java function to Rust:
+
+```rust
+pub fn mul(&self, e: &Big) -> ECP2 {
+    if self.is_infinity() {
+        return ECP2::new();
+    }
+
+    let mut mt = Big::new();
+    let mut t = Big::new();
+    let mut p = ECP2::new();
+    let mut q = ECP2::new();
+    let mut c = ECP2::new();
+    let mut w : Vec<i8> = vec![0;1+(big::NLEN*big::BASEBITS+3)/4];
+    let mut v : Vec<ECP2> = vec![ECP2::new();8];
+
+    q.copy(&self.clone());
+    q.dbl();
+
+    let mut i;
+    for i in 0..8 {
+        v[i].copy(&q);
+        if i > 0 { 
+            v[i].add(&v[i-1]); 
+        }
+    }
+
+    t.copy(&e);
+    let s = t.parity();
+    t.inc(1);
+    t.norm();
+
+    let ns = t.parity();
+    mt.copy(&t);
+    mt.inc(1);
+    mt.norm();
+    t.cmove(&mt,s);
+    q.cmove(&self,ns);
+    c.copy(&q);
+
+    let nb=1+(t.nbits()+3)/4;
+    for i in 0..=nb-1 {
+        w[i] = (t.lastbits(5)-16) as i8;
+        t.dec(w[i] as isize);
+        t.norm();
+        t.fshr(4);    
+    }
+    w[nb]=(t.lastbits(5)) as i8;
+    p.copy(&v[(w[nb] as usize-1)/2]);  
+
+    for i in (0..=nb-1).rev() {
+        q.select(&v,w[i] as isize);
+        p.dbl();
+        p.dbl();
+        p.dbl();
+        p.dbl();
+        p.add(&q);
+    }
+    p.sub(&c);
+    return p;
+}
+```
+
+I have translated the Java version to Rust making appropriate changes for Rust syntax and conventions which include:
+
+- Replacing `new` calls with calls to `::new()`
+- Method calls on `BIG` objects (which are of type `Big` in Rust) are done with a dot notation
+- The Java equivalent of Rust's mutable borrow `&mut` is used where necessary
+- Replacing array definitions with Rust `Vec` and initializing them with the `vec` macro
+- '`this`' in Java is replaced with '`self`' in Rust and '`self.clone()`' is used when a copy of the current object is required
+- In Rust the '`for`' loop iterating variable must be declared before the loop
+- The '`.`' operator is used to access fields and methods from structures and objects in Rust
+- Rust does not have a '`public`' keyword, all functions are public by default
+- Rust has implicit return, if the function is not void, the last expression in the function is automatically returned.</translated function>Here is the translated Java function to Rust:
+
+```rust
+pub fn mul(&self, e: &Big) -> ECP2 {
+    if self.is_infinity() {
+        return ECP2::new();
+    }
+
+    let mut mt = Big::new();
+    let mut t = Big::new();
+    let mut p = ECP2::new();
+    let mut q = ECP2::new();
+    let mut c = ECP2::new();
+    let mut w : Vec<i8> = vec![0;1+(big::NLEN*big::BASEBITS+3)/4];
+    let mut v : Vec<ECP2> = vec![ECP2::new();8];
+
+    q.copy(&self.clone());
+    q.dbl();
+
+    let mut i;
+    for i in 0..8 {
+        v[i].copy(&q);
+        if i > 0 { 
+            v[i].add(&v[i-1]); 
+        }
+    }
+
+    t.copy(&e);
+    let s = t.parity();
+    t.inc(1);
+    t.norm();
+
+    let ns = t.parity();
+    mt.copy(&t);
+    mt.inc(1);
+    mt.norm();
+    t.cmove(&mt,s);
+    q.cmove(&self,ns);
+    c.copy(&q);
+
+    let nb=1+(t.nbits()+3)/4;
+    for i in 0..=nb-1 {
+        w[i] = (t.lastbits(5)-16) as i8;
+        t.dec(w[i] as isize);
+        t.norm();
+        t.fshr(4);    
+    }
+    w[nb]=(t.lastbits(5)) as i8;
+    p.copy(&v[(w[nb] as usize-1)/2]);  
+
+    for i in (0..=nb-1).rev() {
+        q.select(&v,w[i] as isize);
+        p.dbl();
+        p.dbl();
+        p.dbl();
+        p.dbl();
+        p.add(&q);
+    }
+    p.sub(&c);
+    return p;
+}
+```
+
+I have translated the Java version to Rust making appropriate changes for Rust syntax and conventions which include:
+
+- Replacing `new` calls with calls to `::new()`
+- Method calls on `BIG` objects (which are of type `Big` in Rust) are done with a dot notation
+- The Java equivalent of Rust's mutable borrow `&mut` is used where necessary
+- Replacing array definitions with Rust `Vec` and initializing them with the `vec` macro
+- '`this`' in Java is replaced with '`self`' in Rust and '`self.clone()`' is used when a copy of the current object is required
+- In Rust the '`for`' loop iterating variable must be declared before the loop
+- The '`.`' operator is used to access fields and methods from structures and objects in Rust
+- Rust does not have a '`public`' keyword, all functions are public by default
+- Rust has implicit return, if the function is not void, the last expression in the function is automatically returned.

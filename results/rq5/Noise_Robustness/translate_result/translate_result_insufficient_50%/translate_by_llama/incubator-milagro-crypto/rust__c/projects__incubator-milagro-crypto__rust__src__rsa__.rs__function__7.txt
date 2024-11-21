@@ -1,0 +1,295 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int OAEP_ENCODE(int sha,const octet *m,csprng *RNG,const octet *p,octet *f)
+{
+    int slen;
+    int olen=f->max-1;
+    int mlen=m->len;
+    int hlen;
+    int seedlen;
+    char dbmask[MAX_RSA_BYTES];
+    char seed[64];
+    octet DBMASK= {0,sizeof(dbmask),dbmask};
+    octet SEED= {0,sizeof(seed),seed};
+
+    hlen=seedlen=sha;
+    if (mlen>olen-hlen-seedlen-1) return 1;
+    if (m==f) return 1;  /* must be distinct octets */
+
+    hashit(sha,p,-1,f);
+
+    slen=olen-mlen-hlen-seedlen-1;
+
+    OCT_jbyte(f,0,slen);
+    OCT_jbyte(f,0x1,1);
+    OCT_joctet(f,m);
+
+    OCT_rand(&SEED,RNG,seedlen);
+
+    MGF1(sha,&SEED,olen-seedlen,&DBMASK);
+
+    OCT_xor(&DBMASK,f);
+    MGF1(sha,&DBMASK,seedlen,f);
+
+    OCT_xor(f,&SEED);
+
+    OCT_joctet(f,&DBMASK);
+
+    OCT_pad(f,f->max);
+    OCT_clear(&SEED);
+    OCT_clear(&DBMASK);
+
+    return 0;
+}
+</c function>
+<rust function signature>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = RFS - 1;
+    let mlen = m.len();
+
+    let hlen = sha;
+
+    let mut seed: [u8; 64] = [0; 64];
+
+    let seedlen = hlen;
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+
+    let mut dbmask: [u8; RFS] = [0; RFS];
+
+    hashit(sha, p, -1, f);
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    for i in 0..slen {
+        f[hlen + i] = 0
+    }
+    f[hlen + slen] = 1;
+    for i in 0..mlen {
+        f[hlen + slen + 1 + i] = m[i]
+    }
+
+    for i in 0..seedlen {
+        seed[i] = rng.getbyte()
+    }
+
+    mgf1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i]
+    }
+
+    mgf1(sha, &dbmask[0..olen - seedlen], seedlen, f);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i]
+    }
+
+    for i in 0..olen - seedlen {
+        f[i + seedlen] = dbmask[i]
+    }
+
+    /* pad to length RFS */
+    let d = 1;
+    for i in (d..RFS).rev() {
+        f[i] = f[i - d];
+    }
+    for i in (0..d).rev() {
+        f[i] = 0;
+    }
+    return true;
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let slen = f.len() - 1;
+    let olen = f.len();
+    let mlen = m.len();
+    let hlen = sha;
+    let seedlen = sha;
+
+    if mlen > olen - hlen - seedlen - 1 {
+        return true;
+    }
+
+    if m == f {
+        return true; // must be distinct octets
+    }
+
+    hashit(sha, p.as_ref(), -1, f);
+
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    f[..slen].copy_from_slice(&[0x00; slen]);
+    f[slen] = 0x01;
+    f[slen + 1..].copy_from_slice(m);
+
+    let mut seed = [0u8; 64];
+    rng.fill_pool(&mut seed);
+
+    let dbmask = [0u8; MAX_RSA_BYTES];
+    let mut dbmask_octet = Octet::new(&dbmask);
+
+    let seed_octet = Octet::new(&seed);
+
+    mgf1(sha, &seed_octet, olen - seedlen, &mut dbmask_octet);
+
+    dbmask_octet.xor(f);
+    mgf1(sha, &dbmask_octet, seedlen, f);
+
+    f.xor(&seed_octet);
+
+    dbmask_octet.copy_to_slice(f + f.len() - dbmask_octet.len());
+
+    f.pad(f.len());
+
+    seed_octet.clear();
+    dbmask_octet.clear();
+
+    false
+}
+
+struct Octet<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> Octet<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Octet { data }
+    }
+
+    fn xor(&self, other: &mut [u8]) {
+        for (self_byte, other_byte) in self.data.iter().zip(other.iter_mut()) {
+            *other_byte ^= *self_byte;
+        }
+    }
+
+    fn copy_to_slice(&self, slice: &mut [u8]) {
+        slice.copy_from_slice(self.data);
+    }
+
+    fn clear(&mut self) {
+        self.data = &[];
+    }
+}
+
+const MAX_RSA_BYTES: usize = 256;
+```
+Note that I had to make some assumptions about the `hashit` and `mgf1` functions, as well as the `RAND` struct and its methods, since they were not provided in the original code. I also had to define the `Octet` struct and its methods to represent the `octet` type from the C code.</translated function>Here is the translated Rust function:
+```rust
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let slen = f.len() - 1;
+    let olen = f.len();
+    let mlen = m.len();
+    let hlen = sha;
+    let seedlen = sha;
+
+    if mlen > olen - hlen - seedlen - 1 {
+        return true;
+    }
+
+    if m == f {
+        return true; // must be distinct octets
+    }
+
+    hashit(sha, p.as_ref(), -1, f);
+
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    f[..slen].copy_from_slice(&[0x00; slen]);
+    f[slen] = 0x01;
+    f[slen + 1..].copy_from_slice(m);
+
+    let mut seed = [0u8; 64];
+    rng.fill_pool(&mut seed);
+
+    let dbmask = [0u8; MAX_RSA_BYTES];
+    let mut dbmask_octet = Octet::new(&dbmask);
+
+    let seed_octet = Octet::new(&seed);
+
+    mgf1(sha, &seed_octet, olen - seedlen, &mut dbmask_octet);
+
+    dbmask_octet.xor(f);
+    mgf1(sha, &dbmask_octet, seedlen, f);
+
+    f.xor(&seed_octet);
+
+    dbmask_octet.copy_to_slice(f + f.len() - dbmask_octet.len());
+
+    f.pad(f.len());
+
+    seed_octet.clear();
+    dbmask_octet.clear();
+
+    false
+}
+
+struct Octet<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> Octet<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Octet { data }
+    }
+
+    fn xor(&self, other: &mut [u8]) {
+        for (self_byte, other_byte) in self.data.iter().zip(other.iter_mut()) {
+            *other_byte ^= *self_byte;
+        }
+    }
+
+    fn copy_to_slice(&self, slice: &mut [u8]) {
+        slice.copy_from_slice(self.data);
+    }
+
+    fn clear(&mut self) {
+        self.data = &[];
+    }
+}
+
+const MAX_RSA_BYTES: usize = 256;
+```
+Note that I had to make some assumptions about the `hashit` and `mgf1` functions, as well as the `RAND` struct and its methods, since they were not provided in the original code. I also had to define the `Octet` struct and its methods to represent the `octet` type from the C code.

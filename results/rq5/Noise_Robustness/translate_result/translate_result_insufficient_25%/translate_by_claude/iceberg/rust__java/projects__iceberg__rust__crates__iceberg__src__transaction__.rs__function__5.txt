@@ -1,0 +1,215 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public Builder setProperties(Map<String, String> props) {
+      Preconditions.checkNotNull(props, "Invalid properties map: null");
+      Preconditions.checkArgument(!props.containsKey(null), "Invalid property: null");
+      Preconditions.checkArgument(
+          !props.containsValue(null),
+          "Invalid value for properties %s: null",
+          Maps.filterValues(props, Objects::isNull).keySet());
+      properties.putAll(props);
+      return this;
+    }
+</java function>
+<rust function signature>
+pub fn set_properties(mut self, props: HashMap<String, String>) -> Result<Self> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub enum TableUpdate {
+    /// Upgrade table's format version
+    #[serde(rename_all = "kebab-case")]
+    UpgradeFormatVersion {
+        /// Target format upgrade to.
+        format_version: FormatVersion,
+    },
+    /// Assign a new UUID to the table
+    #[serde(rename_all = "kebab-case")]
+    AssignUuid {
+        /// The new UUID to assign.
+        uuid: Uuid,
+    },
+    /// Add a new schema to the table
+    #[serde(rename_all = "kebab-case")]
+    AddSchema {
+        /// The schema to add.
+        schema: Schema,
+        /// The last column id of the table.
+        last_column_id: Option<i32>,
+    },
+    /// Set table's current schema
+    #[serde(rename_all = "kebab-case")]
+    SetCurrentSchema {
+        /// Schema ID to set as current, or -1 to set last added schema
+        schema_id: i32,
+    },
+    /// Add a new partition spec to the table
+    AddSpec {
+        /// The partition spec to add.
+        spec: UnboundPartitionSpec,
+    },
+    /// Set table's default spec
+    #[serde(rename_all = "kebab-case")]
+    SetDefaultSpec {
+        /// Partition spec ID to set as the default, or -1 to set last added spec
+        spec_id: i32,
+    },
+    /// Add sort order to table.
+    #[serde(rename_all = "kebab-case")]
+    AddSortOrder {
+        /// Sort order to add.
+        sort_order: SortOrder,
+    },
+    /// Set table's default sort order
+    #[serde(rename_all = "kebab-case")]
+    SetDefaultSortOrder {
+        /// Sort order ID to set as the default, or -1 to set last added sort order
+        sort_order_id: i64,
+    },
+    /// Add snapshot to table.
+    #[serde(rename_all = "kebab-case")]
+    AddSnapshot {
+        /// Snapshot to add.
+        snapshot: Snapshot,
+    },
+    /// Set table's snapshot ref.
+    #[serde(rename_all = "kebab-case")]
+    SetSnapshotRef {
+        /// Name of snapshot reference to set.
+        ref_name: String,
+        /// Snapshot reference to set.
+        #[serde(flatten)]
+        reference: SnapshotReference,
+    },
+    /// Remove table's snapshots
+    #[serde(rename_all = "kebab-case")]
+    RemoveSnapshots {
+        /// Snapshot ids to remove.
+        snapshot_ids: Vec<i64>,
+    },
+    /// Remove snapshot reference
+    #[serde(rename_all = "kebab-case")]
+    RemoveSnapshotRef {
+        /// Name of snapshot reference to remove.
+        ref_name: String,
+    },
+    /// Update table's location
+    SetLocation {
+        /// New location for table.
+        location: String,
+    },
+    /// Update table's properties
+    SetProperties {
+        /// Properties to update for table.
+        updates: HashMap<String, String>,
+    },
+    /// Remove table's properties
+    RemoveProperties {
+        /// Properties to remove
+        removals: Vec<String>,
+    },
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use crate::error::Result;
+use crate::spec::{FormatVersion, NullOrder, SortDirection, SortField, SortOrder, Transform};
+use crate::table::Table;
+use crate::TableUpdate::UpgradeFormatVersion;
+use crate::{Catalog, Error, ErrorKind, TableCommit, TableRequirement, TableUpdate};
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::mem::discriminant;
+use crate::io::FileIO;
+use crate::spec::{FormatVersion, TableMetadata};
+use crate::table::Table;
+use crate::transaction::Transaction;
+use crate::{TableIdent, TableRequirement, TableUpdate};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufReader;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn set_properties(mut self, props: HashMap<String, String>) -> Result<Self> {
+        self.append_updates(vec![TableUpdate::SetProperties { updates: props }])?;
+        Ok(self)
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn set_properties(mut self, props: HashMap<String, String>) -> Result<Self> {
+    if props.is_empty() {
+        return Err(Error::new(ErrorKind::InvalidInput, "Invalid properties map: empty"));
+    }
+
+    if props.keys().any(|k| k.is_empty()) {
+        return Err(Error::new(ErrorKind::InvalidInput, "Invalid property: empty key"));
+    }
+
+    if props.values().any(|v| v.is_empty()) {
+        let empty_value_keys: Vec<_> = props.iter()
+            .filter(|(_, v)| v.is_empty())
+            .map(|(k, _)| k)
+            .collect();
+        return Err(Error::new(ErrorKind::InvalidInput, 
+            format!("Invalid value for properties {:?}: empty", empty_value_keys)));
+    }
+
+    self.properties.extend(props);
+    Ok(self)
+}
+```
+
+This Rust function closely follows the behavior of the Java function while adapting to Rust's idioms and error handling. Here are the key points:
+
+1. The function signature matches the provided Rust signature, returning a `Result<Self>`.
+2. We check if the `props` HashMap is empty, which is equivalent to the null check in Java.
+3. We check for empty keys and values instead of null checks, as Rust's String can't be null.
+4. We use Rust's `Error` type for error handling, creating custom error messages.
+5. Instead of `putAll`, we use `extend` to add all entries from `props` to `self.properties`.
+6. The function returns `Ok(self)` on success, allowing for method chaining.
+
+Note that this translation assumes the existence of a `properties` field in the struct that this method is implemented for. If additional context or modifications are needed, please let me know.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn set_properties(mut self, props: HashMap<String, String>) -> Result<Self> {
+    if props.is_empty() {
+        return Err(Error::new(ErrorKind::InvalidInput, "Invalid properties map: empty"));
+    }
+
+    if props.keys().any(|k| k.is_empty()) {
+        return Err(Error::new(ErrorKind::InvalidInput, "Invalid property: empty key"));
+    }
+
+    if props.values().any(|v| v.is_empty()) {
+        let empty_value_keys: Vec<_> = props.iter()
+            .filter(|(_, v)| v.is_empty())
+            .map(|(k, _)| k)
+            .collect();
+        return Err(Error::new(ErrorKind::InvalidInput, 
+            format!("Invalid value for properties {:?}: empty", empty_value_keys)));
+    }
+
+    self.properties.extend(props);
+    Ok(self)
+}
+```
+
+This Rust function closely follows the behavior of the Java function while adapting to Rust's idioms and error handling. Here are the key points:
+
+1. The function signature matches the provided Rust signature, returning a `Result<Self>`.
+2. We check if the `props` HashMap is empty, which is equivalent to the null check in Java.
+3. We check for empty keys and values instead of null checks, as Rust's String can't be null.
+4. We use Rust's `Error` type for error handling, creating custom error messages.
+5. Instead of `putAll`, we use `extend` to add all entries from `props` to `self.properties`.
+6. The function returns `Ok(self)` on success, allowing for method chaining.
+
+Note that this translation assumes the existence of a `properties` field in the struct that this method is implemented for. If additional context or modifications are needed, please let me know.

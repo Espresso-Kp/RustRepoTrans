@@ -1,0 +1,74 @@
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let db_name = validate_namespace(namespace)?;
+
+        let mut table_list: Vec<TableIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self
+                    .client
+                    .0
+                    .get_tables()
+                    .database_name(&db_name)
+                    .next_token(token),
+                None => self.client.0.get_tables().database_name(&db_name),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let tables: Vec<_> = resp
+                .table_list()
+                .iter()
+                .map(|tbl| TableIdent::new(namespace.clone(), tbl.name().to_string()))
+                .collect();
+
+            table_list.extend(tables);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(table_list)
+    }
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+------
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;

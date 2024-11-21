@@ -1,0 +1,414 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+uint32_t dc_join_securejoin(dc_context_t* context, const char* qr)
+{
+	/* ==========================================================
+	   ====             Bob - the joiner's side             =====
+	   ====   Step 2 in "Setup verified contact" protocol   =====
+	   ========================================================== */
+
+	int       ret_chat_id = 0;
+	int       ongoing_allocated = 0;
+	uint32_t  contact_chat_id = 0;
+	int       join_vg = 0;
+	dc_lot_t* qr_scan = NULL;
+	int       qr_locked = 0;
+	#define   LOCK_QR    { pthread_mutex_lock(&context->bobs_qr_critical); qr_locked = 1; }
+	#define   UNLOCK_QR  if (qr_locked) { pthread_mutex_unlock(&context->bobs_qr_critical); qr_locked = 0; }
+	#define   CHECK_EXIT if (context->shall_stop_ongoing) { goto cleanup; }
+
+	dc_log_info(context, 0, "Requesting secure-join ...");
+
+	dc_ensure_secret_key_exists(context);
+
+	if ((ongoing_allocated=dc_alloc_ongoing(context))==0) {
+		goto cleanup;
+	}
+
+	if (((qr_scan=dc_check_qr(context, qr))==NULL)
+	 || (qr_scan->state!=DC_QR_ASK_VERIFYCONTACT && qr_scan->state!=DC_QR_ASK_VERIFYGROUP)) {
+		dc_log_error(context, 0, "Unknown QR code.");
+		goto cleanup;
+	}
+
+	if ((contact_chat_id=dc_create_chat_by_contact_id(context, qr_scan->id))==0) {
+		dc_log_error(context, 0, "Unknown contact.");
+		goto cleanup;
+	}
+
+	CHECK_EXIT
+
+	join_vg = (qr_scan->state==DC_QR_ASK_VERIFYGROUP);
+
+	context->bobs_status = 0;
+	LOCK_QR
+		context->bobs_qr_scan = qr_scan;
+	UNLOCK_QR
+
+	if (fingerprint_equals_sender(context, qr_scan->fingerprint, contact_chat_id)) {
+		// the scanned fingerprint matches Alice's key, we can proceed to step 4b) directly and save two mails
+		dc_log_info(context, 0, "Taking protocol shortcut.");
+		context->bob_expects = DC_VC_CONTACT_CONFIRM;
+		context->cb(context, DC_EVENT_SECUREJOIN_JOINER_PROGRESS, chat_id_2_contact_id(context, contact_chat_id), 400);
+		char* own_fingerprint = get_self_fingerprint(context);
+		send_handshake_msg(context, contact_chat_id, join_vg? "vg-request-with-auth" : "vc-request-with-auth",
+			qr_scan->auth, own_fingerprint, join_vg? qr_scan->text2 : NULL); // Bob -> Alice
+		free(own_fingerprint);
+	}
+	else {
+		context->bob_expects = DC_VC_AUTH_REQUIRED;
+		send_handshake_msg(context, contact_chat_id, join_vg? "vg-request" : "vc-request",
+			qr_scan->invitenumber, NULL, NULL); // Bob -> Alice
+	}
+
+	while (1) {
+		CHECK_EXIT
+
+		usleep(300*1000); // 0.3 seconds
+	}
+
+cleanup:
+	context->bob_expects = 0;
+
+	if (context->bobs_status==DC_BOB_SUCCESS) {
+		if (join_vg) {
+			ret_chat_id = dc_get_chat_id_by_grpid(context, qr_scan->text2, NULL, NULL);
+		}
+		else {
+			ret_chat_id = contact_chat_id;
+		}
+	}
+
+	LOCK_QR
+		context->bobs_qr_scan = NULL;
+	UNLOCK_QR
+
+	dc_lot_unref(qr_scan);
+
+	if (ongoing_allocated) { dc_free_ongoing(context); }
+	return ret_chat_id;
+}
+</c function>
+<rust function signature>
+pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn error(&self) -> Option<String> {
+        self.error.clone()
+    }
+async fn securejoin(context: &Context, qr: &str) -> Result<ChatId> {
+    /*========================================================
+    ====             Bob - the joiner's side             =====
+    ====   Step 2 in "Setup verified contact" protocol   =====
+    ========================================================*/
+
+    info!(context, "Requesting secure-join ...",);
+    let qr_scan = check_qr(context, qr).await?;
+
+    let invite = QrInvite::try_from(qr_scan)?;
+
+    bob::start_protocol(context, invite).await
+}
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use anyhow::{bail, Context as _, Error, Result};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use crate::aheader::EncryptPreference;
+use crate::chat::{self, Chat, ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::e2ee::ensure_secret_key_exists;
+use crate::events::EventType;
+use crate::headerdef::HeaderDef;
+use crate::key::{load_self_public_key, DcKey, Fingerprint};
+use crate::message::{Message, Viewtype};
+use crate::mimeparser::{MimeMessage, SystemMessage};
+use crate::param::Param;
+use crate::peerstate::Peerstate;
+use crate::qr::check_qr;
+use crate::securejoin::bob::JoinerProgress;
+use crate::stock_str;
+use crate::sync::Sync::*;
+use crate::token;
+use crate::tools::time;
+use bobstate::BobState;
+use qrinvite::QrInvite;
+use crate::token::Namespace;
+use deltachat_contact_tools::{ContactAddress, EmailAddress};
+use super::*;
+use crate::chat::{remove_contact_from_chat, CantSendReason};
+use crate::chatlist::Chatlist;
+use crate::constants::{self, Chattype};
+use crate::imex::{imex, ImexMode};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::{self, chat_protection_enabled};
+use crate::test_utils::get_chat_msg;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+use std::collections::HashSet;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> {
+    securejoin(context, qr).await.map_err(|err| {
+        warn!(context, "Fatal joiner error: {:#}", err);
+        // The user just scanned this QR code so has context on what failed.
+        error!(context, "QR process failed");
+        err
+    })
+}
+</function>
+<translated function>
+```rust
+pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId>{
+    /* ==========================================================
+       ====             Bob - the joiner's side             =====
+       ====   Step 2 in "Setup verified contact" protocol   =====
+       ========================================================== */
+
+    let mut ret_chat_id: ChatId = Default::default();
+    let mut contact_chat_id: ChatId = Default::default();
+    let mut join_vg = false;
+    let mut qr_scan: Option<Lot>;
+    let mut qr_locked = false;
+
+    info!(context, 0, "Requesting secure-join ...");
+
+    dc_ensure_secret_key_exists(context).await.context("Failed to ensure secret key exists")?;
+
+    let ongoing_allocated = {
+        let lock = context.alloc_ongoing().await;
+        box lock
+    };
+
+    if ongoing_allocated.is_none() {
+        bail!("Failed to allocate ongoing context");
+    }
+
+    qr_scan = check_qr(context, qr).await;
+
+    if qr_scan.is_none() {
+        bail!("QR code cannot be read")
+    }
+
+    match &qr_scan {
+        Some(scan) => {
+            if scan.state != LotState::QrAskVerifyContact
+                && scan.state != LotState::QrAskVerifyGroup
+            {
+                bail!("Unknown QR code.");
+            }
+            contact_chat_id = create_chat_by_contact_id(context, &scan.id)
+                .await
+                .context("Failed to create chat by contact id")?;
+
+            join_vg = scan.state == LotState::QrAskVerifyGroup;
+
+            context.set_bob_expect(Some(LotState::Suspend))
+                .await
+                .context("Failed to set bob expect state")?;
+
+            let mut qr_locked = context.bob_qr_critical.lock().await;
+            context.set_bob_qr_scan(qr_scan.clone());
+            drop(qr_locked);
+
+            let dc_chat_id = ChatId::new(contact_chat_id);
+            if fingerprint_equals_sender(context, &scan.fingerprint, &dc_chat_id) {
+                context
+                    .set_bob_expect(Some(LotState::Suspend))
+                    .await
+                    .context("Failed to set bob expect state")?;
+                context.emit_event(
+                    EventType::SecurejoinJoinerProgress {
+                        progress: JoinerProgress::VcContactConfirm,
+                    },
+                );
+
+                join_vg = scan.state == LotState::QrAskVerifyGroup;
+
+                context
+                    .set_bob_expect(Some(LotState::Suspend))
+                    .await
+                    .context("Failed to set bob expect state")?;
+
+                let path = if join_vg {
+                        "vg-request"
+                    } else {
+                        "vc-request"
+                    }
+                send_handshake_msg(
+                    context,
+                    &dc_chat_id,
+                    path,
+                    &scan.invitenumber,
+                    None,
+                    None,
+                )
+                .await
+                .context("Failed to send handshake message")?;
+            }
+        }
+        None => bail!("No QR code found"),
+    }
+
+    loop {
+        should_stop_ongoing(context).await?;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    context.bob_expects.set(LotState::Suspend).await?;
+
+    match &qr_scan {
+        Some(scan) => {
+            if context.bob_state.get().await == BobState::Success {
+                if join_vg {
+                    ret_chat_id = get_chat_id_by_grpid(&context, &scan.text2, None, None).await
+                        .ok_or(Error::InvalidScancontexts)?;
+                } else {
+                    ret_chat_id = contact_chat_id;
+                }
+            }
+        }
+        None => bail!("No QR code found"),
+    }
+
+    context.bob_qr_scan.set(None).await;
+    qr_scan = None;
+
+    Ok(ret_chat_id)
+}
+```
+
+This function translates from C to rust language. The while Loop in the C function create_delay of 300ms that  is implemented in rust using the `tokio::time::sleep(Duration::from_millis(300)).await;` statement.</translated function>```rust
+pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId>{
+    /* ==========================================================
+       ====             Bob - the joiner's side             =====
+       ====   Step 2 in "Setup verified contact" protocol   =====
+       ========================================================== */
+
+    let mut ret_chat_id: ChatId = Default::default();
+    let mut contact_chat_id: ChatId = Default::default();
+    let mut join_vg = false;
+    let mut qr_scan: Option<Lot>;
+    let mut qr_locked = false;
+
+    info!(context, 0, "Requesting secure-join ...");
+
+    dc_ensure_secret_key_exists(context).await.context("Failed to ensure secret key exists")?;
+
+    let ongoing_allocated = {
+        let lock = context.alloc_ongoing().await;
+        box lock
+    };
+
+    if ongoing_allocated.is_none() {
+        bail!("Failed to allocate ongoing context");
+    }
+
+    qr_scan = check_qr(context, qr).await;
+
+    if qr_scan.is_none() {
+        bail!("QR code cannot be read")
+    }
+
+    match &qr_scan {
+        Some(scan) => {
+            if scan.state != LotState::QrAskVerifyContact
+                && scan.state != LotState::QrAskVerifyGroup
+            {
+                bail!("Unknown QR code.");
+            }
+            contact_chat_id = create_chat_by_contact_id(context, &scan.id)
+                .await
+                .context("Failed to create chat by contact id")?;
+
+            join_vg = scan.state == LotState::QrAskVerifyGroup;
+
+            context.set_bob_expect(Some(LotState::Suspend))
+                .await
+                .context("Failed to set bob expect state")?;
+
+            let mut qr_locked = context.bob_qr_critical.lock().await;
+            context.set_bob_qr_scan(qr_scan.clone());
+            drop(qr_locked);
+
+            let dc_chat_id = ChatId::new(contact_chat_id);
+            if fingerprint_equals_sender(context, &scan.fingerprint, &dc_chat_id) {
+                context
+                    .set_bob_expect(Some(LotState::Suspend))
+                    .await
+                    .context("Failed to set bob expect state")?;
+                context.emit_event(
+                    EventType::SecurejoinJoinerProgress {
+                        progress: JoinerProgress::VcContactConfirm,
+                    },
+                );
+
+                join_vg = scan.state == LotState::QrAskVerifyGroup;
+
+                context
+                    .set_bob_expect(Some(LotState::Suspend))
+                    .await
+                    .context("Failed to set bob expect state")?;
+
+                let path = if join_vg {
+                        "vg-request"
+                    } else {
+                        "vc-request"
+                    }
+                send_handshake_msg(
+                    context,
+                    &dc_chat_id,
+                    path,
+                    &scan.invitenumber,
+                    None,
+                    None,
+                )
+                .await
+                .context("Failed to send handshake message")?;
+            }
+        }
+        None => bail!("No QR code found"),
+    }
+
+    loop {
+        should_stop_ongoing(context).await?;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    context.bob_expects.set(LotState::Suspend).await?;
+
+    match &qr_scan {
+        Some(scan) => {
+            if context.bob_state.get().await == BobState::Success {
+                if join_vg {
+                    ret_chat_id = get_chat_id_by_grpid(&context, &scan.text2, None, None).await
+                        .ok_or(Error::InvalidScancontexts)?;
+                } else {
+                    ret_chat_id = contact_chat_id;
+                }
+            }
+        }
+        None => bail!("No QR code found"),
+    }
+
+    context.bob_qr_scan.set(None).await;
+    qr_scan = None;
+
+    Ok(ret_chat_id)
+}
+```
+
+This function translates from C to rust language. The while Loop in the C function create_delay of 300ms that  is implemented in rust using the `tokio::time::sleep(Duration::from_millis(300)).await;` statement.

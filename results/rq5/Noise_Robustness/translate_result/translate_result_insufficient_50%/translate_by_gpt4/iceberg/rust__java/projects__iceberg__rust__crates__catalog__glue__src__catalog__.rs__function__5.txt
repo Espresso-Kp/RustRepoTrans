@@ -1,0 +1,175 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public void createNamespace(Namespace namespace, Map<String, String> metadata) {
+    try {
+      glue.createDatabase(
+          CreateDatabaseRequest.builder()
+              .catalogId(awsProperties.glueCatalogId())
+              .databaseInput(
+                  IcebergToGlueConverter.toDatabaseInput(
+                      namespace, metadata, awsProperties.glueCatalogSkipNameValidation()))
+              .build());
+      LOG.info("Created namespace: {}", namespace);
+    } catch (software.amazon.awssdk.services.glue.model.AlreadyExistsException e) {
+      throw new AlreadyExistsException(
+          "Cannot create namespace %s because it already exists in Glue", namespace);
+    }
+  }
+</java function>
+<rust function signature>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+pub(crate) fn convert_to_database(
+    namespace: &NamespaceIdent,
+    properties: &HashMap<String, String>,
+) -> Result<DatabaseInput> {
+    let db_name = validate_namespace(namespace)?;
+    let mut builder = DatabaseInput::builder().name(db_name);
+
+    for (k, v) in properties.iter() {
+        match k.as_ref() {
+            DESCRIPTION => {
+                builder = builder.description(v);
+            }
+            LOCATION => {
+                builder = builder.location_uri(v);
+            }
+            _ => {
+                builder = builder.parameters(k, v);
+            }
+        }
+    }
+
+    builder.build().map_err(from_aws_build_error)
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+
+        let builder = self.client.0.create_database().database_input(db_input);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(Namespace::with_properties(namespace.clone(), properties))
+    }
+</function>
+<translated function>
+Here is your translated function:
+
+```Rust
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let database_input = convert_to_database(namespace, &properties)?;
+        let request = CreateDatabaseRequest::builder()
+            .catalog_id(self.config.catalog_id.clone())
+            .database_input(database_input)
+            .build()
+            .map_err(from_aws_build_error)?;
+        match self.glue.create_database(&request).await {
+            Ok(_) => {
+                info!("Created namespace: {:?}", namespace);
+                Ok(Namespace::new(namespace.to_string()))
+            }
+            Err(e) => {
+                if let GlueErrorKind::ResourceAlreadyExists(_) = e.kind {
+                    Err(Error::NamespaceAlreadyExists(namespace.to_string()))
+                } else {
+                    Err(from_aws_sdk_error(e))
+                }
+            }
+        }
+    }
+```
+In this translation, several assumptions have been made:
+
+* `self.config.catalog_id` is accessing the equivalent of `awsProperties.glueCatalogId()` from java code.
+* `self.glue.create_database` is the Rust equivalent of `glue.createDatabase` from java code.
+* `info!` function is used to handle rust logging, equivalent to `LOG.info` from java code.
+* `Error::NamespaceAlreadyExists` is the Rust equivalent of `AlreadyExistsException` from java code.
+
+Don't forget to import all necessary libraries and handle any possible errors that may occur during this process.</translated function>Here is your translated function:
+
+```Rust
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let database_input = convert_to_database(namespace, &properties)?;
+        let request = CreateDatabaseRequest::builder()
+            .catalog_id(self.config.catalog_id.clone())
+            .database_input(database_input)
+            .build()
+            .map_err(from_aws_build_error)?;
+        match self.glue.create_database(&request).await {
+            Ok(_) => {
+                info!("Created namespace: {:?}", namespace);
+                Ok(Namespace::new(namespace.to_string()))
+            }
+            Err(e) => {
+                if let GlueErrorKind::ResourceAlreadyExists(_) = e.kind {
+                    Err(Error::NamespaceAlreadyExists(namespace.to_string()))
+                } else {
+                    Err(from_aws_sdk_error(e))
+                }
+            }
+        }
+    }
+```
+In this translation, several assumptions have been made:
+
+* `self.config.catalog_id` is accessing the equivalent of `awsProperties.glueCatalogId()` from java code.
+* `self.glue.create_database` is the Rust equivalent of `glue.createDatabase` from java code.
+* `info!` function is used to handle rust logging, equivalent to `LOG.info` from java code.
+* `Error::NamespaceAlreadyExists` is the Rust equivalent of `AlreadyExistsException` from java code.
+
+Don't forget to import all necessary libraries and handle any possible errors that may occur during this process.

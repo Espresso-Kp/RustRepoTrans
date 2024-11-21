@@ -1,0 +1,244 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static byte[] OAEP_ENCODE(int sha,byte[] m,RAND rng,byte[] p)
+	{ 
+		int i,slen,olen=RFS-1;
+		int mlen=m.length;
+		int hlen,seedlen;
+		byte[] f=new byte[RFS];
+
+		hlen=sha;
+		byte[] SEED=new byte[hlen];
+		seedlen=hlen;
+
+		if (mlen>olen-hlen-seedlen-1) return new byte[0]; 
+
+		byte[] DBMASK=new byte[olen-seedlen];
+
+		byte[] h=hashit(sha,p,-1);
+
+		for (i=0;i<hlen;i++) f[i]=h[i];
+
+		slen=olen-mlen-hlen-seedlen-1;      
+
+		for (i=0;i<slen;i++) f[hlen+i]=0;
+		f[hlen+slen]=1;
+		for (i=0;i<mlen;i++) f[hlen+slen+1+i]=m[i];
+
+		for (i=0;i<seedlen;i++) SEED[i]=(byte)rng.getByte();
+
+		MGF1(sha,SEED,olen-seedlen,DBMASK);
+
+		for (i=0;i<olen-seedlen;i++) DBMASK[i]^=f[i];
+
+		MGF1(sha,DBMASK,seedlen,f);
+
+		for (i=0;i<seedlen;i++) f[i]^=SEED[i];
+
+		for (i=0;i<olen-seedlen;i++) f[i+seedlen]=DBMASK[i];
+
+		/* pad to length RFS */
+		int d=1;
+		for (i=RFS-1;i>=d;i--)
+			f[i]=f[i-d];
+		for (i=d-1;i>=0;i--)
+			f[i]=0;
+
+		return f;
+	}
+</java function>
+<rust function signature>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = RFS - 1;
+    let mlen = m.len();
+
+    let hlen = sha;
+
+    let mut seed: [u8; 64] = [0; 64];
+
+    let seedlen = hlen;
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+
+    let mut dbmask: [u8; RFS] = [0; RFS];
+
+    hashit(sha, p, -1, f);
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    for i in 0..slen {
+        f[hlen + i] = 0
+    }
+    f[hlen + slen] = 1;
+    for i in 0..mlen {
+        f[hlen + slen + 1 + i] = m[i]
+    }
+
+    for i in 0..seedlen {
+        seed[i] = rng.getbyte()
+    }
+
+    mgf1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i]
+    }
+
+    mgf1(sha, &dbmask[0..olen - seedlen], seedlen, f);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i]
+    }
+
+    for i in 0..olen - seedlen {
+        f[i + seedlen] = dbmask[i]
+    }
+
+    /* pad to length RFS */
+    let d = 1;
+    for i in (d..RFS).rev() {
+        f[i] = f[i - d];
+    }
+    for i in (0..d).rev() {
+        f[i] = 0;
+    }
+    return true;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = RFS - 1;
+    let mlen = m.len();
+    let hlen = sha;
+    let seedlen = hlen;
+
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+
+    let mut seed = vec![0u8; hlen];
+    let mut dbmask = vec![0u8; olen - seedlen];
+
+    let h = if let Some(p_data) = p {
+        hashit(sha, p_data, None)
+    } else {
+        hashit(sha, &[], None)
+    };
+
+    f[..hlen].copy_from_slice(&h);
+
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    f[hlen..hlen + slen].fill(0);
+    f[hlen + slen] = 1;
+    f[hlen + slen + 1..hlen + slen + 1 + mlen].copy_from_slice(m);
+
+    for i in 0..seedlen {
+        seed[i] = rng.get_byte();
+    }
+
+    mgf1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i];
+    }
+
+    mgf1(sha, &dbmask, seedlen, &mut f[..seedlen]);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i];
+    }
+
+    f[seedlen..].copy_from_slice(&dbmask);
+
+    // pad to length RFS
+    let d = 1;
+    for i in (d..RFS).rev() {
+        f[i] = f[i - d];
+    }
+    f[..d].fill(0);
+
+    true
+}</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = RFS - 1;
+    let mlen = m.len();
+    let hlen = sha;
+    let seedlen = hlen;
+
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+
+    let mut seed = vec![0u8; hlen];
+    let mut dbmask = vec![0u8; olen - seedlen];
+
+    let h = if let Some(p_data) = p {
+        hashit(sha, p_data, None)
+    } else {
+        hashit(sha, &[], None)
+    };
+
+    f[..hlen].copy_from_slice(&h);
+
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    f[hlen..hlen + slen].fill(0);
+    f[hlen + slen] = 1;
+    f[hlen + slen + 1..hlen + slen + 1 + mlen].copy_from_slice(m);
+
+    for i in 0..seedlen {
+        seed[i] = rng.get_byte();
+    }
+
+    mgf1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i];
+    }
+
+    mgf1(sha, &dbmask, seedlen, &mut f[..seedlen]);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i];
+    }
+
+    f[seedlen..].copy_from_slice(&dbmask);
+
+    // pad to length RFS
+    let d = 1;
+    for i in (d..RFS).rev() {
+        f[i] = f[i - d];
+    }
+    f[..d].fill(0);
+
+    true
+}

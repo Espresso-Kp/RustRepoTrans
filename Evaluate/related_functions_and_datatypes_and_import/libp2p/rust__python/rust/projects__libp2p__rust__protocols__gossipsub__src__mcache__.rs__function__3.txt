@@ -1,0 +1,53 @@
+pub struct MessageId(pub Vec<u8>);
+
+pub struct RawMessage {
+    /// Id of the peer that published this message.
+    pub source: Option<PeerId>,
+
+    /// Content of the message. Its meaning is out of scope of this library.
+    pub data: Vec<u8>,
+
+    /// A random sequence number.
+    pub sequence_number: Option<u64>,
+
+    /// The topic this message belongs to
+    pub topic: TopicHash,
+
+    /// The signature of the message if it's signed.
+    pub signature: Option<Vec<u8>>,
+
+    /// The public key of the message if it is signed and the source [`PeerId`] cannot be inlined.
+    pub key: Option<Vec<u8>>,
+
+    /// Flag indicating if this message has been validated by the application or not.
+    pub validated: bool,
+}
+
+pub(crate) struct CacheEntry {
+    mid: MessageId,
+    topic: TopicHash,
+}
+
+pub(crate) struct MessageCache {
+    msgs: HashMap<MessageId, (RawMessage, HashSet<PeerId>)>,
+    /// For every message and peer the number of times this peer asked for the message
+    iwant_counts: HashMap<MessageId, HashMap<PeerId, u32>>,
+    history: Vec<Vec<CacheEntry>>,
+    /// The number of indices in the cache history used for gossiping. That means that a message
+    /// won't get gossiped anymore when shift got called `gossip` many times after inserting the
+    /// message in the cache.
+    gossip: usize,
+}
+
+------
+use crate::topic::TopicHash;
+use crate::types::{MessageId, RawMessage};
+use libp2p_identity::PeerId;
+use std::collections::hash_map::Entry;
+use std::fmt::Debug;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
+use super::*;
+use crate::IdentTopic as Topic;

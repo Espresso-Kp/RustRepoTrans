@@ -1,0 +1,146 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_write_file(dc_context_t* context, const char* pathNfilename, const void* buf, size_t buf_bytes)
+{
+	int   success = 0;
+	char* pathNfilename_abs = NULL;
+
+	if ((pathNfilename_abs=dc_get_abs_path(context, pathNfilename))==NULL) {
+		goto cleanup;
+	}
+
+	FILE* f = fopen(pathNfilename_abs, "wb");
+	if (f) {
+		if (fwrite(buf, 1, buf_bytes, f)==buf_bytes) {
+			success = 1;
+		}
+		else {
+			dc_log_warning(context, 0, "Cannot write %lu bytes to \"%s\".", (unsigned long)buf_bytes, pathNfilename);
+		}
+		fclose(f);
+	}
+	else {
+		dc_log_warning(context, 0, "Cannot open \"%s\" for writing.", pathNfilename);
+	}
+
+cleanup:
+	free(pathNfilename_abs);
+	return success;
+}
+</c function>
+<rust function signature>
+pub(crate) async fn write_file(
+    context: &Context,
+    path: impl AsRef<Path>,
+    buf: &[u8],
+) -> Result<(), io::Error> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) fn get_abs_path(context: &Context, path: &Path) -> PathBuf {
+    if let Ok(p) = path.strip_prefix("$BLOBDIR") {
+        context.get_blobdir().join(p)
+    } else {
+        path.into()
+    }
+}
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::borrow::Cow;
+use std::io::{Cursor, Write};
+use std::mem;
+use std::path::{Path, PathBuf};
+use std::str::from_utf8;
+use std::time::Duration;
+use std::time::SystemTime as Time;
+use std::time::SystemTime;
+use anyhow::{bail, Context as _, Result};
+use base64::Engine as _;
+use chrono::{Local, NaiveDateTime, NaiveTime, TimeZone};
+use deltachat_contact_tools::{strip_rtlo_characters, EmailAddress};
+use deltachat_time::SystemTimeTools as SystemTime;
+use futures::{StreamExt, TryStreamExt};
+use mailparse::dateparse;
+use mailparse::headers::Headers;
+use mailparse::MailHeaderMap;
+use rand::{thread_rng, Rng};
+use tokio::{fs, io};
+use url::Url;
+use crate::chat::{add_device_msg, add_device_msg_with_importance};
+use crate::constants::{DC_ELLIPSIS, DC_OUTDATED_WARNING_DAYS};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::message::{Message, Viewtype};
+use crate::stock_str;
+use chrono::NaiveDate;
+use proptest::prelude::*;
+use super::*;
+use crate::chatlist::Chatlist;
+use crate::{chat, test_utils};
+use crate::{receive_imf::receive_imf, test_utils::TestContext};
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) async fn write_file(
+    context: &Context,
+    path: impl AsRef<Path>,
+    buf: &[u8],
+) -> Result<(), io::Error> {
+    let path_abs = get_abs_path(context, path.as_ref());
+    fs::write(&path_abs, buf).await.map_err(|err| {
+        warn!(
+            context,
+            "Cannot write {} bytes to \"{}\": {}",
+            buf.len(),
+            path.as_ref().display(),
+            err
+        );
+        err
+    })
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub(crate) async fn write_file(
+    context: &Context,
+    path: impl AsRef<Path>,
+    buf: &[u8],
+) -> Result<(), io::Error> {
+    let path_abs = get_abs_path(context, path.as_ref())?;
+    let mut file = fs::OpenOptions::new()
+       .write(true)
+       .create(true)
+       .open(path_abs)
+       .await?;
+    file.write_all(buf).await?;
+    Ok(())
+}
+```
+Note that I've used the `fs` module from the `tokio` crate to open and write to the file, as it provides a more modern and async-friendly API. I've also used the `?` operator to propagate errors from the `get_abs_path` function and the `fs::OpenOptions::open` method.</translated function>Here is the translated Rust function:
+```rust
+pub(crate) async fn write_file(
+    context: &Context,
+    path: impl AsRef<Path>,
+    buf: &[u8],
+) -> Result<(), io::Error> {
+    let path_abs = get_abs_path(context, path.as_ref())?;
+    let mut file = fs::OpenOptions::new()
+       .write(true)
+       .create(true)
+       .open(path_abs)
+       .await?;
+    file.write_all(buf).await?;
+    Ok(())
+}
+```
+Note that I've used the `fs` module from the `tokio` crate to open and write to the file, as it provides a more modern and async-friendly API. I've also used the `?` operator to propagate errors from the `get_abs_path` function and the `fs::OpenOptions::open` method.

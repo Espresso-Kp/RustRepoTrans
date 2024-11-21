@@ -1,0 +1,163 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_get_oauth2_url(dc_context_t* context, const char* addr,
+                        const char* redirect_uri)
+{
+	#define CLIENT_ID     "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com"
+	oauth2_t*   oauth2 = NULL;
+	char*       oauth2_url = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || redirect_uri==NULL || redirect_uri[0]==0) {
+		goto cleanup;
+	}
+
+	oauth2 = get_info(addr);
+	if (oauth2==NULL) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_set_config(context->sql, "oauth2_pending_redirect_uri", redirect_uri);
+
+	oauth2_url = dc_strdup(oauth2->get_code);
+	replace_in_uri(&oauth2_url, "$CLIENT_ID", oauth2->client_id);
+	replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+cleanup:
+	free(oauth2);
+	return oauth2_url;
+}
+</c function>
+<rust function signature>
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    let socks5_enabled = context.get_config_bool(Config::Socks5Enabled).await?;
+    if let Some(oauth2) = Oauth2::from_address(context, addr, socks5_enabled).await {
+        context
+            .sql
+            .set_raw_config("oauth2_pending_redirect_uri", Some(redirect_uri))
+            .await?;
+        let oauth2_url = replace_in_uri(oauth2.get_code, "$CLIENT_ID", oauth2.client_id);
+        let oauth2_url = replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+        Ok(Some(oauth2_url))
+    } else {
+        Ok(None)
+    }
+}
+</function>
+<translated function>
+ ```rust
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    const CLIENT_ID: &str = "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com";
+
+    if context.is_null() || context.magic != DC_CONTEXT_MAGIC || redirect_uri.is_empty() {
+        return Ok(None);
+    }
+
+    let oauth2 = get_info(addr).await?;
+    if oauth2.is_none() {
+        return Ok(None);
+    }
+
+    let oauth2 = oauth2.unwrap();
+    dc_sqlite3_set_config(context.sql, "oauth2_pending_redirect_uri", redirect_uri);
+
+    let mut oauth2_url = oauth2.get_code.clone();
+    replace_in_uri(&mut oauth2_url, "$CLIENT_ID", CLIENT_ID);
+    replace_in_uri(&mut oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+    Ok(Some(oauth2_url))
+}
+```</translated function> ```rust
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    const CLIENT_ID: &str = "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com";
+
+    if context.is_null() || context.magic != DC_CONTEXT_MAGIC || redirect_uri.is_empty() {
+        return Ok(None);
+    }
+
+    let oauth2 = get_info(addr).await?;
+    if oauth2.is_none() {
+        return Ok(None);
+    }
+
+    let oauth2 = oauth2.unwrap();
+    dc_sqlite3_set_config(context.sql, "oauth2_pending_redirect_uri", redirect_uri);
+
+    let mut oauth2_url = oauth2.get_code.clone();
+    replace_in_uri(&mut oauth2_url, "$CLIENT_ID", CLIENT_ID);
+    replace_in_uri(&mut oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+    Ok(Some(oauth2_url))
+}
+```

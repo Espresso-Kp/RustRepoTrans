@@ -1,0 +1,97 @@
+fn create_operator<'a>(&self, path: &'a impl AsRef<str>) -> Result<(Operator, &'a str)> {
+        let path = path.as_ref();
+        match self {
+            Storage::LocalFs { op } => {
+                if let Some(stripped) = path.strip_prefix("file:/") {
+                    Ok((op.clone(), stripped))
+                } else {
+                    Ok((op.clone(), &path[1..]))
+                }
+            }
+            Storage::S3 { scheme_str, props } => {
+                let mut props = props.clone();
+                let url = Url::parse(path)?;
+                let bucket = url.host_str().ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::DataInvalid,
+                        format!("Invalid s3 url: {}, missing bucket", path),
+                    )
+                })?;
+
+                props.insert("bucket".to_string(), bucket.to_string());
+
+                let prefix = format!("{}://{}/", scheme_str, bucket);
+                if path.starts_with(&prefix) {
+                    Ok((Operator::via_map(Scheme::S3, props)?, &path[prefix.len()..]))
+                } else {
+                    Err(Error::new(
+                        ErrorKind::DataInvalid,
+                        format!("Invalid s3 url: {}, should start with {}", path, prefix),
+                    ))
+                }
+            }
+        }
+    }
+
+pub struct FileIO {
+    inner: Arc<Storage>,
+}
+
+
+fn try_convert_to_field_summary(
+        partitions: Option<Vec<FieldSummary>>,
+        partition_type: Option<&StructType>,
+    ) -> Result<Vec<super::FieldSummary>> {
+        if let Some(partitions) = partitions {
+            if let Some(partition_type) = partition_type {
+                let partition_types = partition_type.fields();
+                if partitions.len() != partition_types.len() {
+                    return Err(Error::new(
+                        crate::ErrorKind::DataInvalid,
+                        format!(
+                            "Invalid partition spec. Expected {} fields, got {}",
+                            partition_types.len(),
+                            partitions.len()
+                        ),
+                    ));
+                }
+                partitions
+                    .into_iter()
+                    .zip(partition_types)
+                    .map(|(v, field)| {
+                        v.try_into(field.field_type.as_primitive_type().ok_or_else(|| {
+                            Error::new(
+                                crate::ErrorKind::DataInvalid,
+                                "Invalid partition spec. Field type is not primitive",
+                            )
+                        })?)
+                    })
+                    .collect::<Result<Vec<_>>>()
+            } else {
+                Err(Error::new(
+                    crate::ErrorKind::DataInvalid,
+                    "Invalid partition spec. Partition type is required",
+                ))
+            }
+        } else {
+            Ok(Vec::new())
+        }
+    }
+pub struct FileIO {
+    inner: Arc<Storage>,
+}
+------
+
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};

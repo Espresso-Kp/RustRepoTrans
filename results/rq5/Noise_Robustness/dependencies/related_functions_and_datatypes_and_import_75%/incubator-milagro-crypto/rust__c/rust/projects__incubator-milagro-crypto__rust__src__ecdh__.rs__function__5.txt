@@ -1,0 +1,68 @@
+pub fn hmac(sha: usize, m: &[u8], k: &[u8], olen: usize, tag: &mut [u8]) -> bool {
+    // Input is from an octet m
+    // olen is requested output length in bytes. k is the key
+    // The output is the calculated tag
+    let mut b: [u8; 64] = [0; 64]; // Not good
+    let mut k0: [u8; 128] = [0; 128];
+
+    if olen < 4 {
+        return false;
+    }
+
+    let mut lb = 64;
+    if sha > 32 {
+        lb = 128
+    }
+
+    for i in 0..lb {
+        k0[i] = 0
+    }
+
+    if k.len() > lb {
+        hashit(sha, k, 0, None, 0, &mut b);
+        for i in 0..sha {
+            k0[i] = b[i]
+        }
+    } else {
+        for i in 0..k.len() {
+            k0[i] = k[i]
+        }
+    }
+
+    for i in 0..lb {
+        k0[i] ^= 0x36
+    }
+    hashit(sha, &k0[0..lb], 0, Some(m), 0, &mut b);
+
+    for i in 0..lb {
+        k0[i] ^= 0x6a
+    }
+    hashit(sha, &k0[0..lb], 0, Some(&b[0..sha]), olen, tag);
+
+    return true;
+}
+fn intto_bytes(n: usize, b: &mut [u8]) {
+    let mut i = b.len();
+    let mut m = n;
+    while m > 0 && i > 0 {
+        i -= 1;
+        b[i] = (m & 0xff) as u8;
+        m /= 256;
+    }
+}
+------
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;

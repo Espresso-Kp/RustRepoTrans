@@ -1,0 +1,93 @@
+fn replace_in_uri(uri: &str, key: &str, value: &str) -> String {
+    let value_urlencoded = utf8_percent_encode(value, NON_ALPHANUMERIC).to_string();
+    uri.replace(key, &value_urlencoded)
+}
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+------
+
+
+
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;

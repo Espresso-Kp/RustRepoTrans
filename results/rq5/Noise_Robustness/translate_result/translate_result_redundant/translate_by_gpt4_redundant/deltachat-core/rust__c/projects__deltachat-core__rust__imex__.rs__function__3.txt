@@ -1,0 +1,866 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_initiate_key_transfer(dc_context_t* context)
+{
+	int       success = 0;
+	char*     setup_code = NULL;
+	char*     setup_file_content = NULL;
+	char*     setup_file_name = NULL;
+	uint32_t  chat_id = 0;
+	dc_msg_t* msg = NULL;
+	uint32_t  msg_id = 0;
+
+	if (!dc_alloc_ongoing(context)) {
+		return 0; /* no cleanup as this would call dc_free_ongoing() */
+	}
+	#define CHECK_EXIT if (context->shall_stop_ongoing) { goto cleanup; }
+
+	if ((setup_code=dc_create_setup_code(context))==NULL) { /* this may require a keypair to be created. this may take a second ... */
+		goto cleanup;
+	}
+
+	CHECK_EXIT
+
+	if ((setup_file_content=dc_render_setup_file(context, setup_code))==NULL) { /* encrypting may also take a while ... */
+		goto cleanup;
+	}
+
+	CHECK_EXIT
+
+	if ((setup_file_name=dc_get_fine_pathNfilename(context, "$BLOBDIR", "autocrypt-setup-message.html"))==NULL
+	 || !dc_write_file(context, setup_file_name, setup_file_content, strlen(setup_file_content))) {
+		goto cleanup;
+	}
+
+	if ((chat_id=dc_create_chat_by_contact_id(context, DC_CONTACT_ID_SELF))==0) {
+		goto cleanup;
+	}
+
+	msg = dc_msg_new_untyped(context);
+	msg->type = DC_MSG_FILE;
+	dc_param_set    (msg->param, DC_PARAM_FILE,              setup_file_name);
+	dc_param_set    (msg->param, DC_PARAM_MIMETYPE,          "application/autocrypt-setup");
+	dc_param_set_int(msg->param, DC_PARAM_CMD,               DC_CMD_AUTOCRYPT_SETUP_MESSAGE);
+	dc_param_set_int(msg->param, DC_PARAM_FORCE_PLAINTEXT,   DC_FP_NO_AUTOCRYPT_HEADER);
+
+	CHECK_EXIT
+
+	if ((msg_id = dc_send_msg(context, chat_id, msg))==0) {
+		goto cleanup;
+	}
+
+	dc_msg_unref(msg);
+	msg = NULL;
+
+	/* wait until the message is really sent */
+	dc_log_info(context, 0, "Wait for setup message being sent ...");
+
+	while (1)
+	{
+		CHECK_EXIT
+
+		sleep(1);
+
+		msg = dc_get_msg(context, msg_id);
+		if (dc_msg_is_sent(msg)) {
+			break;
+		}
+		dc_msg_unref(msg);
+		msg = NULL;
+	}
+
+	dc_log_info(context, 0, "... setup message sent.");
+
+	success = 1;
+
+cleanup:
+	if (!success) { free(setup_code); setup_code = NULL; }
+	free(setup_file_name);
+	free(setup_file_content);
+	dc_msg_unref(msg);
+	dc_free_ongoing(context);
+	return setup_code;
+}
+</c function>
+<rust function signature>
+pub async fn initiate_key_transfer(context: &Context) -> Result<String> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub async fn send_msg(context: &Context, chat_id: ChatId, msg: &mut Message) -> Result<MsgId> {
+    if chat_id.is_unset() {
+        let forwards = msg.param.get(Param::PrepForwards);
+        if let Some(forwards) = forwards {
+            for forward in forwards.split(' ') {
+                if let Ok(msg_id) = forward.parse::<u32>().map(MsgId::new) {
+                    if let Ok(mut msg) = Message::load_from_db(context, msg_id).await {
+                        send_msg_inner(context, chat_id, &mut msg).await?;
+                    };
+                }
+            }
+            msg.param.remove(Param::PrepForwards);
+            msg.update_param(context).await?;
+        }
+        return send_msg_inner(context, chat_id, msg).await;
+    }
+
+    if msg.state != MessageState::Undefined && msg.state != MessageState::OutPreparing {
+        msg.param.remove(Param::GuaranteeE2ee);
+        msg.param.remove(Param::ForcePlaintext);
+        msg.update_param(context).await?;
+    }
+    send_msg_inner(context, chat_id, msg).await
+}
+
+pub fn as_name(&self) -> &str {
+        &self.name
+    }
+
+pub fn set(&mut self, key: Param, value: impl ToString) -> &mut Self {
+        self.inner.insert(key, value.to_string());
+        self
+    }
+
+pub fn set_int(&mut self, key: Param, value: i32) -> &mut Self {
+        self.set(key, format!("{value}"));
+        self
+    }
+
+pub async fn render_setup_file(context: &Context, passphrase: &str) -> Result<String> {
+    let passphrase_begin = if let Some(passphrase_begin) = passphrase.get(..2) {
+        passphrase_begin
+    } else {
+        bail!("Passphrase must be at least 2 chars long.");
+    };
+    let private_key = load_self_secret_key(context).await?;
+    let ac_headers = match context.get_config_bool(Config::E2eeEnabled).await? {
+        false => None,
+        true => Some(("Autocrypt-Prefer-Encrypt", "mutual")),
+    };
+    let private_key_asc = private_key.to_asc(ac_headers);
+    let encr = pgp::symm_encrypt(passphrase, private_key_asc.as_bytes())
+        .await?
+        .replace('\n', "\r\n");
+
+    let replacement = format!(
+        concat!(
+            "-----BEGIN PGP MESSAGE-----\r\n",
+            "Passphrase-Format: numeric9x4\r\n",
+            "Passphrase-Begin: {}"
+        ),
+        passphrase_begin
+    );
+    let pgp_msg = encr.replace("-----BEGIN PGP MESSAGE-----", &replacement);
+
+    let msg_subj = stock_str::ac_setup_msg_subject(context).await;
+    let msg_body = stock_str::ac_setup_msg_body(context).await;
+    let msg_body_html = msg_body.replace('\r', "").replace('\n', "<br>");
+    Ok(format!(
+        concat!(
+            "<!DOCTYPE html>\r\n",
+            "<html>\r\n",
+            "  <head>\r\n",
+            "    <title>{}</title>\r\n",
+            "  </head>\r\n",
+            "  <body>\r\n",
+            "    <h1>{}</h1>\r\n",
+            "    <p>{}</p>\r\n",
+            "    <pre>\r\n{}\r\n</pre>\r\n",
+            "  </body>\r\n",
+            "</html>\r\n"
+        ),
+        msg_subj, msg_subj, msg_body_html, pgp_msg
+    ))
+}
+
+pub fn set_cmd(&mut self, value: SystemMessage) {
+        self.set_int(Param::Cmd, value as i32);
+    }
+
+pub fn force_plaintext(&mut self) {
+        self.param.set_int(Param::ForcePlaintext, 1);
+    }
+
+pub async fn create(
+        context: &'a Context,
+        suggested_name: &str,
+        data: &[u8],
+    ) -> Result<BlobObject<'a>> {
+        let blobdir = context.get_blobdir();
+        let (stem, ext) = BlobObject::sanitise_name(suggested_name);
+        let (name, mut file) = BlobObject::create_new_file(context, blobdir, &stem, &ext).await?;
+        file.write_all(data).await.context("file write failure")?;
+
+        // workaround a bug in async-std
+        // (the executor does not handle blocking operation in Drop correctly,
+        // see <https://github.com/async-rs/async-std/issues/900>)
+        let _ = file.flush().await;
+
+        let blob = BlobObject {
+            blobdir,
+            name: format!("$BLOBDIR/{name}"),
+        };
+        context.emit_event(EventType::NewBlobFile(blob.as_name().to_string()));
+        Ok(blob)
+    }
+
+pub async fn create_for_contact(context: &Context, contact_id: ContactId) -> Result<Self> {
+        ChatId::create_for_contact_with_blocked(context, contact_id, Blocked::Not).await
+    }
+
+pub fn create_setup_code(_context: &Context) -> String {
+    let mut random_val: u16;
+    let mut rng = thread_rng();
+    let mut ret = String::new();
+
+    for i in 0..9 {
+        loop {
+            random_val = rng.gen();
+            if random_val as usize <= 60000 {
+                break;
+            }
+        }
+        random_val = (random_val as usize % 10000) as u16;
+        ret += &format!(
+            "{}{:04}",
+            if 0 != i { "-" } else { "" },
+            random_val as usize
+        );
+    }
+
+    ret
+}
+
+pub fn new(viewtype: Viewtype) -> Self {
+        Message {
+            viewtype,
+            ..Default::default()
+        }
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+
+pub enum Param {
+    /// For messages
+    File = b'f',
+
+    /// For messages: original filename (as shown in chat)
+    Filename = b'v',
+
+    /// For messages: This name should be shown instead of contact.get_display_name()
+    /// (used if this is a mailinglist
+    /// or explicitly set using set_override_sender_name(), eg. by bots)
+    OverrideSenderDisplayname = b'O',
+
+    /// For Messages
+    Width = b'w',
+
+    /// For Messages
+    Height = b'h',
+
+    /// For Messages
+    Duration = b'd',
+
+    /// For Messages
+    MimeType = b'm',
+
+    /// For Messages: HTML to be written to the database and to be send.
+    /// `SendHtml` param is not used for received messages.
+    /// Use `MsgId::get_html()` to get HTML of received messages.
+    SendHtml = b'T',
+
+    /// For Messages: message is encrypted, outgoing: guarantee E2EE or the message is not send
+    GuaranteeE2ee = b'c',
+
+    /// For Messages: quoted message is encrypted.
+    ///
+    /// If this message is sent unencrypted, quote text should be replaced.
+    ProtectQuote = b'0',
+
+    /// For Messages: decrypted with validation errors or without mutual set, if neither
+    /// 'c' nor 'e' are preset, the messages is only transport encrypted.
+    ErroneousE2ee = b'e',
+
+    /// For Messages: force unencrypted message, a value from `ForcePlaintext` enum.
+    ForcePlaintext = b'u',
+
+    /// For Messages: do not include Autocrypt header.
+    SkipAutocrypt = b'o',
+
+    /// For Messages
+    WantsMdn = b'r',
+
+    /// For Messages: the message is a reaction.
+    Reaction = b'x',
+
+    /// For Chats: the timestamp of the last reaction.
+    LastReactionTimestamp = b'y',
+
+    /// For Chats: Message ID of the last reaction.
+    LastReactionMsgId = b'Y',
+
+    /// For Chats: Contact ID of the last reaction.
+    LastReactionContactId = b'1',
+
+    /// For Messages: a message with "Auto-Submitted: auto-generated" header ("bot").
+    Bot = b'b',
+
+    /// For Messages: unset or 0=not forwarded,
+    /// 1=forwarded from unknown msg_id, >9 forwarded from msg_id
+    Forwarded = b'a',
+
+    /// For Messages: quoted text.
+    Quote = b'q',
+
+    /// For Messages
+    Cmd = b'S',
+
+    /// For Messages
+    Arg = b'E',
+
+    /// For Messages
+    Arg2 = b'F',
+
+    /// `Secure-Join-Fingerprint` header for `{vc,vg}-request-with-auth` messages.
+    Arg3 = b'G',
+
+    /// Deprecated `Secure-Join-Group` header for messages.
+    Arg4 = b'H',
+
+    /// For Messages
+    AttachGroupImage = b'A',
+
+    /// For Messages
+    WebrtcRoom = b'V',
+
+    /// For Messages: space-separated list of messaged IDs of forwarded copies.
+    ///
+    /// This is used when a [crate::message::Message] is in the
+    /// [crate::message::MessageState::OutPending] state but is already forwarded.
+    /// In this case the forwarded messages are written to the
+    /// database and their message IDs are added to this parameter of
+    /// the original message, which is also saved in the database.
+    /// When the original message is then finally sent this parameter
+    /// is used to also send all the forwarded messages.
+    PrepForwards = b'P',
+
+    /// For Messages
+    SetLatitude = b'l',
+
+    /// For Messages
+    SetLongitude = b'n',
+
+    /// For Groups
+    ///
+    /// An unpromoted group has not had any messages sent to it and thus only exists on the
+    /// creator's device.  Any changes made to an unpromoted group do not need to send
+    /// system messages to the group members to update them of the changes.  Once a message
+    /// has been sent to a group it is promoted and group changes require sending system
+    /// messages to all members.
+    Unpromoted = b'U',
+
+    /// For Groups and Contacts
+    ProfileImage = b'i',
+
+    /// For Chats
+    /// Signals whether the chat is the `saved messages` chat
+    Selftalk = b'K',
+
+    /// For Chats: On sending a new message we set the subject to `Re: <last subject>`.
+    /// Usually we just use the subject of the parent message, but if the parent message
+    /// is deleted, we use the LastSubject of the chat.
+    LastSubject = b't',
+
+    /// For Chats
+    Devicetalk = b'D',
+
+    /// For Chats: If this is a mailing list chat, contains the List-Post address.
+    /// None if there simply is no `List-Post` header in the mailing list.
+    /// Some("") if the mailing list is using multiple different List-Post headers.
+    ///
+    /// The List-Post address is the email address where the user can write to in order to
+    /// post something to the mailing list.
+    ListPost = b'p',
+
+    /// For Contacts: If this is the List-Post address of a mailing list, contains
+    /// the List-Id of the mailing list (which is also used as the group id of the chat).
+    ListId = b's',
+
+    /// For Contacts: timestamp of status (aka signature or footer) update.
+    StatusTimestamp = b'j',
+
+    /// For Contacts and Chats: timestamp of avatar update.
+    AvatarTimestamp = b'J',
+
+    /// For Chats: timestamp of status/signature/footer update.
+    EphemeralSettingsTimestamp = b'B',
+
+    /// For Chats: timestamp of subject update.
+    SubjectTimestamp = b'C',
+
+    /// For Chats: timestamp of group name update.
+    GroupNameTimestamp = b'g',
+
+    /// For Chats: timestamp of member list update.
+    MemberListTimestamp = b'k',
+
+    /// For Webxdc Message Instances: Current document name
+    WebxdcDocument = b'R',
+
+    /// For Webxdc Message Instances: timestamp of document name update.
+    WebxdcDocumentTimestamp = b'W',
+
+    /// For Webxdc Message Instances: Current summary
+    WebxdcSummary = b'N',
+
+    /// For Webxdc Message Instances: timestamp of summary update.
+    WebxdcSummaryTimestamp = b'Q',
+
+    /// For Webxdc Message Instances: Webxdc is an integration, see init_webxdc_integration()
+    WebxdcIntegration = b'3',
+
+    /// For Webxdc Message Instances: Chat to integrate the Webxdc for.
+    WebxdcIntegrateFor = b'2',
+
+    /// For messages: Whether [crate::message::Viewtype::Sticker] should be forced.
+    ForceSticker = b'X',
+    // 'L' was defined as ProtectionSettingsTimestamp for Chats, however, never used in production.
+}
+
+pub(crate) async fn ac_setup_msg_subject(context: &Context) -> String {
+    translated(context, StockMessage::AcSetupMsgSubject).await
+}
+
+impl ContactId {
+    /// Undefined contact. Used as a placeholder for trashed messages.
+    pub const UNDEFINED: ContactId = ContactId::new(0);
+
+    /// The owner of the account.
+    ///
+    /// The email-address is set by `set_config` using "addr".
+    pub const SELF: ContactId = ContactId::new(1);
+
+    /// ID of the contact for info messages.
+    pub const INFO: ContactId = ContactId::new(2);
+
+    /// ID of the contact for device messages.
+    pub const DEVICE: ContactId = ContactId::new(5);
+    pub(crate) const LAST_SPECIAL: ContactId = ContactId::new(9);
+
+    /// Address to go with [`ContactId::DEVICE`].
+    ///
+    /// This is used by APIs which need to return an email address for this contact.
+    pub const DEVICE_ADDR: &'static str = "device@localhost";
+}
+
+pub struct Message {
+    /// Message ID.
+    pub(crate) id: MsgId,
+
+    /// `From:` contact ID.
+    pub(crate) from_id: ContactId,
+
+    /// ID of the first contact in the `To:` header.
+    pub(crate) to_id: ContactId,
+
+    /// ID of the chat message belongs to.
+    pub(crate) chat_id: ChatId,
+
+    /// Type of the message.
+    pub(crate) viewtype: Viewtype,
+
+    /// State of the message.
+    pub(crate) state: MessageState,
+    pub(crate) download_state: DownloadState,
+
+    /// Whether the message is hidden.
+    pub(crate) hidden: bool,
+    pub(crate) timestamp_sort: i64,
+    pub(crate) timestamp_sent: i64,
+    pub(crate) timestamp_rcvd: i64,
+    pub(crate) ephemeral_timer: EphemeralTimer,
+    pub(crate) ephemeral_timestamp: i64,
+    pub(crate) text: String,
+
+    /// Message subject.
+    ///
+    /// If empty, a default subject will be generated when sending.
+    pub(crate) subject: String,
+
+    /// `Message-ID` header value.
+    pub(crate) rfc724_mid: String,
+
+    /// `In-Reply-To` header value.
+    pub(crate) in_reply_to: Option<String>,
+    pub(crate) is_dc_message: MessengerMessage,
+    pub(crate) mime_modified: bool,
+    pub(crate) chat_blocked: Blocked,
+    pub(crate) location_id: u32,
+    pub(crate) error: Option<String>,
+    pub(crate) param: Params,
+}
+
+pub enum SystemMessage {
+    /// Unknown type of system message.
+    #[default]
+    Unknown = 0,
+
+    /// Group name changed.
+    GroupNameChanged = 2,
+
+    /// Group avatar changed.
+    GroupImageChanged = 3,
+
+    /// Member was added to the group.
+    MemberAddedToGroup = 4,
+
+    /// Member was removed from the group.
+    MemberRemovedFromGroup = 5,
+
+    /// Autocrypt Setup Message.
+    AutocryptSetupMessage = 6,
+
+    /// Secure-join message.
+    SecurejoinMessage = 7,
+
+    /// Location streaming is enabled.
+    LocationStreamingEnabled = 8,
+
+    /// Location-only message.
+    LocationOnly = 9,
+
+    /// Chat ephemeral message timer is changed.
+    EphemeralTimerChanged = 10,
+
+    /// "Messages are guaranteed to be end-to-end encrypted from now on."
+    ChatProtectionEnabled = 11,
+
+    /// "%1$s sent a message from another device."
+    ChatProtectionDisabled = 12,
+
+    /// Message can't be sent because of `Invalid unencrypted mail to <>`
+    /// which is sent by chatmail servers.
+    InvalidUnencryptedMail = 13,
+
+    /// 1:1 chats info message telling that SecureJoin has started and the user should wait for it
+    /// to complete.
+    SecurejoinWait = 14,
+
+    /// 1:1 chats info message telling that SecureJoin is still running, but the user may already
+    /// send messages.
+    SecurejoinWaitTimeout = 15,
+
+    /// Self-sent-message that contains only json used for multi-device-sync;
+    /// if possible, we attach that to other messages as for locations.
+    MultiDeviceSync = 20,
+
+    /// Sync message that contains a json payload
+    /// sent to the other webxdc instances
+    /// These messages are not shown in the chat.
+    WebxdcStatusUpdate = 30,
+
+    /// Webxdc info added with `info` set in `send_webxdc_status_update()`.
+    WebxdcInfoMessage = 32,
+
+    /// This message contains a users iroh node address.
+    IrohNodeAddr = 40,
+}
+
+
+pub fn set_float(&mut self, key: Param, value: f64) -> &mut Self {
+        self.set(key, format!("{value}"));
+        self
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn initiate_key_transfer(context: &Context) -> Result<String> {
+    let setup_code = create_setup_code(context);
+    /* this may require a keypair to be created. this may take a second ... */
+    let setup_file_content = render_setup_file(context, &setup_code).await?;
+    /* encrypting may also take a while ... */
+    let setup_file_blob = BlobObject::create(
+        context,
+        "autocrypt-setup-message.html",
+        setup_file_content.as_bytes(),
+    )
+    .await?;
+
+    let chat_id = ChatId::create_for_contact(context, ContactId::SELF).await?;
+    let mut msg = Message {
+        viewtype: Viewtype::File,
+        ..Default::default()
+    };
+    msg.param.set(Param::File, setup_file_blob.as_name());
+    msg.subject = stock_str::ac_setup_msg_subject(context).await;
+    msg.param
+        .set(Param::MimeType, "application/autocrypt-setup");
+    msg.param.set_cmd(SystemMessage::AutocryptSetupMessage);
+    msg.force_plaintext();
+    msg.param.set_int(Param::SkipAutocrypt, 1);
+
+    chat::send_msg(context, chat_id, &mut msg).await?;
+    // no maybe_add_bcc_self_device_msg() here.
+    // the ui shows the dialog with the setup code on this device,
+    // it would be too much noise to have two things popping up at the same time.
+    // maybe_add_bcc_self_device_msg() is called on the other device
+    // once the transfer is completed.
+    Ok(setup_code)
+}
+</function>
+<translated function>
+pub async fn initiate_key_transfer(context: &Context) -> Result<String> {
+    use futures::future::FutureExt;
+
+    let mut success: bool = false;
+    let mut chat_id: ChatId;
+    let mut msg = Message::new(Viewtype::File);
+    let mut msg_id: MsgId;
+
+    if !dc_alloc_ongoing(context).await {
+        return Ok("".to_string());
+    }
+
+    let setup_code = dc_create_setup_code(context);
+    
+    if setup_code.is_empty() {
+        return Ok("".to_string());
+    }
+        
+    let setup_file_content = render_setup_file(context, &setup_code).await?;
+        
+    if setup_file_content.is_empty() {
+        return Ok("".to_string());
+    }
+
+    match create(context, "$BLOBDIR/autocrypt-setup-message.html", setup_file_content.as_bytes()).await {
+        Ok(res) => {
+            if res.as_name().is_empty() {
+                return Ok("".to_string());
+            }
+        },
+        Err(_) => {
+            return Ok("".to_string());
+        }
+    }       
+               
+    let chat_id = ChatId::create_for_contact(context, ContactId::SELF)
+        .await
+        .unwrap_or_else(|_| ChatId::new(0));
+
+    if chat_id.is_unset() {
+        return Ok("".to_string());
+    }
+
+    msg.param.set(Param::File, blob.path().to_string_lossy());
+    msg.param.set(Param::MimeType, "application/autocrypt-setup");
+    msg.param.set_cmd(SystemMessage::AutocryptSetupMessage);
+    msg.param.set_int(Param::ForcePlaintext, 2);
+
+    msg_id = send_msg(context, chat_id, &mut msg).await.unwrap_or_else(|_| MsgId::new(0));
+        
+    if msg_id.is_unset() {
+        return Ok("".to_string());
+    }
+        
+
+    while !msg.is_encrypted() {
+        sleep(Duration::from_secs(1)).await;
+        msg.download_state = message::downloaded();
+        if message::msgstatus::is_sent() {
+            break;
+        }
+    }
+
+    success = true;
+
+    if success {
+        return Ok(setup_code);
+    } else {
+        return Ok("".to_string());
+    }
+}
+</translated function>pub async fn initiate_key_transfer(context: &Context) -> Result<String> {
+    use futures::future::FutureExt;
+
+    let mut success: bool = false;
+    let mut chat_id: ChatId;
+    let mut msg = Message::new(Viewtype::File);
+    let mut msg_id: MsgId;
+
+    if !dc_alloc_ongoing(context).await {
+        return Ok("".to_string());
+    }
+
+    let setup_code = dc_create_setup_code(context);
+    
+    if setup_code.is_empty() {
+        return Ok("".to_string());
+    }
+        
+    let setup_file_content = render_setup_file(context, &setup_code).await?;
+        
+    if setup_file_content.is_empty() {
+        return Ok("".to_string());
+    }
+
+    match create(context, "$BLOBDIR/autocrypt-setup-message.html", setup_file_content.as_bytes()).await {
+        Ok(res) => {
+            if res.as_name().is_empty() {
+                return Ok("".to_string());
+            }
+        },
+        Err(_) => {
+            return Ok("".to_string());
+        }
+    }       
+               
+    let chat_id = ChatId::create_for_contact(context, ContactId::SELF)
+        .await
+        .unwrap_or_else(|_| ChatId::new(0));
+
+    if chat_id.is_unset() {
+        return Ok("".to_string());
+    }
+
+    msg.param.set(Param::File, blob.path().to_string_lossy());
+    msg.param.set(Param::MimeType, "application/autocrypt-setup");
+    msg.param.set_cmd(SystemMessage::AutocryptSetupMessage);
+    msg.param.set_int(Param::ForcePlaintext, 2);
+
+    msg_id = send_msg(context, chat_id, &mut msg).await.unwrap_or_else(|_| MsgId::new(0));
+        
+    if msg_id.is_unset() {
+        return Ok("".to_string());
+    }
+        
+
+    while !msg.is_encrypted() {
+        sleep(Duration::from_secs(1)).await;
+        msg.download_state = message::downloaded();
+        if message::msgstatus::is_sent() {
+            break;
+        }
+    }
+
+    success = true;
+
+    if success {
+        return Ok(setup_code);
+    } else {
+        return Ok("".to_string());
+    }
+}

@@ -1,0 +1,625 @@
+pub fn get_viewtype(&self) -> Viewtype {
+        self.viewtype
+    }
+pub(crate) async fn create_send_msg_jobs(context: &Context, msg: &mut Message) -> Result<Vec<i64>> {
+    let needs_encryption = msg.param.get_bool(Param::GuaranteeE2ee).unwrap_or_default();
+    let mimefactory = MimeFactory::from_msg(context, msg).await?;
+    let attach_selfavatar = mimefactory.attach_selfavatar;
+    let mut recipients = mimefactory.recipients();
+
+    let from = context.get_primary_self_addr().await?;
+    let lowercase_from = from.to_lowercase();
+
+    // Send BCC to self if it is enabled.
+    //
+    // Previous versions of Delta Chat did not send BCC self
+    // if DeleteServerAfter was set to immediately delete messages
+    // from the server. This is not the case anymore
+    // because BCC-self messages are also used to detect
+    // that message was sent if SMTP server is slow to respond
+    // and connection is frequently lost
+    // before receiving status line.
+    //
+    // `from` must be the last addr, see `receive_imf_inner()` why.
+    if context.get_config_bool(Config::BccSelf).await?
+        && !recipients
+            .iter()
+            .any(|x| x.to_lowercase() == lowercase_from)
+    {
+        recipients.push(from);
+    }
+
+    // Webxdc integrations are messages, however, shipped with main app and must not be sent out
+    if msg.param.get_int(Param::WebxdcIntegration).is_some() {
+        recipients.clear();
+    }
+
+    if recipients.is_empty() {
+        // may happen eg. for groups with only SELF and bcc_self disabled
+        info!(
+            context,
+            "Message {} has no recipient, skipping smtp-send.", msg.id
+        );
+        msg.id.set_delivered(context).await?;
+        msg.state = MessageState::OutDelivered;
+        return Ok(Vec::new());
+    }
+
+    let rendered_msg = match mimefactory.render(context).await {
+        Ok(res) => Ok(res),
+        Err(err) => {
+            message::set_msg_failed(context, msg, &err.to_string()).await?;
+            Err(err)
+        }
+    }?;
+
+    if needs_encryption && !rendered_msg.is_encrypted {
+        /* unrecoverable */
+        message::set_msg_failed(
+            context,
+            msg,
+            "End-to-end-encryption unavailable unexpectedly.",
+        )
+        .await?;
+        bail!(
+            "e2e encryption unavailable {} - {:?}",
+            msg.id,
+            needs_encryption
+        );
+    }
+
+    let now = smeared_time(context);
+
+    if rendered_msg.is_gossiped {
+        msg.chat_id.set_gossiped_timestamp(context, now).await?;
+    }
+
+    if msg.param.get_cmd() == SystemMessage::MemberRemovedFromGroup {
+        // Reject member list synchronisation from older messages. See also
+        // `receive_imf::apply_group_changes()`.
+        msg.chat_id
+            .update_timestamp(
+                context,
+                Param::MemberListTimestamp,
+                now.saturating_add(constants::TIMESTAMP_SENT_TOLERANCE),
+            )
+            .await?;
+    }
+
+    if rendered_msg.last_added_location_id.is_some() {
+        if let Err(err) = location::set_kml_sent_timestamp(context, msg.chat_id, now).await {
+            error!(context, "Failed to set kml sent_timestamp: {err:#}.");
+        }
+    }
+
+    if let Some(sync_ids) = rendered_msg.sync_ids_to_delete {
+        if let Err(err) = context.delete_sync_ids(sync_ids).await {
+            error!(context, "Failed to delete sync ids: {err:#}.");
+        }
+    }
+
+    if attach_selfavatar {
+        if let Err(err) = msg.chat_id.set_selfavatar_timestamp(context, now).await {
+            error!(context, "Failed to set selfavatar timestamp: {err:#}.");
+        }
+    }
+
+    if rendered_msg.is_encrypted && !needs_encryption {
+        msg.param.set_int(Param::GuaranteeE2ee, 1);
+        msg.update_param(context).await?;
+    }
+
+    msg.subject.clone_from(&rendered_msg.subject);
+    msg.update_subject(context).await?;
+    let chunk_size = context.get_max_smtp_rcpt_to().await?;
+    let trans_fn = |t: &mut rusqlite::Transaction| {
+        let mut row_ids = Vec::<i64>::new();
+        for recipients_chunk in recipients.chunks(chunk_size) {
+            let recipients_chunk = recipients_chunk.join(" ");
+            let row_id = t.execute(
+                "INSERT INTO smtp (rfc724_mid, recipients, mime, msg_id) \
+                VALUES            (?1,         ?2,         ?3,   ?4)",
+                (
+                    &rendered_msg.rfc724_mid,
+                    recipients_chunk,
+                    &rendered_msg.message,
+                    msg.id,
+                ),
+            )?;
+            row_ids.push(row_id.try_into()?);
+        }
+        Ok(row_ids)
+    };
+    context.sql.transaction(trans_fn).await
+}
+pub fn emit_msgs_changed(&self, chat_id: ChatId, msg_id: MsgId) {
+        self.emit_event(EventType::MsgsChanged { chat_id, msg_id });
+        chatlist_events::emit_chatlist_changed(self);
+        chatlist_events::emit_chatlist_item_changed(self, chat_id);
+    }
+pub fn is_special(self) -> bool {
+        (0..=DC_CHAT_ID_LAST_SPECIAL.0).contains(&self.0)
+    }
+pub fn to_u32(self) -> u32 {
+        self.0
+    }
+pub async fn unarchive_if_not_muted(
+        self,
+        context: &Context,
+        msg_state: MessageState,
+    ) -> Result<()> {
+        if msg_state != MessageState::InFresh {
+            context
+                .sql
+                .execute(
+                    "UPDATE chats SET archived=0 WHERE id=? AND archived=1 \
+                AND NOT(muted_until=-1 OR muted_until>?)",
+                    (self, time()),
+                )
+                .await?;
+            return Ok(());
+        }
+        let chat = Chat::load_from_db(context, self).await?;
+        if chat.visibility != ChatVisibility::Archived {
+            return Ok(());
+        }
+        if chat.is_muted() {
+            let unread_cnt = context
+                .sql
+                .count(
+                    "SELECT COUNT(*)
+                FROM msgs
+                WHERE state=?
+                AND hidden=0
+                AND chat_id=?",
+                    (MessageState::InFresh, self),
+                )
+                .await?;
+            if unread_cnt == 1 {
+                // Added the first unread message in the chat.
+                context.emit_msgs_changed(DC_CHAT_ID_ARCHIVED_LINK, MsgId::new(0));
+            }
+            return Ok(());
+        }
+        context
+            .sql
+            .execute("UPDATE chats SET archived=0 WHERE id=?", (self,))
+            .await?;
+        Ok(())
+    }
+pub async fn load_from_db(context: &Context, chat_id: ChatId) -> Result<Self> {
+        let mut chat = context
+            .sql
+            .query_row(
+                "SELECT c.type, c.name, c.grpid, c.param, c.archived,
+                    c.blocked, c.locations_send_until, c.muted_until, c.protected
+             FROM chats c
+             WHERE c.id=?;",
+                (chat_id,),
+                |row| {
+                    let c = Chat {
+                        id: chat_id,
+                        typ: row.get(0)?,
+                        name: row.get::<_, String>(1)?,
+                        grpid: row.get::<_, String>(2)?,
+                        param: row.get::<_, String>(3)?.parse().unwrap_or_default(),
+                        visibility: row.get(4)?,
+                        blocked: row.get::<_, Option<_>>(5)?.unwrap_or_default(),
+                        is_sending_locations: row.get(6)?,
+                        mute_duration: row.get(7)?,
+                        protected: row.get(8)?,
+                    };
+                    Ok(c)
+                },
+            )
+            .await
+            .context(format!("Failed loading chat {chat_id} from database"))?;
+
+        if chat.id.is_archived_link() {
+            chat.name = stock_str::archived_chats(context).await;
+        } else {
+            if chat.typ == Chattype::Single && chat.name.is_empty() {
+                // chat.name is set to contact.display_name on changes,
+                // however, if things went wrong somehow, we do this here explicitly.
+                let mut chat_name = "Err [Name not found]".to_owned();
+                match get_chat_contacts(context, chat.id).await {
+                    Ok(contacts) => {
+                        if let Some(contact_id) = contacts.first() {
+                            if let Ok(contact) = Contact::get_by_id(context, *contact_id).await {
+                                contact.get_display_name().clone_into(&mut chat_name);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!(
+                            context,
+                            "Failed to load contacts for {}: {:#}.", chat.id, err
+                        );
+                    }
+                }
+                chat.name = chat_name;
+            }
+            if chat.param.exists(Param::Selftalk) {
+                chat.name = stock_str::saved_messages(context).await;
+            } else if chat.param.exists(Param::Devicetalk) {
+                chat.name = stock_str::device_messages(context).await;
+            }
+        }
+
+        Ok(chat)
+    }
+pub async fn query_map<T, F, G, H>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+        mut g: G,
+    ) -> Result<H>
+    where
+        F: Send + FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+        G: Send + FnMut(rusqlite::MappedRows<F>) -> Result<H>,
+        H: Send + 'static,
+    {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let res = stmt.query_map(params, f)?;
+            g(res)
+        })
+        .await
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+pub struct MsgId(u32);
+pub struct ChatId(u32);
+pub enum Param {
+    /// For messages
+    File = b'f',
+
+    /// For messages: original filename (as shown in chat)
+    Filename = b'v',
+
+    /// For messages: This name should be shown instead of contact.get_display_name()
+    /// (used if this is a mailinglist
+    /// or explicitly set using set_override_sender_name(), eg. by bots)
+    OverrideSenderDisplayname = b'O',
+
+    /// For Messages
+    Width = b'w',
+
+    /// For Messages
+    Height = b'h',
+
+    /// For Messages
+    Duration = b'd',
+
+    /// For Messages
+    MimeType = b'm',
+
+    /// For Messages: HTML to be written to the database and to be send.
+    /// `SendHtml` param is not used for received messages.
+    /// Use `MsgId::get_html()` to get HTML of received messages.
+    SendHtml = b'T',
+
+    /// For Messages: message is encrypted, outgoing: guarantee E2EE or the message is not send
+    GuaranteeE2ee = b'c',
+
+    /// For Messages: quoted message is encrypted.
+    ///
+    /// If this message is sent unencrypted, quote text should be replaced.
+    ProtectQuote = b'0',
+
+    /// For Messages: decrypted with validation errors or without mutual set, if neither
+    /// 'c' nor 'e' are preset, the messages is only transport encrypted.
+    ErroneousE2ee = b'e',
+
+    /// For Messages: force unencrypted message, a value from `ForcePlaintext` enum.
+    ForcePlaintext = b'u',
+
+    /// For Messages: do not include Autocrypt header.
+    SkipAutocrypt = b'o',
+
+    /// For Messages
+    WantsMdn = b'r',
+
+    /// For Messages: the message is a reaction.
+    Reaction = b'x',
+
+    /// For Chats: the timestamp of the last reaction.
+    LastReactionTimestamp = b'y',
+
+    /// For Chats: Message ID of the last reaction.
+    LastReactionMsgId = b'Y',
+
+    /// For Chats: Contact ID of the last reaction.
+    LastReactionContactId = b'1',
+
+    /// For Messages: a message with "Auto-Submitted: auto-generated" header ("bot").
+    Bot = b'b',
+
+    /// For Messages: unset or 0=not forwarded,
+    /// 1=forwarded from unknown msg_id, >9 forwarded from msg_id
+    Forwarded = b'a',
+
+    /// For Messages: quoted text.
+    Quote = b'q',
+
+    /// For Messages
+    Cmd = b'S',
+
+    /// For Messages
+    Arg = b'E',
+
+    /// For Messages
+    Arg2 = b'F',
+
+    /// `Secure-Join-Fingerprint` header for `{vc,vg}-request-with-auth` messages.
+    Arg3 = b'G',
+
+    /// Deprecated `Secure-Join-Group` header for messages.
+    Arg4 = b'H',
+
+    /// For Messages
+    AttachGroupImage = b'A',
+
+    /// For Messages
+    WebrtcRoom = b'V',
+
+    /// For Messages: space-separated list of messaged IDs of forwarded copies.
+    ///
+    /// This is used when a [crate::message::Message] is in the
+    /// [crate::message::MessageState::OutPending] state but is already forwarded.
+    /// In this case the forwarded messages are written to the
+    /// database and their message IDs are added to this parameter of
+    /// the original message, which is also saved in the database.
+    /// When the original message is then finally sent this parameter
+    /// is used to also send all the forwarded messages.
+    PrepForwards = b'P',
+
+    /// For Messages
+    SetLatitude = b'l',
+
+    /// For Messages
+    SetLongitude = b'n',
+
+    /// For Groups
+    ///
+    /// An unpromoted group has not had any messages sent to it and thus only exists on the
+    /// creator's device.  Any changes made to an unpromoted group do not need to send
+    /// system messages to the group members to update them of the changes.  Once a message
+    /// has been sent to a group it is promoted and group changes require sending system
+    /// messages to all members.
+    Unpromoted = b'U',
+
+    /// For Groups and Contacts
+    ProfileImage = b'i',
+
+    /// For Chats
+    /// Signals whether the chat is the `saved messages` chat
+    Selftalk = b'K',
+
+    /// For Chats: On sending a new message we set the subject to `Re: <last subject>`.
+    /// Usually we just use the subject of the parent message, but if the parent message
+    /// is deleted, we use the LastSubject of the chat.
+    LastSubject = b't',
+
+    /// For Chats
+    Devicetalk = b'D',
+
+    /// For Chats: If this is a mailing list chat, contains the List-Post address.
+    /// None if there simply is no `List-Post` header in the mailing list.
+    /// Some("") if the mailing list is using multiple different List-Post headers.
+    ///
+    /// The List-Post address is the email address where the user can write to in order to
+    /// post something to the mailing list.
+    ListPost = b'p',
+
+    /// For Contacts: If this is the List-Post address of a mailing list, contains
+    /// the List-Id of the mailing list (which is also used as the group id of the chat).
+    ListId = b's',
+
+    /// For Contacts: timestamp of status (aka signature or footer) update.
+    StatusTimestamp = b'j',
+
+    /// For Contacts and Chats: timestamp of avatar update.
+    AvatarTimestamp = b'J',
+
+    /// For Chats: timestamp of status/signature/footer update.
+    EphemeralSettingsTimestamp = b'B',
+
+    /// For Chats: timestamp of subject update.
+    SubjectTimestamp = b'C',
+
+    /// For Chats: timestamp of group name update.
+    GroupNameTimestamp = b'g',
+
+    /// For Chats: timestamp of member list update.
+    MemberListTimestamp = b'k',
+
+    /// For Webxdc Message Instances: Current document name
+    WebxdcDocument = b'R',
+
+    /// For Webxdc Message Instances: timestamp of document name update.
+    WebxdcDocumentTimestamp = b'W',
+
+    /// For Webxdc Message Instances: Current summary
+    WebxdcSummary = b'N',
+
+    /// For Webxdc Message Instances: timestamp of summary update.
+    WebxdcSummaryTimestamp = b'Q',
+
+    /// For Webxdc Message Instances: Webxdc is an integration, see init_webxdc_integration()
+    WebxdcIntegration = b'3',
+
+    /// For Webxdc Message Instances: Chat to integrate the Webxdc for.
+    WebxdcIntegrateFor = b'2',
+
+    /// For messages: Whether [crate::message::Viewtype::Sticker] should be forced.
+    ForceSticker = b'X',
+    // 'L' was defined as ProtectionSettingsTimestamp for Chats, however, never used in production.
+}
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+pub enum MessageState {
+    /// Undefined message state.
+    #[default]
+    Undefined = 0,
+
+    /// Incoming *fresh* message. Fresh messages are neither noticed
+    /// nor seen and are typically shown in notifications.
+    InFresh = 10,
+
+    /// Incoming *noticed* message. E.g. chat opened but message not
+    /// yet read - noticed messages are not counted as unread but did
+    /// not marked as read nor resulted in MDNs.
+    InNoticed = 13,
+
+    /// Incoming message, really *seen* by the user. Marked as read on
+    /// IMAP and MDN may be sent.
+    InSeen = 16,
+
+    /// For files which need time to be prepared before they can be
+    /// sent, the message enters this state before
+    /// OutPending.
+    OutPreparing = 18,
+
+    /// Message saved as draft.
+    OutDraft = 19,
+
+    /// The user has pressed the "send" button but the message is not
+    /// yet sent and is pending in some way. Maybe we're offline (no
+    /// checkmark).
+    OutPending = 20,
+
+    /// *Unrecoverable* error (*recoverable* errors result in pending
+    /// messages).
+    OutFailed = 24,
+
+    /// Outgoing message successfully delivered to server (one
+    /// checkmark). Note, that already delivered messages may get into
+    /// the OutFailed state if we get such a hint from the server.
+    OutDelivered = 26,
+
+    /// Outgoing message read by the recipient (two checkmarks; this
+    /// requires goodwill on the receiver's side)
+    OutMdnRcvd = 28,
+}
+------
+
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;

@@ -1,0 +1,179 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public ObjectInspector primitive(Type.PrimitiveType primitiveType) {
+    final PrimitiveTypeInfo primitiveTypeInfo;
+
+    switch (primitiveType.typeId()) {
+      case BINARY:
+        return IcebergBinaryObjectInspector.get();
+      case BOOLEAN:
+        primitiveTypeInfo = TypeInfoFactory.booleanTypeInfo;
+        break;
+      case DATE:
+        return DATE_INSPECTOR;
+      case DECIMAL:
+        Types.DecimalType type = (Types.DecimalType) primitiveType;
+        return IcebergDecimalObjectInspector.get(type.precision(), type.scale());
+      case DOUBLE:
+        primitiveTypeInfo = TypeInfoFactory.doubleTypeInfo;
+        break;
+      case FIXED:
+        return IcebergFixedObjectInspector.get();
+      case FLOAT:
+        primitiveTypeInfo = TypeInfoFactory.floatTypeInfo;
+        break;
+      case INTEGER:
+        primitiveTypeInfo = TypeInfoFactory.intTypeInfo;
+        break;
+      case LONG:
+        primitiveTypeInfo = TypeInfoFactory.longTypeInfo;
+        break;
+      case STRING:
+        primitiveTypeInfo = TypeInfoFactory.stringTypeInfo;
+        break;
+      case UUID:
+        return IcebergUUIDObjectInspector.get();
+      case TIMESTAMP:
+        boolean adjustToUTC = ((Types.TimestampType) primitiveType).shouldAdjustToUTC();
+        return adjustToUTC ? TIMESTAMP_INSPECTOR_WITH_TZ : TIMESTAMP_INSPECTOR;
+      case TIME:
+        return IcebergTimeObjectInspector.get();
+      default:
+        throw new IllegalArgumentException(primitiveType.typeId() + " type is not supported");
+    }
+
+    return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(primitiveTypeInfo);
+  }
+</java function>
+<rust function signature>
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+        let avro_schema = match p {
+            PrimitiveType::Boolean => AvroSchema::Boolean,
+            PrimitiveType::Int => AvroSchema::Int,
+            PrimitiveType::Long => AvroSchema::Long,
+            PrimitiveType::Float => AvroSchema::Float,
+            PrimitiveType::Double => AvroSchema::Double,
+            PrimitiveType::Date => AvroSchema::Date,
+            PrimitiveType::Time => AvroSchema::TimeMicros,
+            PrimitiveType::Timestamp => AvroSchema::TimestampMicros,
+            PrimitiveType::Timestamptz => AvroSchema::TimestampMicros,
+            PrimitiveType::String => AvroSchema::String,
+            PrimitiveType::Uuid => avro_fixed_schema(UUID_BYTES, Some(UUID_LOGICAL_TYPE))?,
+            PrimitiveType::Fixed(len) => avro_fixed_schema((*len) as usize, None)?,
+            PrimitiveType::Binary => AvroSchema::Bytes,
+            PrimitiveType::Decimal { precision, scale } => {
+                avro_decimal_schema(*precision as usize, *scale as usize)?
+            }
+        };
+        Ok(Either::Left(avro_schema))
+    }
+</function>
+<translated function>
+ ```rust
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+    match p.type_id() {
+        crate::spec::TypeId::BINARY => Ok(AvroSchemaOrField::Schema(IcebergBinaryObjectInspector::get())),
+        crate::spec::TypeId::BOOLEAN => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::boolean_type_info())),
+        crate::spec::TypeId::DATE => Ok(AvroSchemaOrField::Schema(DATE_INSPECTOR.clone())),
+        crate::spec::TypeId::DECIMAL => {
+            let type_decimal = match p {
+                PrimitiveType::Decimal(t) => t,
+                _ => return Err(Error::new(ErrorKind::InvalidInput, "Expected Decimal type")),
+            };
+            Ok(AvroSchemaOrField::Schema(IcebergDecimalObjectInspector::get(type_decimal.precision(), type_decimal.scale())))
+        },
+        crate::spec::TypeId::DOUBLE => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::double_type_info())),
+        crate::spec::TypeId::FIXED => Ok(AvroSchemaOrField::Schema(IcebergFixedObjectInspector::get())),
+        crate::spec::TypeId::FLOAT => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::float_type_info())),
+        crate::spec::TypeId::INTEGER => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::int_type_info())),
+        crate::spec::TypeId::LONG => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::long_type_info())),
+        crate::spec::TypeId::STRING => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::string_type_info())),
+        crate::spec::TypeId::UUID => Ok(AvroSchemaOrField::Schema(IcebergUUIDObjectInspector::get())),
+        crate::spec::TypeId::TIMESTAMP => {
+            let timestamp_type = match p {
+                PrimitiveType::Timestamp(t) => t,
+                _ => return Err(Error::new(ErrorKind::InvalidInput, "Expected Timestamp type")),
+            };
+            let adjust_to_utc = timestamp_type.should_adjust_to_utc();
+            if adjust_to_utc {
+                Ok(AvroSchemaOrField::Schema(TIMESTAMP_INSPECTOR_WITH_TZ.clone()))
+            } else {
+                Ok(AvroSchemaOrField::Schema(TIMESTAMP_INSPECTOR.clone()))
+            }
+        },
+        crate::spec::TypeId::TIME => Ok(AvroSchemaOrField::Schema(IcebergTimeObjectInspector::get())),
+        _ => Err(Error::new(ErrorKind::InvalidInput, format!("{} type is not supported", p.type_id()))),
+    }
+}
+```</translated function> ```rust
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+    match p.type_id() {
+        crate::spec::TypeId::BINARY => Ok(AvroSchemaOrField::Schema(IcebergBinaryObjectInspector::get())),
+        crate::spec::TypeId::BOOLEAN => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::boolean_type_info())),
+        crate::spec::TypeId::DATE => Ok(AvroSchemaOrField::Schema(DATE_INSPECTOR.clone())),
+        crate::spec::TypeId::DECIMAL => {
+            let type_decimal = match p {
+                PrimitiveType::Decimal(t) => t,
+                _ => return Err(Error::new(ErrorKind::InvalidInput, "Expected Decimal type")),
+            };
+            Ok(AvroSchemaOrField::Schema(IcebergDecimalObjectInspector::get(type_decimal.precision(), type_decimal.scale())))
+        },
+        crate::spec::TypeId::DOUBLE => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::double_type_info())),
+        crate::spec::TypeId::FIXED => Ok(AvroSchemaOrField::Schema(IcebergFixedObjectInspector::get())),
+        crate::spec::TypeId::FLOAT => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::float_type_info())),
+        crate::spec::TypeId::INTEGER => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::int_type_info())),
+        crate::spec::TypeId::LONG => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::long_type_info())),
+        crate::spec::TypeId::STRING => Ok(AvroSchemaOrField::Schema(TypeInfoFactory::string_type_info())),
+        crate::spec::TypeId::UUID => Ok(AvroSchemaOrField::Schema(IcebergUUIDObjectInspector::get())),
+        crate::spec::TypeId::TIMESTAMP => {
+            let timestamp_type = match p {
+                PrimitiveType::Timestamp(t) => t,
+                _ => return Err(Error::new(ErrorKind::InvalidInput, "Expected Timestamp type")),
+            };
+            let adjust_to_utc = timestamp_type.should_adjust_to_utc();
+            if adjust_to_utc {
+                Ok(AvroSchemaOrField::Schema(TIMESTAMP_INSPECTOR_WITH_TZ.clone()))
+            } else {
+                Ok(AvroSchemaOrField::Schema(TIMESTAMP_INSPECTOR.clone()))
+            }
+        },
+        crate::spec::TypeId::TIME => Ok(AvroSchemaOrField::Schema(IcebergTimeObjectInspector::get())),
+        _ => Err(Error::new(ErrorKind::InvalidInput, format!("{} type is not supported", p.type_id()))),
+    }
+}
+```

@@ -1,0 +1,150 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def __new__(cls, left: BooleanExpression, right: BooleanExpression) -> BooleanExpression:  # type: ignore
+
+        if left is AlwaysTrue() or right is AlwaysTrue():
+            return AlwaysTrue()
+        elif left is AlwaysFalse():
+            return right
+        elif right is AlwaysFalse():
+            return left
+        else:
+            obj = super().__new__(cls)
+            obj.left = left
+            obj.right = right
+            return obj
+</python function>
+<rust function signature>
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+struct PredicateConverter<'a> {
+    /// The Parquet schema descriptor.
+    pub parquet_schema: &'a SchemaDescriptor,
+    /// The map between field id and leaf column index in Parquet schema.
+    pub column_map: &'a HashMap<i32, usize>,
+    /// The required column indices in Parquet schema for the predicates.
+    pub column_indices: &'a Vec<usize>,
+}
+type PredicateResult =
+    dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, ArrowError> + Send + 'static;
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use crate::error::Result;
+use arrow_arith::boolean::{and, is_not_null, is_null, not, or};
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
+use arrow_ord::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
+use arrow_schema::{ArrowError, DataType, SchemaRef as ArrowSchemaRef};
+use async_stream::try_stream;
+use bytes::Bytes;
+use fnv::FnvHashSet;
+use futures::future::BoxFuture;
+use futures::stream::StreamExt;
+use futures::{try_join, TryFutureExt};
+use parquet::arrow::arrow_reader::{ArrowPredicateFn, RowFilter};
+use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, PARQUET_FIELD_ID_META_KEY};
+use parquet::file::metadata::ParquetMetaData;
+use parquet::schema::types::{SchemaDescriptor, Type as ParquetType};
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::str::FromStr;
+use std::sync::Arc;
+use crate::arrow::{arrow_schema_to_schema, get_arrow_datum};
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::io::{FileIO, FileMetadata, FileRead};
+use crate::scan::{ArrowRecordBatchStream, FileScanTaskStream};
+use crate::spec::{Datum, SchemaRef};
+use crate::{Error, ErrorKind};
+use crate::arrow::reader::CollectFieldIdVisitor;
+use crate::expr::visitors::bound_predicate_visitor::visit;
+use crate::expr::{Bind, Reference};
+use crate::spec::{NestedField, PrimitiveType, Schema, SchemaRef, Type};
+use std::collections::HashSet;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> {
+        Ok(Box::new(move |batch| {
+            let left = lhs(batch.clone())?;
+            let right = rhs(batch)?;
+            or(&left, &right)
+        }))
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+fn or(
+    &mut self,
+    mut lhs: Box<PredicateResult>,
+    mut rhs: Box<PredicateResult>,
+) -> Result<Box<PredicateResult>> {
+    Ok(Box::new(move |batch: RecordBatch| {
+        let left_result = lhs(batch.clone())?;
+        let right_result = rhs(batch.clone())?;
+
+        if left_result.iter().all(|&x| x) {
+            Ok(BooleanArray::from(vec![true; left_result.len()]))
+        } else if right_result.iter().all(|&x| x) {
+            Ok(BooleanArray::from(vec![true; right_result.len()]))
+        } else if left_result.iter().all(|&x| !x) {
+            Ok(right_result)
+        } else if right_result.iter().all(|&x| !x) {
+            Ok(left_result)
+        } else {
+            or(&left_result, &right_result)
+        }
+    }))
+}
+```
+
+This Rust function implements the logical OR operation on two predicates, similar to the Python function. It uses the provided `PredicateResult` type and `RecordBatch` from the Arrow library. The function handles the cases where either predicate is always true or always false, and combines the results using the `or` function from the `arrow_arith::boolean` module when necessary.
+
+Note that this translation assumes that `AlwaysTrue()` and `AlwaysFalse()` in the Python version correspond to arrays where all elements are `true` or `false`, respectively, in the Rust version. The function uses iterators to check for these conditions.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+fn or(
+    &mut self,
+    mut lhs: Box<PredicateResult>,
+    mut rhs: Box<PredicateResult>,
+) -> Result<Box<PredicateResult>> {
+    Ok(Box::new(move |batch: RecordBatch| {
+        let left_result = lhs(batch.clone())?;
+        let right_result = rhs(batch.clone())?;
+
+        if left_result.iter().all(|&x| x) {
+            Ok(BooleanArray::from(vec![true; left_result.len()]))
+        } else if right_result.iter().all(|&x| x) {
+            Ok(BooleanArray::from(vec![true; right_result.len()]))
+        } else if left_result.iter().all(|&x| !x) {
+            Ok(right_result)
+        } else if right_result.iter().all(|&x| !x) {
+            Ok(left_result)
+        } else {
+            or(&left_result, &right_result)
+        }
+    }))
+}
+```
+
+This Rust function implements the logical OR operation on two predicates, similar to the Python function. It uses the provided `PredicateResult` type and `RecordBatch` from the Arrow library. The function handles the cases where either predicate is always true or always false, and combines the results using the `or` function from the `arrow_arith::boolean` module when necessary.
+
+Note that this translation assumes that `AlwaysTrue()` and `AlwaysFalse()` in the Python version correspond to arrays where all elements are `true` or `false`, respectively, in the Rust version. The function uses iterators to check for these conditions.

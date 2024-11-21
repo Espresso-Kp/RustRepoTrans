@@ -1,0 +1,157 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def delete(self, location: Union[str, InputFile, OutputFile]) -> None:
+        """Delete the file at the given location.
+
+        Args:
+            location (Union[str, InputFile, OutputFile]): The URI to the file--if an InputFile instance or an OutputFile instance is provided,
+                the location attribute for that instance is used as the location to delete.
+
+        Raises:
+            FileNotFoundError: When the file at the provided location does not exist.
+            PermissionError: If the file at the provided location cannot be accessed due to a permission error such as
+                an AWS error code 15.
+        """
+        str_location = location.location if isinstance(location, (InputFile, OutputFile)) else location
+        scheme, netloc, path = self.parse_location(str_location)
+        fs = self.fs_by_scheme(scheme, netloc)
+
+        try:
+            fs.delete_file(path)
+        except:
+            raise
+</python function>
+<rust function signature>
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn create_operator<'a>(&self, path: &'a impl AsRef<str>) -> Result<(Operator, &'a str)> {
+        let path = path.as_ref();
+        match self {
+            Storage::LocalFs { op } => {
+                if let Some(stripped) = path.strip_prefix("file:/") {
+                    Ok((op.clone(), stripped))
+                } else {
+                    Ok((op.clone(), &path[1..]))
+                }
+            }
+            Storage::S3 { scheme_str, props } => {
+                let mut props = props.clone();
+                let url = Url::parse(path)?;
+                let bucket = url.host_str().ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::DataInvalid,
+                        format!("Invalid s3 url: {}, missing bucket", path),
+                    )
+                })?;
+
+                props.insert("bucket".to_string(), bucket.to_string());
+
+                let prefix = format!("{}://{}/", scheme_str, bucket);
+                if path.starts_with(&prefix) {
+                    Ok((Operator::via_map(Scheme::S3, props)?, &path[prefix.len()..]))
+                } else {
+                    Err(Error::new(
+                        ErrorKind::DataInvalid,
+                        format!("Invalid s3 url: {}, should start with {}", path, prefix),
+                    ))
+                }
+            }
+        }
+    }
+pub struct FileIO {
+    inner: Arc<Storage>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        Ok(op.delete(relative_path).await?)
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and library imports:
+
+```rust
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+    let (op, path) = self.inner.create_operator(&path)?;
+
+    match op.delete(&path).await {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            if err.kind() == opendal::ErrorKind::NotFound {
+                Err(Error::new(ErrorKind::NotFound, format!("File not found: {}", path)))
+            } else if err.kind() == opendal::ErrorKind::PermissionDenied {
+                Err(Error::new(ErrorKind::PermissionDenied, format!("Permission denied: {}", path)))
+            } else {
+                Err(Error::new(ErrorKind::Unexpected, format!("Failed to delete file: {}", err)))
+            }
+        }
+    }
+}
+```
+
+This Rust function:
+
+1. Uses the `create_operator` method to get the appropriate operator and path.
+2. Attempts to delete the file using the `delete` method of the operator.
+3. Handles potential errors, mapping them to appropriate `Error` types:
+   - `NotFound` for when the file doesn't exist
+   - `PermissionDenied` for permission-related errors
+   - `Unexpected` for other types of errors
+4. Returns a `Result<()>` to indicate success or failure.
+
+The function makes use of the provided dependencies and adheres to the given function signature.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and library imports:
+
+```rust
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+    let (op, path) = self.inner.create_operator(&path)?;
+
+    match op.delete(&path).await {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            if err.kind() == opendal::ErrorKind::NotFound {
+                Err(Error::new(ErrorKind::NotFound, format!("File not found: {}", path)))
+            } else if err.kind() == opendal::ErrorKind::PermissionDenied {
+                Err(Error::new(ErrorKind::PermissionDenied, format!("Permission denied: {}", path)))
+            } else {
+                Err(Error::new(ErrorKind::Unexpected, format!("Failed to delete file: {}", err)))
+            }
+        }
+    }
+}
+```
+
+This Rust function:
+
+1. Uses the `create_operator` method to get the appropriate operator and path.
+2. Attempts to delete the file using the `delete` method of the operator.
+3. Handles potential errors, mapping them to appropriate `Error` types:
+   - `NotFound` for when the file doesn't exist
+   - `PermissionDenied` for permission-related errors
+   - `Unexpected` for other types of errors
+4. Returns a `Result<()>` to indicate success or failure.
+
+The function makes use of the provided dependencies and adheres to the given function signature.

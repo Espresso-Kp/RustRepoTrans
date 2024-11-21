@@ -1,0 +1,224 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int PRECOMPUTE(byte[] TOKEN,byte[] CID,byte[] G1,byte[] G2)
+	{
+		ECP P,T;
+		FP24 g;
+
+		T=ECP.fromBytes(TOKEN);
+		if (T.is_infinity()) return INVALID_POINT; 
+
+		P=ECP.mapit(CID);
+
+		ECP4 Q=ECP4.generator();
+
+		g=PAIR192.ate(Q,T);
+		g=PAIR192.fexp(g);
+		g.toBytes(G1);
+
+		g=PAIR192.ate(Q,P);
+		g=PAIR192.fexp(g);
+		g.toBytes(G2);
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn precompute(token: &[u8], cid: &[u8], g1: &mut [u8], g2: &mut [u8]) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn to_bytes(&self, w: &mut [u8]) {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+
+        self.a.geta().geta().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i] = t[i]
+        }
+        self.a.geta().getb().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + mb] = t[i]
+        }
+        self.a.getb().geta().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 2 * mb] = t[i]
+        }
+        self.a.getb().getb().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 3 * mb] = t[i]
+        }
+
+        self.b.geta().geta().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 4 * mb] = t[i]
+        }
+        self.b.geta().getb().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 5 * mb] = t[i]
+        }
+        self.b.getb().geta().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 6 * mb] = t[i]
+        }
+        self.b.getb().getb().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 7 * mb] = t[i]
+        }
+
+        self.c.geta().geta().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 8 * mb] = t[i]
+        }
+        self.c.geta().getb().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 9 * mb] = t[i]
+        }
+        self.c.getb().geta().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 10 * mb] = t[i]
+        }
+        self.c.getb().getb().to_bytes(&mut t);
+        for i in 0..mb {
+            w[i + 11 * mb] = t[i]
+        }
+    }
+pub fn ate(P1: &ECP4, Q1: &ECP) -> FP24 {
+    let mut n = Big::new();
+    let mut n3 = Big::new();
+
+    let mut P = P1.clone();
+    P.affine();
+    let mut Q = Q1.clone();
+    Q.affine();
+
+    let qx = Q.getpx();
+    let qy = Q.getpy();
+
+    let mut A = P.clone();
+    let mut NP = P.clone();
+    NP.neg();
+
+    let nb = lbits(&mut n3, &mut n);
+
+    let mut r = FP24::new_int(1);
+    for i in (1..nb - 1).rev() {
+        r.sqr();
+
+        let mut lv = linedbl(&mut A, &qx, &qy);
+
+        let bt = n3.bit(i) - n.bit(i);
+        if bt == 1 {
+            let lv2 = lineadd(&mut A, &P, &qx, &qy);
+            lv.smul(&lv2);
+        }
+        if bt == -1 {
+            let lv2 = lineadd(&mut A, &NP, &qx, &qy);
+            lv.smul(&lv2);
+        }
+        r.ssmul(&lv);
+    }
+
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        r.conj();
+    }
+
+    return r;
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn precompute(token: &[u8], cid: &[u8], g1: &mut [u8], g2: &mut [u8]) -> isize {
+    let T = ECP::from_bytes(&token);
+    if T.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let P = ECP::mapit(&cid);
+
+    let Q = ECP4::generator();
+
+    let mut g = pair192::ate(&Q, &T);
+    g = pair192::fexp(&g);
+    g.to_bytes(g1);
+
+    g = pair192::ate(&Q, &P);
+    g = pair192::fexp(&g);
+    g.to_bytes(g2);
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn precompute(token: &[u8], cid: &[u8], g1: &mut [u8], g2: &mut [u8]) -> isize {
+    let mut t = ECP::from_bytes(token).unwrap();
+    if t.is_infinity() {
+        return -1; // equivalent to Java's INVALID_POINT
+    }
+
+    let p = ECP4::generator();
+    let mut q = ECP::from_bytes(cid).unwrap();
+    q.affine();
+
+    let mut g = pair192::ate(&p, &t).unwrap();
+    g = pair192::fexp(g).unwrap();
+    g.to_bytes(g1);
+
+    g = pair192::ate(&p, &q).unwrap();
+    g = pair192::fexp(g).unwrap();
+    g.to_bytes(g2);
+
+    0
+}
+```
+Note that I've assumed that the `unwrap` method is used to handle errors, as it is a common pattern in Rust. If you want to handle errors differently, you can modify the code accordingly. Also, I've used the `&mut [u8]` syntax to match the Rust function signature, which is equivalent to the Java `byte[]` parameter.</translated function>Here is the translated Rust function:
+```rust
+pub fn precompute(token: &[u8], cid: &[u8], g1: &mut [u8], g2: &mut [u8]) -> isize {
+    let mut t = ECP::from_bytes(token).unwrap();
+    if t.is_infinity() {
+        return -1; // equivalent to Java's INVALID_POINT
+    }
+
+    let p = ECP4::generator();
+    let mut q = ECP::from_bytes(cid).unwrap();
+    q.affine();
+
+    let mut g = pair192::ate(&p, &t).unwrap();
+    g = pair192::fexp(g).unwrap();
+    g.to_bytes(g1);
+
+    g = pair192::ate(&p, &q).unwrap();
+    g = pair192::fexp(g).unwrap();
+    g.to_bytes(g2);
+
+    0
+}
+```
+Note that I've assumed that the `unwrap` method is used to handle errors, as it is a common pattern in Rust. If you want to handle errors differently, you can modify the code accordingly. Also, I've used the `&mut [u8]` syntax to match the Rust function signature, which is equivalent to the Java `byte[]` parameter.

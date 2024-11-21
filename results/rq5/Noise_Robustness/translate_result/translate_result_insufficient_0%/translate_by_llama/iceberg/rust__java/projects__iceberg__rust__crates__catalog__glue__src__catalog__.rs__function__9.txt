@@ -1,0 +1,154 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public boolean dropNamespace(Namespace namespace) throws NamespaceNotEmptyException {
+    namespaceExists(namespace);
+
+    GetTablesResponse response =
+        glue.getTables(
+            GetTablesRequest.builder()
+                .catalogId(awsProperties.glueCatalogId())
+                .databaseName(
+                    IcebergToGlueConverter.toDatabaseName(
+                        namespace, awsProperties.glueCatalogSkipNameValidation()))
+                .build());
+
+    if (response.hasTableList() && !response.tableList().isEmpty()) {
+      Table table = response.tableList().get(0);
+      if (isGlueIcebergTable(table)) {
+        throw new NamespaceNotEmptyException(
+            "Cannot drop namespace %s because it still contains Iceberg tables", namespace);
+      } else {
+        throw new NamespaceNotEmptyException(
+            "Cannot drop namespace %s because it still contains non-Iceberg tables", namespace);
+      }
+    }
+
+    glue.deleteDatabase(
+        DeleteDatabaseRequest.builder()
+            .catalogId(awsProperties.glueCatalogId())
+            .name(
+                IcebergToGlueConverter.toDatabaseName(
+                    namespace, awsProperties.glueCatalogSkipNameValidation()))
+            .build());
+    LOG.info("Dropped namespace: {}", namespace);
+    // Always successful, otherwise exception is thrown
+    return true;
+  }
+</java function>
+<rust function signature>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+        let db_name = validate_namespace(namespace)?;
+        let table_list = self.list_tables(namespace).await?;
+
+        if !table_list.is_empty() {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} is not empty", &db_name),
+            ));
+        }
+
+        let builder = self.client.0.delete_database().name(db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    namespace_exists(namespace)?;
+
+    let catalog_id = with_catalog_id()?;
+    let database_name = convert_to_database(namespace, &self.aws_properties.glue_catalog_skip_name_validation())?;
+    let get_tables_response = self.glue.get_tables(GetTablesRequest {
+        catalog_id,
+        database_name,
+    })
+   .await?;
+
+    if get_tables_response.table_list().is_some() &&!get_tables_response.table_list().unwrap().is_empty() {
+        let table = get_tables_response.table_list().unwrap().get(0).unwrap();
+        if self.is_glue_iceberg_table(table) {
+            return Err(Error::new(ErrorKind::NamespaceNotEmpty, format!("Cannot drop namespace {} because it still contains Iceberg tables", namespace)));
+        } else {
+            return Err(Error::new(ErrorKind::NamespaceNotEmpty, format!("Cannot drop namespace {} because it still contains non-Iceberg tables", namespace)));
+        }
+    }
+
+    self.glue.delete_database(DeleteDatabaseRequest {
+        catalog_id,
+        name: database_name,
+    })
+   .await?;
+    self.log.info(format!("Dropped namespace: {}", namespace));
+    Ok(())
+}
+```
+Note that I've assumed that the `namespace_exists` function is defined elsewhere in the codebase, and that the `aws_properties` field is a struct with a `glue_catalog_id` method that returns the catalog ID. I've also assumed that the `log` field is a logger instance that has an `info` method. If these assumptions are incorrect, please let me know and I'll adjust the code accordingly.</translated function>Here is the translated Rust function:
+```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    namespace_exists(namespace)?;
+
+    let catalog_id = with_catalog_id()?;
+    let database_name = convert_to_database(namespace, &self.aws_properties.glue_catalog_skip_name_validation())?;
+    let get_tables_response = self.glue.get_tables(GetTablesRequest {
+        catalog_id,
+        database_name,
+    })
+   .await?;
+
+    if get_tables_response.table_list().is_some() &&!get_tables_response.table_list().unwrap().is_empty() {
+        let table = get_tables_response.table_list().unwrap().get(0).unwrap();
+        if self.is_glue_iceberg_table(table) {
+            return Err(Error::new(ErrorKind::NamespaceNotEmpty, format!("Cannot drop namespace {} because it still contains Iceberg tables", namespace)));
+        } else {
+            return Err(Error::new(ErrorKind::NamespaceNotEmpty, format!("Cannot drop namespace {} because it still contains non-Iceberg tables", namespace)));
+        }
+    }
+
+    self.glue.delete_database(DeleteDatabaseRequest {
+        catalog_id,
+        name: database_name,
+    })
+   .await?;
+    self.log.info(format!("Dropped namespace: {}", namespace));
+    Ok(())
+}
+```
+Note that I've assumed that the `namespace_exists` function is defined elsewhere in the codebase, and that the `aws_properties` field is a struct with a `glue_catalog_id` method that returns the catalog ID. I've also assumed that the `log` field is a logger instance that has an `info` method. If these assumptions are incorrect, please let me know and I'll adjust the code accordingly.

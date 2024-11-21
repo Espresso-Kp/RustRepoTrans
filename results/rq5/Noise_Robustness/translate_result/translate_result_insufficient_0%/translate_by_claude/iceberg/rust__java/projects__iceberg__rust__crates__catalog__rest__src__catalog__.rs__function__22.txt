@@ -1,0 +1,266 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public Table create() {
+      CreateTableRequest request =
+          CreateTableRequest.builder()
+              .withName(ident.name())
+              .withSchema(schema)
+              .withPartitionSpec(spec)
+              .withWriteOrder(writeOrder)
+              .withLocation(location)
+              .setProperties(propertiesBuilder.build())
+              .build();
+
+      LoadTableResponse response =
+          client.post(
+              paths.tables(ident.namespace()),
+              request,
+              LoadTableResponse.class,
+              headers(context),
+              ErrorHandlers.tableErrorHandler());
+
+      AuthSession session = tableSession(response.config(), session(context));
+      RESTTableOperations ops =
+          new RESTTableOperations(
+              client,
+              paths.table(ident),
+              session::headers,
+              tableFileIO(context, response.config()),
+              response.tableMetadata());
+
+      trackFileIO(ops);
+
+      return new BaseTable(
+          ops, fullTableName(ident), metricsReporter(paths.metrics(ident), session::headers));
+    }
+</java function>
+<rust function signature>
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::HashMap;
+use std::str::FromStr;
+use async_trait::async_trait;
+use itertools::Itertools;
+use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, Request, Response, StatusCode, Url};
+use serde::de::DeserializeOwned;
+use typed_builder::TypedBuilder;
+use urlencoding::encode;
+use crate::catalog::_serde::{
+    CommitTableRequest, CommitTableResponse, CreateTableRequest, LoadTableResponse,
+};
+use iceberg::io::FileIO;
+use iceberg::table::Table;
+use iceberg::Result;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+};
+use self::_serde::{
+    CatalogConfig, ErrorResponse, ListNamespaceResponse, ListTableResponse, NamespaceSerde,
+    RenameTableRequest, TokenResponse, NO_CONTENT, OK,
+};
+use std::collections::HashMap;
+use serde_derive::{Deserialize, Serialize};
+use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
+use iceberg::{Error, ErrorKind, Namespace, TableIdent, TableRequirement, TableUpdate};
+use chrono::{TimeZone, Utc};
+use iceberg::spec::{
+        FormatVersion, NestedField, NullOrder, Operation, PrimitiveType, Schema, Snapshot,
+        SnapshotLog, SortDirection, SortField, SortOrder, Summary, Transform, Type,
+        UnboundPartitionField, UnboundPartitionSpec,
+    };
+use iceberg::transaction::Transaction;
+use mockito::{Mock, Server, ServerGuard};
+use serde_json::json;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+use uuid::uuid;
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> {
+        let table_ident = TableIdent::new(namespace.clone(), creation.name.clone());
+
+        let request = self
+            .client
+            .0
+            .post(self.config.tables_endpoint(namespace))
+            .json(&CreateTableRequest {
+                name: creation.name,
+                location: creation.location,
+                schema: creation.schema,
+                partition_spec: creation.partition_spec,
+                write_order: creation.sort_order,
+                // We don't support stage create yet.
+                stage_create: Some(false),
+                properties: if creation.properties.is_empty() {
+                    None
+                } else {
+                    Some(creation.properties)
+                },
+            })
+            .build()?;
+
+        let resp = self
+            .client
+            .query::<LoadTableResponse, ErrorResponse, OK>(request)
+            .await?;
+
+        let file_io = self.load_file_io(resp.metadata_location.as_deref(), resp.config)?;
+
+        let table = Table::builder()
+            .identifier(table_ident)
+            .file_io(file_io)
+            .metadata(resp.metadata)
+            .metadata_location(resp.metadata_location.ok_or_else(|| {
+                Error::new(
+                    ErrorKind::DataInvalid,
+                    "Metadata location missing in create table response!",
+                )
+            })?)
+            .build();
+
+        Ok(table)
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+async fn create_table(
+    &self,
+    namespace: &NamespaceIdent,
+    creation: TableCreation,
+) -> Result<Table> {
+    let request = CreateTableRequest::builder()
+        .name(creation.name.clone())
+        .schema(creation.schema)
+        .partition_spec(creation.partition_spec)
+        .write_order(creation.sort_order)
+        .location(creation.location)
+        .properties(creation.properties)
+        .build();
+
+    let response: LoadTableResponse = self
+        .client
+        .post(self.paths.tables(namespace))
+        .json(&request)
+        .headers(self.headers(self.context.clone()))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let session = self.table_session(response.config, self.session(self.context.clone()));
+    let ident = TableIdent::new(namespace.clone(), creation.name);
+    let ops = Arc::new(RESTTableOperations::new(
+        self.client.clone(),
+        self.paths.table(&ident),
+        Box::new(move || session.headers()),
+        self.table_file_io(self.context.clone(), response.config.clone()),
+        response.metadata,
+    ));
+
+    self.track_file_io(&ops);
+
+    Ok(BaseTable::new(
+        ops,
+        self.full_table_name(&ident),
+        self.metrics_reporter(self.paths.metrics(&ident), Box::new(move || session.headers())),
+    ))
+}
+```
+
+Note that this translation makes some assumptions and adaptations based on the provided Rust context:
+
+1. We're using the `async` version of the function as specified in the Rust signature.
+2. The `Result` type is used for error handling.
+3. The `CreateTableRequest` is built using a builder pattern, assuming it's implemented with `TypedBuilder`.
+4. The HTTP request is made using the `reqwest` crate, as it's included in the dependencies.
+5. Error handling is done using `error_for_status()` and the `?` operator.
+6. The `RESTTableOperations`, `BaseTable`, and other types are assumed to exist in the Rust codebase with similar interfaces to their Java counterparts.
+7. Some method names are adjusted to follow Rust naming conventions (e.g., `table_session` instead of `tableSession`).
+8. The `trackFileIO` call is translated to `track_file_io`, assuming such a method exists in the Rust implementation.
+
+This translation aims to maintain the overall structure and functionality of the original Java function while adapting it to Rust idioms and the provided context.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+async fn create_table(
+    &self,
+    namespace: &NamespaceIdent,
+    creation: TableCreation,
+) -> Result<Table> {
+    let request = CreateTableRequest::builder()
+        .name(creation.name.clone())
+        .schema(creation.schema)
+        .partition_spec(creation.partition_spec)
+        .write_order(creation.sort_order)
+        .location(creation.location)
+        .properties(creation.properties)
+        .build();
+
+    let response: LoadTableResponse = self
+        .client
+        .post(self.paths.tables(namespace))
+        .json(&request)
+        .headers(self.headers(self.context.clone()))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let session = self.table_session(response.config, self.session(self.context.clone()));
+    let ident = TableIdent::new(namespace.clone(), creation.name);
+    let ops = Arc::new(RESTTableOperations::new(
+        self.client.clone(),
+        self.paths.table(&ident),
+        Box::new(move || session.headers()),
+        self.table_file_io(self.context.clone(), response.config.clone()),
+        response.metadata,
+    ));
+
+    self.track_file_io(&ops);
+
+    Ok(BaseTable::new(
+        ops,
+        self.full_table_name(&ident),
+        self.metrics_reporter(self.paths.metrics(&ident), Box::new(move || session.headers())),
+    ))
+}
+```
+
+Note that this translation makes some assumptions and adaptations based on the provided Rust context:
+
+1. We're using the `async` version of the function as specified in the Rust signature.
+2. The `Result` type is used for error handling.
+3. The `CreateTableRequest` is built using a builder pattern, assuming it's implemented with `TypedBuilder`.
+4. The HTTP request is made using the `reqwest` crate, as it's included in the dependencies.
+5. Error handling is done using `error_for_status()` and the `?` operator.
+6. The `RESTTableOperations`, `BaseTable`, and other types are assumed to exist in the Rust codebase with similar interfaces to their Java counterparts.
+7. Some method names are adjusted to follow Rust naming conventions (e.g., `table_session` instead of `tableSession`).
+8. The `trackFileIO` call is translated to `track_file_io`, assuming such a method exists in the Rust implementation.
+
+This translation aims to maintain the overall structure and functionality of the original Java function while adapting it to Rust idioms and the provided context.

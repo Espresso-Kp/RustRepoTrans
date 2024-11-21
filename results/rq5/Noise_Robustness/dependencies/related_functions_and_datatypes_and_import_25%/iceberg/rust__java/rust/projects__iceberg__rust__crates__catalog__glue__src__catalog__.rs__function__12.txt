@@ -1,0 +1,55 @@
+pub fn identifier(&self) -> &TableIdent {
+        &self.identifier
+    }
+pub fn metadata_location(&self) -> Option<&str> {
+        self.metadata_location.as_deref()
+    }
+pub fn new_input(&self, path: impl AsRef<str>) -> Result<InputFile> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        let path = path.as_ref().to_string();
+        let relative_path_pos = path.len() - relative_path.len();
+        Ok(InputFile {
+            op,
+            path,
+            relative_path_pos,
+        })
+    }
+pub fn file_io(&self) -> FileIO {
+        self.file_io.clone()
+    }
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+pub fn new(name: String) -> Self {
+        Self(vec![name])
+    }
+------
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;

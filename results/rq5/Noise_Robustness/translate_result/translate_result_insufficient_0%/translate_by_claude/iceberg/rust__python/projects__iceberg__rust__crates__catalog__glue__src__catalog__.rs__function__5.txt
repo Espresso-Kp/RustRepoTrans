@@ -1,0 +1,148 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def create_namespace(self, namespace: Union[str, Identifier], properties: Properties = EMPTY_DICT) -> None:
+        """Create a namespace in the catalog.
+
+        Args:
+            namespace: Namespace identifier.
+            properties: A string dictionary of properties for the given namespace.
+
+        Raises:
+            ValueError: If the identifier is invalid.
+            AlreadyExistsError: If a namespace with the given name already exists.
+        """
+        database_name = self.identifier_to_database(namespace)
+        try:
+            self.glue.create_database(DatabaseInput=_construct_database_input(database_name, properties))
+        except self.glue.exceptions.AlreadyExistsException as e:
+            raise NamespaceAlreadyExistsError(f"Database {database_name} already exists") from e
+</python function>
+<rust function signature>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+
+        let builder = self.client.0.create_database().database_input(db_input);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(Namespace::with_properties(namespace.clone(), properties))
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, and dependencies:
+
+```rust
+async fn create_namespace(
+    &self,
+    namespace: &NamespaceIdent,
+    properties: HashMap<String, String>,
+) -> Result<Namespace> {
+    let database_name = convert_to_database(namespace);
+    
+    let database_input = _construct_database_input(&database_name, &properties);
+    
+    match self.glue.create_database().set_database_input(Some(database_input)).send().await {
+        Ok(_) => Ok(convert_to_namespace(namespace, &properties)),
+        Err(err) => {
+            if let aws_sdk_glue::error::SdkError::ServiceError { err, .. } = &err {
+                if err.is_already_exists_exception() {
+                    return Err(Error::new(
+                        ErrorKind::AlreadyExists,
+                        format!("Database {} already exists", database_name),
+                    ));
+                }
+            }
+            Err(from_aws_sdk_error(err))
+        }
+    }
+}
+```
+
+Note that I've made some assumptions and adaptations based on the provided Rust dependencies and conventions:
+
+1. The `_construct_database_input` function is assumed to exist and work similarly to the Python version.
+2. The `self.glue` is assumed to be an instance of the AWS Glue client.
+3. Error handling is done using the `Result` type and custom `Error` and `ErrorKind` types.
+4. The `convert_to_database`, `convert_to_namespace`, and `from_aws_sdk_error` functions are used from the provided dependencies.
+5. The function returns a `Result<Namespace>` instead of `None` as in the Python version.
+
+This translation maintains the core functionality of creating a namespace (database in Glue) and handling the "already exists" error case. The Rust version is more explicit about error handling and uses async/await for the AWS SDK call.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, and dependencies:
+
+```rust
+async fn create_namespace(
+    &self,
+    namespace: &NamespaceIdent,
+    properties: HashMap<String, String>,
+) -> Result<Namespace> {
+    let database_name = convert_to_database(namespace);
+    
+    let database_input = _construct_database_input(&database_name, &properties);
+    
+    match self.glue.create_database().set_database_input(Some(database_input)).send().await {
+        Ok(_) => Ok(convert_to_namespace(namespace, &properties)),
+        Err(err) => {
+            if let aws_sdk_glue::error::SdkError::ServiceError { err, .. } = &err {
+                if err.is_already_exists_exception() {
+                    return Err(Error::new(
+                        ErrorKind::AlreadyExists,
+                        format!("Database {} already exists", database_name),
+                    ));
+                }
+            }
+            Err(from_aws_sdk_error(err))
+        }
+    }
+}
+```
+
+Note that I've made some assumptions and adaptations based on the provided Rust dependencies and conventions:
+
+1. The `_construct_database_input` function is assumed to exist and work similarly to the Python version.
+2. The `self.glue` is assumed to be an instance of the AWS Glue client.
+3. Error handling is done using the `Result` type and custom `Error` and `ErrorKind` types.
+4. The `convert_to_database`, `convert_to_namespace`, and `from_aws_sdk_error` functions are used from the provided dependencies.
+5. The function returns a `Result<Namespace>` instead of `None` as in the Python version.
+
+This translation maintains the core functionality of creating a namespace (database in Glue) and handling the "already exists" error case. The Rust version is more explicit about error handling and uses async/await for the AWS SDK call.

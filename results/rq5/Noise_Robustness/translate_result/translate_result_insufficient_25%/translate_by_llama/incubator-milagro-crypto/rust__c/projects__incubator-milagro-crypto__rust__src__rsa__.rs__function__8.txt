@@ -1,0 +1,322 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int OAEP_DECODE(int sha,const octet *p,octet *f)
+{
+    int comp;
+    int x;
+    int t;
+    int i;
+    int k;
+    int olen=f->max-1;
+    int hlen;
+    int seedlen;
+    char dbmask[MAX_RSA_BYTES];
+    char seed[64];
+    char chash[64];
+    octet DBMASK= {0,sizeof(dbmask),dbmask};
+    octet SEED= {0,sizeof(seed),seed};
+    octet CHASH= {0,sizeof(chash),chash};
+
+    seedlen=hlen=sha;
+    if (olen<seedlen+hlen+1) return 1;
+    if (!OCT_pad(f,olen+1)) return 1;
+    hashit(sha,p,-1,&CHASH);
+
+    x=f->val[0];
+    for (i=seedlen; i<olen; i++)
+        DBMASK.val[i-seedlen]=f->val[i+1];
+    DBMASK.len=olen-seedlen;
+
+    MGF1(sha,&DBMASK,seedlen,&SEED);
+    for (i=0; i<seedlen; i++) SEED.val[i]^=f->val[i+1];
+    MGF1(sha,&SEED,olen-seedlen,f);
+    OCT_xor(&DBMASK,f);
+
+    comp=OCT_ncomp(&CHASH,&DBMASK,hlen);
+
+    OCT_shl(&DBMASK,hlen);
+
+    OCT_clear(&SEED);
+    OCT_clear(&CHASH);
+
+    for (k=0;; k++)
+    {
+        if (k>=DBMASK.len)
+        {
+            OCT_clear(&DBMASK);
+            return 1;
+        }
+        if (DBMASK.val[k]!=0) break;
+    }
+
+    t=DBMASK.val[k];
+    if (!comp || x!=0 || t!=0x01)
+    {
+        OCT_clear(&DBMASK);
+        return 1;
+    }
+
+    OCT_shl(&DBMASK,k+1);
+    OCT_copy(f,&DBMASK);
+    OCT_clear(&DBMASK);
+
+    return 0;
+}
+</c function>
+<rust function signature>
+pub fn oaep_decode(sha: usize, p: Option<&[u8]>, f: &mut [u8]) -> usize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn oaep_decode(sha: usize, p: Option<&[u8]>, f: &mut [u8]) -> usize {
+    let olen = RFS - 1;
+
+    let hlen = sha;
+    let mut seed: [u8; 64] = [0; 64];
+    let seedlen = hlen;
+    let mut chash: [u8; 64] = [0; 64];
+
+    if olen < seedlen + hlen + 1 {
+        return 0;
+    }
+    let mut dbmask: [u8; RFS] = [0; RFS];
+    //for i in 0..olen-seedlen {dbmask[i]=0}
+
+    if f.len() < RFS {
+        let d = RFS - f.len();
+        for i in (d..RFS).rev() {
+            f[i] = f[i - d];
+        }
+        for i in (0..d).rev() {
+            f[i] = 0;
+        }
+    }
+
+    hashit(sha, p, -1, &mut chash);
+
+    let x = f[0];
+
+    for i in seedlen..olen {
+        dbmask[i - seedlen] = f[i + 1];
+    }
+
+    mgf1(sha, &dbmask[0..olen - seedlen], seedlen, &mut seed);
+    for i in 0..seedlen {
+        seed[i] ^= f[i + 1]
+    }
+    mgf1(sha, &seed, olen - seedlen, f);
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i]
+    }
+
+    let mut comp = true;
+    for i in 0..hlen {
+        if chash[i] != dbmask[i] {
+            comp = false
+        }
+    }
+
+    for i in 0..olen - seedlen - hlen {
+        dbmask[i] = dbmask[i + hlen]
+    }
+
+    for i in 0..hlen {
+        seed[i] = 0;
+        chash[i] = 0
+    }
+
+    let mut k = 0;
+    loop {
+        if k >= olen - seedlen - hlen {
+            return 0;
+        }
+        if dbmask[k] != 0 {
+            break;
+        }
+        k += 1;
+    }
+
+    let t = dbmask[k];
+    if !comp || x != 0 || t != 0x01 {
+        for i in 0..olen - seedlen {
+            dbmask[i] = 0
+        }
+        return 0;
+    }
+
+    for i in 0..olen - seedlen - hlen - k - 1 {
+        f[i] = dbmask[i + k + 1];
+    }
+
+    for i in 0..olen - seedlen {
+        dbmask[i] = 0
+    }
+
+    return olen - seedlen - hlen - k - 1;
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn oaep_decode(sha: usize, p: Option<&[u8]>, f: &mut [u8]) -> usize {
+    let mut comp = 0;
+    let mut x = 0;
+    let mut t = 0;
+    let mut i = 0;
+    let mut k = 0;
+    let olen = f.len() - 1;
+    let hlen = sha;
+    let seedlen = hlen;
+    let mut dbmask = [0u8; RFS];
+    let mut seed = [0u8; 64];
+    let mut chash = [0u8; 64];
+
+    let mut dbmask_octet = Octet::new(&dbmask);
+    let mut seed_octet = Octet::new(&seed);
+    let mut chash_octet = Octet::new(&chash);
+
+    if olen < seedlen + hlen + 1 {
+        return 1;
+    }
+    if!OCT_pad(f, olen + 1) {
+        return 1;
+    }
+    hashit(sha, p.unwrap_or(&[]), -1, &mut chash_octet);
+
+    x = f[0];
+    for i in seedlen..olen {
+        dbmask_octet.val[i - seedlen] = f[i + 1];
+    }
+    dbmask_octet.len = olen - seedlen;
+
+    MGF1(sha, &dbmask_octet, seedlen, &mut seed_octet);
+    for i in 0..seedlen {
+        seed_octet.val[i] ^= f[i + 1];
+    }
+    MGF1(sha, &seed_octet, olen - seedlen, f);
+    OCT_xor(&dbmask_octet, f);
+
+    comp = OCT_ncomp(&chash_octet, &dbmask_octet, hlen);
+
+    OCT_shl(&dbmask_octet, hlen);
+
+    OCT_clear(&seed_octet);
+    OCT_clear(&chash_octet);
+
+    loop {
+        if k >= dbmask_octet.len {
+            OCT_clear(&dbmask_octet);
+            return 1;
+        }
+        if dbmask_octet.val[k]!= 0 {
+            break;
+        }
+        k += 1;
+    }
+
+    t = dbmask_octet.val[k];
+    if!comp || x!= 0 || t!= 0x01 {
+        OCT_clear(&dbmask_octet);
+        return 1;
+    }
+
+    OCT_shl(&dbmask_octet, k + 1);
+    OCT_copy(f, &dbmask_octet);
+    OCT_clear(&dbmask_octet);
+
+    0
+}
+```
+Note that I've assumed that the `Octet` type is defined elsewhere in the codebase, and that the `OCT_pad`, `hashit`, `MGF1`, `OCT_ncomp`, `OCT_shl`, `OCT_xor`, and `OCT_copy` functions are also defined elsewhere. I've also assumed that the `RFS` constant is defined as a global constant. If these assumptions are incorrect, please let me know and I'll</translated function>Here is the translated Rust function:
+```rust
+pub fn oaep_decode(sha: usize, p: Option<&[u8]>, f: &mut [u8]) -> usize {
+    let mut comp = 0;
+    let mut x = 0;
+    let mut t = 0;
+    let mut i = 0;
+    let mut k = 0;
+    let olen = f.len() - 1;
+    let hlen = sha;
+    let seedlen = hlen;
+    let mut dbmask = [0u8; RFS];
+    let mut seed = [0u8; 64];
+    let mut chash = [0u8; 64];
+
+    let mut dbmask_octet = Octet::new(&dbmask);
+    let mut seed_octet = Octet::new(&seed);
+    let mut chash_octet = Octet::new(&chash);
+
+    if olen < seedlen + hlen + 1 {
+        return 1;
+    }
+    if!OCT_pad(f, olen + 1) {
+        return 1;
+    }
+    hashit(sha, p.unwrap_or(&[]), -1, &mut chash_octet);
+
+    x = f[0];
+    for i in seedlen..olen {
+        dbmask_octet.val[i - seedlen] = f[i + 1];
+    }
+    dbmask_octet.len = olen - seedlen;
+
+    MGF1(sha, &dbmask_octet, seedlen, &mut seed_octet);
+    for i in 0..seedlen {
+        seed_octet.val[i] ^= f[i + 1];
+    }
+    MGF1(sha, &seed_octet, olen - seedlen, f);
+    OCT_xor(&dbmask_octet, f);
+
+    comp = OCT_ncomp(&chash_octet, &dbmask_octet, hlen);
+
+    OCT_shl(&dbmask_octet, hlen);
+
+    OCT_clear(&seed_octet);
+    OCT_clear(&chash_octet);
+
+    loop {
+        if k >= dbmask_octet.len {
+            OCT_clear(&dbmask_octet);
+            return 1;
+        }
+        if dbmask_octet.val[k]!= 0 {
+            break;
+        }
+        k += 1;
+    }
+
+    t = dbmask_octet.val[k];
+    if!comp || x!= 0 || t!= 0x01 {
+        OCT_clear(&dbmask_octet);
+        return 1;
+    }
+
+    OCT_shl(&dbmask_octet, k + 1);
+    OCT_copy(f, &dbmask_octet);
+    OCT_clear(&dbmask_octet);
+
+    0
+}
+```
+Note that I've assumed that the `Octet` type is defined elsewhere in the codebase, and that the `OCT_pad`, `hashit`, `MGF1`, `OCT_ncomp`, `OCT_shl`, `OCT_xor`, and `OCT_copy` functions are also defined elsewhere. I've also assumed that the `RFS` constant is defined as a global constant. If these assumptions are incorrect, please let me know and I'll

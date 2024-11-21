@@ -1,0 +1,345 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int VP_DSA(int sha,byte[] W,byte[] F, byte[] C,byte[] D)
+	{
+		BIG r,f,c,d,h2;
+		int res=0;
+		ECP G,WP,P;
+		int valid; 
+
+		byte[] B=hashit(sha,F,0,null,BIG.MODBYTES);
+
+		G=ECP.generator();
+		r=new BIG(ROM.CURVE_Order);
+
+		c=BIG.fromBytes(C);
+		d=BIG.fromBytes(D);
+		f=BIG.fromBytes(B);
+     
+		if (c.iszilch() || BIG.comp(c,r)>=0 || d.iszilch() || BIG.comp(d,r)>=0) 
+            res=INVALID;
+
+		if (res==0)
+		{
+			d.invmodp(r);
+			f.copy(BIG.modmul(f,d,r));
+			h2=BIG.modmul(c,d,r);
+
+			WP=ECP.fromBytes(W);
+			if (WP.is_infinity()) res=ERROR;
+			else
+			{
+				P=new ECP();
+				P.copy(WP);
+				P=P.mul2(h2,G,f);
+				if (P.is_infinity()) res=INVALID;
+				else
+				{
+					d=P.getX();
+					d.mod(r);
+					if (BIG.comp(d,c)!=0) res=INVALID;
+				}
+			}
+		}
+
+		return res;
+	}
+</java function>
+<rust function signature>
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+pub fn getx(&self) -> Big {
+        let mut W = self.clone();
+        W.affine();
+        return W.x.redc();
+    }
+pub fn is_zilch(&self) -> bool {
+        for i in 0..NLEN {
+            if self.w[i] != 0 {
+                return false;
+            }
+        }
+        true
+    }
+fn hashit(sha: usize, a: &[u8], n: usize, b: Option<&[u8]>, pad: usize, w: &mut [u8]) {
+    let mut r: [u8; 64] = [0; 64];
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+
+    if pad == 0 {
+        for i in 0..sha {
+            w[i] = r[i]
+        }
+    } else {
+        if pad <= sha {
+            for i in 0..pad {
+                w[i] = r[i]
+            }
+        } else {
+            for i in 0..sha {
+                w[i + pad - sha] = r[i]
+            }
+            for i in 0..(pad - sha) {
+                w[i] = 0
+            }
+        }
+    }
+}
+pub fn comp(a: &Big, b: &Big) -> isize {
+        for i in (0..NLEN).rev() {
+            if a.w[i] == b.w[i] {
+                continue;
+            }
+            if a.w[i] > b.w[i] {
+                return 1;
+            } else {
+                return -1;
+            }
+        }
+        0
+    }
+pub const ERROR: isize = -3;
+pub const INVALID: isize = -4;
+pub const CURVE_ORDER: [Chunk; NLEN] = [
+    0xD,
+    0x800000000010A1,
+    0x8000000007FF9F,
+    0x40000001BA344D,
+    0x25236482,
+];
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize {
+    let mut res = 0;
+
+    let mut b: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+
+    hashit(sha, f, 0, None, big::MODBYTES as usize, &mut b);
+
+    let G = ECP::generator();
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let cb = Big::from_bytes(c); // c or &c ?
+    let mut db = Big::from_bytes(d); // d or &d ?
+
+    if cb.is_zilch() || Big::comp(&cb, &r) >= 0 || db.is_zilch() || Big::comp(&db, &r) >= 0 {
+        res = INVALID;
+    }
+
+    if res == 0 {
+        let mut fb = Big::from_bytes(&b);
+        db.invmodp(&r);
+        let tb = Big::modmul(&fb, &db, &r);
+        fb = tb.clone();
+        let h2 = Big::modmul(&cb, &db, &r);
+
+        let WP = ECP::from_bytes(&w);
+        if WP.is_infinity() {
+            res = ERROR;
+        } else {
+            let mut P = WP.clone();
+
+            P = P.mul2(&h2, &G, &fb);
+
+            if P.is_infinity() {
+                res = INVALID;
+            } else {
+                db = P.getx();
+                db.rmod(&r);
+
+                if Big::comp(&db, &cb) != 0 {
+                    res = INVALID
+                }
+            }
+        }
+    }
+
+    res
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize {
+    let mut res = 0;
+    let mut b = vec![0u8; Big::MODBYTES];
+    hashit(sha, f, 0, None, Big::MODBYTES, &mut b);
+
+    let g = ECP::generator();
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let mut c_big = Big::frombytes(c);
+    let mut d_big = Big::frombytes(d);
+    let f_big = Big::frombytes(&b);
+
+    if c_big.is_zilch() || Big::comp(&c_big, &r) >= 0 || d_big.is_zilch() || Big::comp(&d_big, &r) >= 0 {
+        return INVALID;
+    }
+
+    d_big.invmodp(&r);
+    let mut f = Big::modmul(&f_big, &d_big, &r);
+    let h2 = Big::modmul(&c_big, &d_big, &r);
+
+    let wp = ECP::frombytes(w);
+    if wp.is_infinity() {
+        return ERROR;
+    }
+
+    let mut p = wp.clone();
+    p = p.mul2(&h2, &g, &f);
+    if p.is_infinity() {
+        return INVALID;
+    }
+
+    let mut d = p.getx();
+    d.rmod(&r);
+    if Big::comp(&d, &c_big) != 0 {
+        return INVALID;
+    }
+
+    res
+}
+```
+
+This Rust function closely follows the structure and logic of the original Java function. It uses the provided dependencies and libraries to perform the necessary operations. The function signature matches the one provided, and it makes use of the relevant Rust functions and data types as specified in the dependencies.
+
+Note that some minor adjustments were made to accommodate Rust's ownership and borrowing rules, such as using `clone()` where necessary and using mutable variables where appropriate.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize {
+    let mut res = 0;
+    let mut b = vec![0u8; Big::MODBYTES];
+    hashit(sha, f, 0, None, Big::MODBYTES, &mut b);
+
+    let g = ECP::generator();
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let mut c_big = Big::frombytes(c);
+    let mut d_big = Big::frombytes(d);
+    let f_big = Big::frombytes(&b);
+
+    if c_big.is_zilch() || Big::comp(&c_big, &r) >= 0 || d_big.is_zilch() || Big::comp(&d_big, &r) >= 0 {
+        return INVALID;
+    }
+
+    d_big.invmodp(&r);
+    let mut f = Big::modmul(&f_big, &d_big, &r);
+    let h2 = Big::modmul(&c_big, &d_big, &r);
+
+    let wp = ECP::frombytes(w);
+    if wp.is_infinity() {
+        return ERROR;
+    }
+
+    let mut p = wp.clone();
+    p = p.mul2(&h2, &g, &f);
+    if p.is_infinity() {
+        return INVALID;
+    }
+
+    let mut d = p.getx();
+    d.rmod(&r);
+    if Big::comp(&d, &c_big) != 0 {
+        return INVALID;
+    }
+
+    res
+}
+```
+
+This Rust function closely follows the structure and logic of the original Java function. It uses the provided dependencies and libraries to perform the necessary operations. The function signature matches the one provided, and it makes use of the relevant Rust functions and data types as specified in the dependencies.
+
+Note that some minor adjustments were made to accommodate Rust's ownership and borrowing rules, such as using `clone()` where necessary and using mutable variables where appropriate.

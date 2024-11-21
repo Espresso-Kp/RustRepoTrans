@@ -1,0 +1,199 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+dc_lot_t* dc_msg_get_summary(const dc_msg_t* msg, const dc_chat_t* chat)
+{
+	dc_lot_t*      ret = dc_lot_new();
+	dc_contact_t*  contact = NULL;
+	dc_chat_t*     chat_to_delete = NULL;
+
+	if (msg==NULL || msg->magic!=DC_MSG_MAGIC) {
+		goto cleanup;
+	}
+
+	if (chat==NULL) {
+		if ((chat_to_delete=dc_get_chat(msg->context, msg->chat_id))==NULL) {
+			goto cleanup;
+		}
+		chat = chat_to_delete;
+	}
+
+	if (msg->from_id!=DC_CONTACT_ID_SELF && DC_CHAT_TYPE_IS_MULTI(chat->type)) {
+		contact = dc_get_contact(chat->context, msg->from_id);
+	}
+
+	dc_lot_fill(ret, msg, chat, contact, msg->context);
+
+cleanup:
+	dc_contact_unref(contact);
+	dc_chat_unref(chat_to_delete);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use anyhow::{ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::{parse_vcard, VcardContact};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use tokio::{fs, io};
+use crate::blob::BlobObject;
+use crate::chat::{Chat, ChatId, ChatIdBlocked};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    Blocked, Chattype, VideochatType, DC_CHAT_ID_TRASH, DC_DESIRED_TEXT_LEN, DC_MSG_ID_LAST_SPECIAL,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::debug_logging::set_debug_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::{start_ephemeral_timers_msgids, Timer as EphemeralTimer};
+use crate::events::EventType;
+use crate::imap::markseen_on_imap_table;
+use crate::location::delete_poi_location;
+use crate::mimeparser::{parse_message_id, SystemMessage};
+use crate::param::{Param, Params};
+use crate::pgp::split_armored_data;
+use crate::reaction::get_msg_reactions;
+use crate::sql;
+use crate::summary::Summary;
+use crate::tools::{
+    buf_compress, buf_decompress, get_filebytes, get_filemeta, gm2local_offset, read_file, time,
+    timestamp_to_str, truncate,
+};
+use MessageState::*;
+use MessageState::*;
+use num_traits::FromPrimitive;
+use super::*;
+use crate::chat::{
+        self, add_contact_to_chat, marknoticed_chat, send_text_msg, ChatItem, ProtectionStatus,
+    };
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::reaction::send_reaction;
+use crate::receive_imf::receive_imf;
+use crate::test_utils as test;
+use crate::test_utils::{TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> {
+        let chat_loaded: Chat;
+        let chat = if let Some(chat) = chat {
+            chat
+        } else {
+            let chat = Chat::load_from_db(context, self.chat_id).await?;
+            chat_loaded = chat;
+            &chat_loaded
+        };
+
+        let contact = if self.from_id != ContactId::SELF {
+            match chat.typ {
+                Chattype::Group | Chattype::Broadcast | Chattype::Mailinglist => {
+                    Some(Contact::get_by_id(context, self.from_id).await?)
+                }
+                Chattype::Single => None,
+            }
+        } else {
+            None
+        };
+
+        Summary::new(context, self, chat, contact.as_ref()).await
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> {
+    let mut ret = Summary::default();
+    let mut contact: Option<Contact> = None;
+    let mut chat_to_delete: Option<Chat> = None;
+
+    if self.magic != DC_MSG_MAGIC {
+        return Ok(ret);
+    }
+
+    let chat = if let Some(c) = chat {
+        c
+    } else {
+        chat_to_delete = Some(Chat::load_from_db(context, self.chat_id).await?);
+        chat_to_delete.as_ref().unwrap()
+    };
+
+    if self.from_id != ContactId::SELF && chat.is_multi_user() {
+        contact = Some(Contact::get_by_id(context, self.from_id).await?);
+    }
+
+    ret.fill(self, chat, contact.as_ref(), context).await?;
+
+    Ok(ret)
+}
+```
+
+Note that I've made some assumptions and adaptations to fit the Rust idioms and the provided function signature:
+
+1. The `dc_lot_t` type is replaced with `Summary`, which I assume is the equivalent in the Rust implementation.
+2. Error handling is done using the `Result` type, as specified in the function signature.
+3. The `Context` is passed as a parameter instead of being part of the message or chat.
+4. The `Chat` is passed as an `Option<&Chat>` instead of a raw pointer.
+5. Memory management is handled automatically by Rust, so there's no need for explicit cleanup or reference counting.
+6. Async/await syntax is used as the function signature suggests an asynchronous implementation.
+7. Some method names are adjusted to follow Rust naming conventions (e.g., `is_multi_user()` instead of `DC_CHAT_TYPE_IS_MULTI`).
+8. The `magic` field is assumed to be part of the `self` struct (which represents the message).
+
+Please note that this translation might need further adjustments depending on the exact implementation details of your Rust codebase, which are not fully visible from the provided context.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> {
+    let mut ret = Summary::default();
+    let mut contact: Option<Contact> = None;
+    let mut chat_to_delete: Option<Chat> = None;
+
+    if self.magic != DC_MSG_MAGIC {
+        return Ok(ret);
+    }
+
+    let chat = if let Some(c) = chat {
+        c
+    } else {
+        chat_to_delete = Some(Chat::load_from_db(context, self.chat_id).await?);
+        chat_to_delete.as_ref().unwrap()
+    };
+
+    if self.from_id != ContactId::SELF && chat.is_multi_user() {
+        contact = Some(Contact::get_by_id(context, self.from_id).await?);
+    }
+
+    ret.fill(self, chat, contact.as_ref(), context).await?;
+
+    Ok(ret)
+}
+```
+
+Note that I've made some assumptions and adaptations to fit the Rust idioms and the provided function signature:
+
+1. The `dc_lot_t` type is replaced with `Summary`, which I assume is the equivalent in the Rust implementation.
+2. Error handling is done using the `Result` type, as specified in the function signature.
+3. The `Context` is passed as a parameter instead of being part of the message or chat.
+4. The `Chat` is passed as an `Option<&Chat>` instead of a raw pointer.
+5. Memory management is handled automatically by Rust, so there's no need for explicit cleanup or reference counting.
+6. Async/await syntax is used as the function signature suggests an asynchronous implementation.
+7. Some method names are adjusted to follow Rust naming conventions (e.g., `is_multi_user()` instead of `DC_CHAT_TYPE_IS_MULTI`).
+8. The `magic` field is assumed to be part of the `self` struct (which represents the message).
+
+Please note that this translation might need further adjustments depending on the exact implementation details of your Rust codebase, which are not fully visible from the provided context.

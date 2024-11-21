@@ -1,0 +1,69 @@
+<path>
+projects/iceberg/rust/crates/catalog/glue/src/catalog.rs
+</path>
+<function>
+    async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+        if parent.is_some() {
+            return Ok(vec![]);
+        }
+
+        let mut database_list: Vec<NamespaceIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self.client.0.get_databases().next_token(token),
+                None => self.client.0.get_databases(),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let dbs: Vec<NamespaceIdent> = resp
+                .database_list()
+                .iter()
+                .map(|db| NamespaceIdent::new(db.name().to_string()))
+                .collect();
+
+            database_list.extend(dbs);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(database_list)
+    }
+</function>
+------
+
+<path>
+projects/iceberg/python/pyiceberg/catalog/glue.py
+</path>
+<function>
+    def list_namespaces(self, namespace: Union[str, Identifier] = ()) -> List[Identifier]:
+        """List namespaces from the given namespace. If not given, list top-level namespaces from the catalog.
+
+        Returns:
+            List[Identifier]: a List of namespace identifiers.
+        """
+        # Hierarchical namespace is not supported. Return an empty list
+        if namespace:
+            return []
+
+        database_list: List[DatabaseTypeDef] = []
+        next_token: Optional[str] = None
+
+        while True:
+            databases_response = self.glue.get_databases() if not next_token else self.glue.get_databases(NextToken=next_token)
+            database_list.extend(databases_response["DatabaseList"])
+            next_token = databases_response.get("NextToken")
+            if not next_token:
+                break
+
+        return [self.identifier_to_tuple(database["Name"]) for database in database_list]
+
+</function>

@@ -1,0 +1,213 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+char* dc_decrypt_setup_file(dc_context_t* context, const char* passphrase, const char* filecontent)
+{
+	char*         fc_buf = NULL;
+	const char*   fc_headerline = NULL;
+	const char*   fc_base64 = NULL;
+	char*         binary = NULL;
+	size_t        binary_bytes = 0;
+	size_t        indx = 0;
+	void*         plain = NULL;
+	size_t        plain_bytes = 0;
+	char*         payload = NULL;
+
+	/* extract base64 from filecontent */
+	fc_buf = dc_strdup(filecontent);
+	if (!dc_split_armored_data(fc_buf, &fc_headerline, NULL, NULL, &fc_base64)
+	 || fc_headerline==NULL || strcmp(fc_headerline, "-----BEGIN PGP MESSAGE-----")!=0 || fc_base64==NULL) {
+		goto cleanup;
+	}
+
+	/* convert base64 to binary */
+	if (mailmime_base64_body_parse(fc_base64, strlen(fc_base64), &indx, &binary/*must be freed using mmap_string_unref()*/, &binary_bytes)!=MAILIMF_NO_ERROR
+	 || binary==NULL || binary_bytes==0) {
+		goto cleanup;
+	}
+
+	/* decrypt symmetrically */
+	if (!dc_pgp_symm_decrypt(context, passphrase, binary, binary_bytes, &plain, &plain_bytes)) {
+		goto cleanup;
+	}
+	payload = strndup((const char*)plain, plain_bytes);
+
+cleanup:
+	free(plain);
+	free(fc_buf);
+	if (binary) { mmap_string_unref(binary); }
+	return payload;
+}
+</c function>
+<rust function signature>
+async fn decrypt_setup_file<T: std::io::Read + std::io::Seek>(
+    passphrase: &str,
+    file: T,
+) -> Result<String> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub async fn symm_decrypt<T: std::io::Read + std::io::Seek>(
+    passphrase: &str,
+    ctext: T,
+) -> Result<Vec<u8>> {
+    let (enc_msg, _) = Message::from_armor_single(ctext)?;
+
+    let passphrase = passphrase.to_string();
+    tokio::task::spawn_blocking(move || {
+        let decryptor = enc_msg.decrypt_with_password(|| passphrase)?;
+
+        let msgs = decryptor.collect::<pgp::errors::Result<Vec<_>>>()?;
+        if let Some(msg) = msgs.first() {
+            match msg.get_content()? {
+                Some(content) => Ok(content),
+                None => bail!("Decrypted message is empty"),
+            }
+        } else {
+            bail!("No valid messages found")
+        }
+    })
+    .await?
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn decrypt_setup_file<T: std::io::Read + std::io::Seek>(
+    passphrase: &str,
+    file: T,
+) -> Result<String> {
+    let plain_bytes = pgp::symm_decrypt(passphrase, file).await?;
+    let plain_text = std::string::String::from_utf8(plain_bytes)?;
+
+    Ok(plain_text)
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+async fn decrypt_setup_file<T: std::io::Read + std::io::Seek>(
+    passphrase: &str,
+    mut file: T,
+) -> Result<String> {
+    // Read the entire file content
+    let mut filecontent = String::new();
+    file.read_to_string(&mut filecontent)?;
+
+    // Extract base64 from filecontent
+    let (fc_headerline, _, _, fc_base64) = split_armored_data(&filecontent)?;
+
+    if fc_headerline != "-----BEGIN PGP MESSAGE-----" || fc_base64.is_empty() {
+        bail!("Invalid file format");
+    }
+
+    // Convert base64 to binary
+    let binary = base64::decode(fc_base64.trim())?;
+
+    // Decrypt symmetrically
+    let plain = symm_decrypt(passphrase, &binary[..]).await?;
+
+    // Convert plain bytes to String
+    let payload = String::from_utf8(plain)?;
+
+    Ok(payload)
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries provided. It performs the following steps:
+
+1. Reads the entire file content into a String.
+2. Extracts the base64 content from the file using the `split_armored_data` function.
+3. Checks if the header line is correct and if the base64 content is not empty.
+4. Decodes the base64 content to binary.
+5. Uses the `symm_decrypt` function to decrypt the binary data.
+6. Converts the decrypted bytes to a String.
+7. Returns the resulting String.
+
+Note that this translation assumes that the `base64` crate is available for base64 decoding. If it's not included in the provided dependencies, you may need to add it to your `Cargo.toml` file.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+async fn decrypt_setup_file<T: std::io::Read + std::io::Seek>(
+    passphrase: &str,
+    mut file: T,
+) -> Result<String> {
+    // Read the entire file content
+    let mut filecontent = String::new();
+    file.read_to_string(&mut filecontent)?;
+
+    // Extract base64 from filecontent
+    let (fc_headerline, _, _, fc_base64) = split_armored_data(&filecontent)?;
+
+    if fc_headerline != "-----BEGIN PGP MESSAGE-----" || fc_base64.is_empty() {
+        bail!("Invalid file format");
+    }
+
+    // Convert base64 to binary
+    let binary = base64::decode(fc_base64.trim())?;
+
+    // Decrypt symmetrically
+    let plain = symm_decrypt(passphrase, &binary[..]).await?;
+
+    // Convert plain bytes to String
+    let payload = String::from_utf8(plain)?;
+
+    Ok(payload)
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries provided. It performs the following steps:
+
+1. Reads the entire file content into a String.
+2. Extracts the base64 content from the file using the `split_armored_data` function.
+3. Checks if the header line is correct and if the base64 content is not empty.
+4. Decodes the base64 content to binary.
+5. Uses the `symm_decrypt` function to decrypt the binary data.
+6. Converts the decrypted bytes to a String.
+7. Returns the resulting String.
+
+Note that this translation assumes that the `base64` crate is available for base64 decoding. If it's not included in the provided dependencies, you may need to add it to your `Cargo.toml` file.

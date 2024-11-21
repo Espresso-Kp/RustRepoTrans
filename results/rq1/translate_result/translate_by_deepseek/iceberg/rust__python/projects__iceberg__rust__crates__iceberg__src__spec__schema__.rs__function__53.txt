@@ -1,0 +1,250 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def prune_columns(schema: Schema, selected: Set[int], select_full_types: bool = True) -> Schema:
+    """Prunes a column by only selecting a set of field-ids.
+
+    Args:
+        schema: The schema to be pruned.
+        selected: The field-ids to be included.
+        select_full_types: Return the full struct when a subset is recorded
+
+    Returns:
+        The pruned schema.
+    """
+    result = visit(schema.as_struct(), _PruneColumnsVisitor(selected, select_full_types))
+    return Schema(
+        *(result or StructType()).fields,
+        schema_id=schema.schema_id,
+        identifier_field_ids=list(selected.intersection(schema.identifier_field_ids)),
+    )
+</python function>
+<rust function signature>
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn visit_schema<V: SchemaVisitor>(schema: &Schema, visitor: &mut V) -> Result<V::T> {
+    let result = visit_struct(&schema.r#struct, visitor)?;
+    visitor.schema(schema, result)
+}
+
+pub struct Schema {
+    r#struct: StructType,
+    schema_id: SchemaId,
+    highest_field_id: i32,
+    identifier_field_ids: HashSet<i32>,
+
+    alias_to_id: BiHashMap<String, i32>,
+    id_to_field: HashMap<i32, NestedFieldRef>,
+
+    name_to_id: HashMap<String, i32>,
+    lowercase_name_to_id: HashMap<String, i32>,
+    id_to_name: HashMap<i32, String>,
+
+    field_id_to_accessor: HashMap<i32, Arc<StructAccessor>>,
+}
+
+struct PruneColumn {
+    selected: HashSet<i32>,
+    select_full_types: bool,
+}
+impl PruneColumn {
+    fn new(selected: HashSet<i32>, select_full_types: bool) -> Self {
+        Self {
+            selected,
+            select_full_types,
+        }
+    }
+}
+
+pub enum Type {
+    /// Primitive types
+    Primitive(PrimitiveType),
+    /// Struct type
+    Struct(StructType),
+    /// List type.
+    List(ListType),
+    /// Map type
+    Map(MapType),
+}
+
+pub struct StructType {
+    /// Struct fields
+    fields: Vec<NestedFieldRef>,
+    /// Lookup for index by field id
+    #[serde(skip_serializing)]
+    id_lookup: OnceLock<HashMap<i32, usize>>,
+    #[serde(skip_serializing)]
+    name_lookup: OnceLock<HashMap<String, usize>>,
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use crate::error::Result;
+use crate::expr::accessor::StructAccessor;
+use crate::spec::datatypes::{
+    ListType, MapType, NestedFieldRef, PrimitiveType, StructType, Type, LIST_FILED_NAME,
+    MAP_KEY_FIELD_NAME, MAP_VALUE_FIELD_NAME,
+};
+use crate::{ensure_data_valid, Error, ErrorKind};
+use bimap::BiHashMap;
+use itertools::{zip_eq, Itertools};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use _serde::SchemaEnum;
+use super::NestedField;
+use serde::{Deserialize, Serialize};
+use crate::{spec::StructType, Error, Result};
+use super::{Schema, DEFAULT_SCHEMA_ID};
+use crate::spec::datatypes::Type::{List, Map, Primitive, Struct};
+use crate::spec::datatypes::{
+        ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, StructType, Type,
+    };
+use crate::spec::schema::Schema;
+use crate::spec::schema::_serde::{SchemaEnum, SchemaV1, SchemaV2};
+use crate::spec::values::Map as MapValue;
+use crate::spec::{prune_columns, Datum, Literal};
+use std::collections::{HashMap, HashSet};
+use super::DEFAULT_SCHEMA_ID;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> {
+    let mut visitor = PruneColumn::new(HashSet::from_iter(selected), select_full_types);
+    let result = visit_schema(schema, &mut visitor);
+
+    match result {
+        Ok(s) => {
+            if let Some(struct_type) = s {
+                Ok(struct_type)
+            } else {
+                Ok(Type::Struct(StructType::default()))
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+</function>
+<translated function>
+ ```rust
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> {
+    let selected: HashSet<i32> = selected.into_iter().collect();
+    let result = visit_schema(schema, &mut PruneColumnsVisitor::new(selected.clone(), select_full_types))?;
+    let result_struct = result.unwrap_or_else(|| StructType { fields: vec![] });
+    Ok(Type::Struct(StructType {
+        fields: result_struct.fields,
+        id_lookup: OnceLock::new(),
+        name_lookup: OnceLock::new(),
+    }))
+}
+
+pub fn visit_schema<V: SchemaVisitor>(schema: &Schema, visitor: &mut V) -> Result<V::T> {
+    let result = visit_struct(&schema.r#struct, visitor)?;
+    visitor.schema(schema, result)
+}
+
+pub struct PruneColumnsVisitor {
+    selected: HashSet<i32>,
+    select_full_types: bool,
+}
+
+impl PruneColumnsVisitor {
+    fn new(selected: HashSet<i32>, select_full_types: bool) -> Self {
+        Self {
+            selected,
+            select_full_types,
+        }
+    }
+}
+
+impl SchemaVisitor for PruneColumnsVisitor {
+    type T = StructType;
+
+    fn struct_(&mut self, struct_: &StructType) -> Result<Self::T> {
+        let fields: Vec<NestedFieldRef> = struct_
+            .fields
+            .iter()
+            .filter(|field| self.selected.contains(&field.id))
+            .cloned()
+            .collect();
+        Ok(StructType {
+            fields,
+            id_lookup: OnceLock::new(),
+            name_lookup: OnceLock::new(),
+        })
+    }
+}
+```
+
+This Rust function translates the given Python function, adhering to the provided Rust function signature, related variables, functions, and data type declarations, and dependency libraries. The `PruneColumnsVisitor` is implemented to filter the fields based on the selected IDs and return a pruned `StructType`.</translated function> ```rust
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> {
+    let selected: HashSet<i32> = selected.into_iter().collect();
+    let result = visit_schema(schema, &mut PruneColumnsVisitor::new(selected.clone(), select_full_types))?;
+    let result_struct = result.unwrap_or_else(|| StructType { fields: vec![] });
+    Ok(Type::Struct(StructType {
+        fields: result_struct.fields,
+        id_lookup: OnceLock::new(),
+        name_lookup: OnceLock::new(),
+    }))
+}
+
+pub fn visit_schema<V: SchemaVisitor>(schema: &Schema, visitor: &mut V) -> Result<V::T> {
+    let result = visit_struct(&schema.r#struct, visitor)?;
+    visitor.schema(schema, result)
+}
+
+pub struct PruneColumnsVisitor {
+    selected: HashSet<i32>,
+    select_full_types: bool,
+}
+
+impl PruneColumnsVisitor {
+    fn new(selected: HashSet<i32>, select_full_types: bool) -> Self {
+        Self {
+            selected,
+            select_full_types,
+        }
+    }
+}
+
+impl SchemaVisitor for PruneColumnsVisitor {
+    type T = StructType;
+
+    fn struct_(&mut self, struct_: &StructType) -> Result<Self::T> {
+        let fields: Vec<NestedFieldRef> = struct_
+            .fields
+            .iter()
+            .filter(|field| self.selected.contains(&field.id))
+            .cloned()
+            .collect();
+        Ok(StructType {
+            fields,
+            id_lookup: OnceLock::new(),
+            name_lookup: OnceLock::new(),
+        })
+    }
+}
+```
+
+This Rust function translates the given Python function, adhering to the provided Rust function signature, related variables, functions, and data type declarations, and dependency libraries. The `PruneColumnsVisitor` is implemented to filter the fields based on the selected IDs and return a pruned `StructType`.

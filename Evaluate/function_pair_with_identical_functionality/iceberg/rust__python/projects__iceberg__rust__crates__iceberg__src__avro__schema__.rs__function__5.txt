@@ -1,0 +1,99 @@
+<path>
+projects/iceberg/rust/crates/iceberg/src/avro/schema.rs
+</path>
+<function>
+    fn map(
+        &mut self,
+        map: &MapType,
+        key_value: AvroSchemaOrField,
+        value: AvroSchemaOrField,
+    ) -> Result<AvroSchemaOrField> {
+        let key_field_schema = key_value.unwrap_left();
+        let mut value_field_schema = value.unwrap_left();
+        if !map.value_field.required {
+            value_field_schema = avro_optional(value_field_schema)?;
+        }
+
+        if matches!(key_field_schema, AvroSchema::String) {
+            Ok(Either::Left(AvroSchema::Map(Box::new(value_field_schema))))
+        } else {
+            // Avro map requires that key must be string type. Here we convert it to array if key is
+            // not string type.
+            let key_field = {
+                let mut field = AvroRecordField {
+                    name: map.key_field.name.clone(),
+                    doc: None,
+                    aliases: None,
+                    default: None,
+                    schema: key_field_schema,
+                    order: RecordFieldOrder::Ascending,
+                    position: 0,
+                    custom_attributes: Default::default(),
+                };
+                field.custom_attributes.insert(
+                    FILED_ID_PROP.to_string(),
+                    Value::Number(Number::from(map.key_field.id)),
+                );
+                field
+            };
+
+            let value_field = {
+                let mut field = AvroRecordField {
+                    name: map.value_field.name.clone(),
+                    doc: None,
+                    aliases: None,
+                    default: None,
+                    schema: value_field_schema,
+                    order: RecordFieldOrder::Ignore,
+                    position: 0,
+                    custom_attributes: Default::default(),
+                };
+                field.custom_attributes.insert(
+                    FILED_ID_PROP.to_string(),
+                    Value::Number(Number::from(map.value_field.id)),
+                );
+                field
+            };
+
+            let fields = vec![key_field, value_field];
+            let item_avro_schema = avro_record_schema(
+                format!("k{}_v{}", map.key_field.id, map.value_field.id).as_str(),
+                fields,
+            )?;
+
+            Ok(Either::Left(AvroSchema::Array(item_avro_schema.into())))
+        }
+    }
+</function>
+------
+
+<path>
+projects/iceberg/python/pyiceberg/utils/schema_conversion.py
+</path>
+<function>
+    def map(self, map_type: MapType, key_result: AvroType, value_result: AvroType) -> AvroType:
+        if isinstance(key_result, StringType):
+            # Avro Maps does not support other keys than a String,
+            return {
+                "type": "map",
+                "values": value_result,
+                "key-id": self.last_map_key_field_id,
+                "value-id": self.last_map_value_field_id,
+            }
+        else:
+            # Creates a logical map that's a list of schema's
+            # binary compatible
+            return {
+                "type": "array",
+                "items": {
+                    "type": "record",
+                    "name": f"k{self.last_map_key_field_id}_v{self.last_map_value_field_id}",
+                    "fields": [
+                        {"name": "key", "type": key_result, "field-id": self.last_map_key_field_id},
+                        {"name": "value", "type": value_result, "field-id": self.last_map_value_field_id},
+                    ],
+                },
+                "logicalType": "map",
+            }
+
+</function>

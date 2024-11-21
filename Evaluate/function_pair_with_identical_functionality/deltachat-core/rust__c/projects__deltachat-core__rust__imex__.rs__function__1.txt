@@ -1,0 +1,55 @@
+<path>
+projects/deltachat-core/rust/imex.rs
+</path>
+<function>
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> {
+    let cancel = context.alloc_ongoing().await?;
+
+    let res = {
+        let _guard = context.scheduler.pause(context.clone()).await?;
+        imex_inner(context, what, path, passphrase)
+            .race(async {
+                cancel.recv().await.ok();
+                Err(format_err!("canceled"))
+            })
+            .await
+    };
+    context.free_ongoing().await;
+
+    if let Err(err) = res.as_ref() {
+        // We are using Anyhow's .context() and to show the inner error, too, we need the {:#}:
+        error!(context, "IMEX failed to complete: {:#}", err);
+        context.emit_event(EventType::ImexProgress(0));
+    } else {
+        info!(context, "IMEX successfully completed");
+        context.emit_event(EventType::ImexProgress(1000));
+    }
+
+    res
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_imex.c
+</path>
+<function>
+void dc_imex(dc_context_t* context, int what, const char* param1, const char* param2)
+{
+	dc_param_t* param = dc_param_new();
+
+	dc_param_set_int(param, DC_PARAM_CMD,      what);
+	dc_param_set    (param, DC_PARAM_CMD_ARG,  param1);
+	dc_param_set    (param, DC_PARAM_CMD_ARG2, param2);
+
+	dc_job_kill_action(context, DC_JOB_IMEX_IMAP);
+	dc_job_add(context, DC_JOB_IMEX_IMAP, 0, param->packed, 0); // results in a call to dc_job_do_DC_JOB_IMEX_IMAP()
+
+	dc_param_unref(param);
+}
+</function>

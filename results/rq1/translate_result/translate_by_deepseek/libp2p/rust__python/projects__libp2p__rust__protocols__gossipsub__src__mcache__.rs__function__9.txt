@@ -1,0 +1,110 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def shift(self) -> None:
+        """
+        Shift the window over by 1 position, dropping the last element of the history.
+        """
+        last_entries: List[CacheEntry] = self.history[len(self.history) - 1]
+
+        for entry in last_entries:
+            self.msgs.pop(entry.mid)
+
+        i: int = len(self.history) - 2
+
+        while i >= 0:
+            self.history[i + 1] = self.history[i]
+            i -= 1
+
+        self.history[0] = []
+</python function>
+<rust function signature>
+pub(crate) fn shift(&mut self) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) struct MessageCache {
+    msgs: HashMap<MessageId, (RawMessage, HashSet<PeerId>)>,
+    /// For every message and peer the number of times this peer asked for the message
+    iwant_counts: HashMap<MessageId, HashMap<PeerId, u32>>,
+    history: Vec<Vec<CacheEntry>>,
+    /// The number of indices in the cache history used for gossiping. That means that a message
+    /// won't get gossiped anymore when shift got called `gossip` many times after inserting the
+    /// message in the cache.
+    gossip: usize,
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use crate::topic::TopicHash;
+use crate::types::{MessageId, RawMessage};
+use libp2p_identity::PeerId;
+use std::collections::hash_map::Entry;
+use std::fmt::Debug;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
+use super::*;
+use crate::IdentTopic as Topic;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn shift(&mut self) {
+        for entry in self.history.pop().expect("history is always > 1") {
+            if let Some((msg, _)) = self.msgs.remove(&entry.mid) {
+                if !msg.validated {
+                    // If GossipsubConfig::validate_messages is true, the implementing
+                    // application has to ensure that Gossipsub::validate_message gets called for
+                    // each received message within the cache timeout time."
+                    tracing::debug!(
+                        message=%&entry.mid,
+                        "The message got removed from the cache without being validated."
+                    );
+                }
+            }
+            tracing::trace!(message=%&entry.mid, "Remove message from the cache");
+
+            self.iwant_counts.remove(&entry.mid);
+        }
+
+        // Insert an empty vec in position 0
+        self.history.insert(0, Vec::new());
+    }
+</function>
+<translated function>
+ ```rust
+pub(crate) fn shift(&mut self) {
+    if let Some(last_entries) = self.history.last_mut() {
+        for entry in last_entries.iter() {
+            if let Entry::Occupied(mut o) = self.msgs.entry(entry.mid) {
+                o.remove();
+            }
+        }
+    }
+
+    let len = self.history.len();
+    for i in (1..len).rev() {
+        self.history.swap(i, i - 1);
+    }
+    self.history[0].clear();
+}
+```</translated function> ```rust
+pub(crate) fn shift(&mut self) {
+    if let Some(last_entries) = self.history.last_mut() {
+        for entry in last_entries.iter() {
+            if let Entry::Occupied(mut o) = self.msgs.entry(entry.mid) {
+                o.remove();
+            }
+        }
+    }
+
+    let len = self.history.len();
+    for i in (1..len).rev() {
+        self.history.swap(i, i - 1);
+    }
+    self.history[0].clear();
+}
+```

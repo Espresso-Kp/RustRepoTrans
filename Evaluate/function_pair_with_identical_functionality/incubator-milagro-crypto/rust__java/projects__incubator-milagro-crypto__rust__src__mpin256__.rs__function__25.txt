@@ -1,0 +1,170 @@
+<path>
+projects/incubator-milagro-crypto/rust/src/mpin256.rs
+</path>
+<function>
+pub fn server_2(
+    date: usize,
+    hid: &[u8],
+    htid: Option<&[u8]>,
+    y: &[u8],
+    sst: &[u8],
+    xid: Option<&[u8]>,
+    xcid: Option<&[u8]>,
+    msec: &[u8],
+    e: Option<&mut [u8]>,
+    f: Option<&mut [u8]>,
+) -> isize {
+    let Q = ECP8::generator();
+
+    let sQ = ECP8::from_bytes(&sst);
+    if sQ.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut R: ECP;
+    if date != 0 {
+        if let Some(rxcid) = xcid {
+            R = ECP::from_bytes(&rxcid);
+        } else {
+            return BAD_PARAMS;
+        }
+    } else {
+        if let Some(rxid) = xid {
+            R = ECP::from_bytes(&rxid)
+        } else {
+            return BAD_PARAMS;
+        }
+    }
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut sy = Big::from_bytes(&y);
+    let mut P: ECP;
+    if date != 0 {
+        if let Some(rhtid) = htid {
+            P = ECP::from_bytes(&rhtid)
+        } else {
+            return BAD_PARAMS;
+        }
+    } else {
+        P = ECP::from_bytes(&hid);
+    }
+
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    P = pair256::g1mul(&mut P, &mut sy);
+    P.add(&mut R);
+    R = ECP::from_bytes(&msec);
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut g: FP48;
+
+    g = pair256::ate2(&Q, &R, &sQ, &P);
+    g = pair256::fexp(&g);
+
+    if !g.is_unity() {
+        if let Some(rxid) = xid {
+            if let Some(re) = e {
+                if let Some(rf) = f {
+                    g.to_bytes(re);
+                    if date != 0 {
+                        P = ECP::from_bytes(&hid);
+                        if P.is_infinity() {
+                            return INVALID_POINT;
+                        }
+                        R = ECP::from_bytes(&rxid);
+                        if R.is_infinity() {
+                            return INVALID_POINT;
+                        }
+                        P = pair256::g1mul(&mut P, &mut sy);
+                        P.add(&mut R); //P.affine();
+                    }
+                    g = pair256::ate(&Q, &P);
+                    g = pair256::fexp(&g);
+                    g.to_bytes(rf);
+                }
+            }
+        }
+
+        return BAD_PIN;
+    }
+
+    return 0;
+}
+</function>
+------
+
+<path>
+projects/incubator-milagro-crypto/java/src/main/java/org/apache/milagro/amcl/BLS48/MPIN256.java
+</path>
+<function>
+public static int SERVER_2(int date,byte[] HID,byte[] HTID,byte[] Y,byte[] SST,byte[] xID,byte[] xCID,byte[] mSEC,byte[] E,byte[] F)
+	{
+		BIG q=new BIG(ROM.Modulus);
+		ECP8 Q=ECP8.generator();
+
+		ECP8 sQ=ECP8.fromBytes(SST);
+		if (sQ.is_infinity()) return INVALID_POINT;	
+
+		ECP R;
+		if (date!=0)
+			R=ECP.fromBytes(xCID);
+		else 
+		{
+			if (xID==null) return BAD_PARAMS;
+			R=ECP.fromBytes(xID);
+		}
+		if (R.is_infinity()) return INVALID_POINT;
+
+		BIG y=BIG.fromBytes(Y);
+		ECP P;
+		if (date!=0) P=ECP.fromBytes(HTID);
+		else 
+		{
+			if (HID==null) return BAD_PARAMS;
+			P=ECP.fromBytes(HID);
+		}
+	
+		if (P.is_infinity()) return INVALID_POINT;
+
+		P=PAIR256.G1mul(P,y);
+		P.add(R); //P.affine();
+		R=ECP.fromBytes(mSEC);
+		if (R.is_infinity()) return INVALID_POINT;
+
+		FP48 g;
+
+		g=PAIR256.ate2(Q,R,sQ,P);
+		g=PAIR256.fexp(g);
+
+		if (!g.isunity())
+		{
+			if (HID!=null && xID!=null && E!=null && F!=null)
+			{
+				g.toBytes(E);
+				if (date!=0)
+				{
+					P=ECP.fromBytes(HID);
+					if (P.is_infinity()) return INVALID_POINT;
+					R=ECP.fromBytes(xID);
+					if (R.is_infinity()) return INVALID_POINT;
+
+					P=PAIR256.G1mul(P,y);
+					P.add(R); //P.affine();
+				}
+				g=PAIR256.ate(Q,P);
+				g=PAIR256.fexp(g);
+				g.toBytes(F);
+			}
+			return BAD_PIN;
+		}
+
+		return 0;
+	}
+</function>
+

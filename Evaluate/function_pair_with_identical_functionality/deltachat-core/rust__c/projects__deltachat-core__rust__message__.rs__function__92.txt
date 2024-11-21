@@ -1,0 +1,78 @@
+<path>
+projects/deltachat-core/rust/message.rs
+</path>
+<function>
+pub(crate) async fn set_msg_failed(
+    context: &Context,
+    msg: &mut Message,
+    error: &str,
+) -> Result<()> {
+    if msg.state.can_fail() {
+        msg.state = MessageState::OutFailed;
+        warn!(context, "{} failed: {}", msg.id, error);
+    } else {
+        warn!(
+            context,
+            "{} seems to have failed ({}), but state is {}", msg.id, error, msg.state
+        )
+    }
+    msg.error = Some(error.to_string());
+
+    context
+        .sql
+        .execute(
+            "UPDATE msgs SET state=?, error=? WHERE id=?;",
+            (msg.state, error, msg.id),
+        )
+        .await?;
+
+    context.emit_event(EventType::MsgFailed {
+        chat_id: msg.chat_id,
+        msg_id: msg.id,
+    });
+    chatlist_events::emit_chatlist_item_changed(context, msg.chat_id);
+
+    Ok(())
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_msg.c
+</path>
+<function>
+void dc_set_msg_failed(dc_context_t* context, uint32_t msg_id, const char* error)
+{
+	dc_msg_t*     msg = dc_msg_new_untyped(context);
+	sqlite3_stmt* stmt = NULL;
+
+	if (!dc_msg_load_from_db(msg, context, msg_id)) {
+		goto cleanup;
+	}
+
+	if (DC_STATE_OUT_PREPARING==msg->state ||
+	    DC_STATE_OUT_PENDING  ==msg->state ||
+	    DC_STATE_OUT_DELIVERED==msg->state)
+	{
+		msg->state = DC_STATE_OUT_FAILED;
+	}
+
+	if (error) {
+		dc_param_set(msg->param, DC_PARAM_ERROR, error);
+		dc_log_error(context, 0, "%s", error);
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"UPDATE msgs SET state=?, param=? WHERE id=?;");
+	sqlite3_bind_int (stmt, 1, msg->state);
+	sqlite3_bind_text(stmt, 2, msg->param->packed, -1, SQLITE_STATIC);
+	sqlite3_bind_int (stmt, 3, msg_id);
+	sqlite3_step(stmt);
+
+	context->cb(context, DC_EVENT_MSG_FAILED, msg->chat_id, msg_id);
+
+cleanup:
+	sqlite3_finalize(stmt);
+	dc_msg_unref(msg);
+}
+</function>

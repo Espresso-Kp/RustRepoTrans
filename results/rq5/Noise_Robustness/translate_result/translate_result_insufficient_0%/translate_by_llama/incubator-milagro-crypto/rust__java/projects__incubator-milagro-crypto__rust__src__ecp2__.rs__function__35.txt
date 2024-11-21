@@ -1,0 +1,322 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static ECP2 mapit(byte[] h)
+	{
+		BIG q=new BIG(ROM.Modulus);
+		BIG x=BIG.fromBytes(h);
+		BIG one=new BIG(1);
+		FP2 X;
+		ECP2 Q;
+		x.mod(q);
+		while (true)
+		{
+			X=new FP2(one,x);
+			Q=new ECP2(X);
+			if (!Q.is_infinity()) break;
+			x.inc(1); x.norm();
+		}
+
+		BIG Fra=new BIG(ROM.Fra);
+		BIG Frb=new BIG(ROM.Frb);
+		X=new FP2(Fra,Frb);
+
+		if (ECP.SEXTIC_TWIST==ECP.M_TYPE)
+		{
+			X.inverse();
+			X.norm();
+		}
+
+		x=new BIG(ROM.CURVE_Bnx);
+
+/* Fast Hashing to G2 - Fuentes-Castaneda, Knapp and Rodriguez-Henriquez */
+
+		if (ECP.CURVE_PAIRING_TYPE==ECP.BN)
+		{
+			ECP2 T,K;
+
+			T=new ECP2(); T.copy(Q);
+			T=T.mul(x); 
+			
+			if (ECP.SIGN_OF_X==ECP.NEGATIVEX)
+			{
+				T.neg();
+			}	
+			K=new ECP2(); K.copy(T);
+			K.dbl(); K.add(T); //K.affine();
+
+			K.frob(X);
+			Q.frob(X); Q.frob(X); Q.frob(X);
+			Q.add(T); Q.add(K);
+			T.frob(X); T.frob(X);
+			Q.add(T);
+
+		}
+
+/* Efficient hash maps to G2 on BLS curves - Budroni, Pintore */
+/* Q -> x2Q -xQ -Q +F(xQ -Q) +F(F(2Q)) */
+
+		if (ECP.CURVE_PAIRING_TYPE==ECP.BLS)
+		{
+		//	ECP2 xQ,x2Q;
+		//	xQ=new ECP2();
+		//	x2Q=new ECP2();
+
+			ECP2 xQ=Q.mul(x);
+			ECP2 x2Q=xQ.mul(x);
+
+			if (ECP.SIGN_OF_X==ECP.NEGATIVEX)
+			{
+				xQ.neg();
+			}	
+
+			x2Q.sub(xQ);
+			x2Q.sub(Q);
+
+			xQ.sub(Q);
+			xQ.frob(X);
+
+			Q.dbl();
+			Q.frob(X);
+			Q.frob(X);
+
+			Q.add(x2Q);
+			Q.add(xQ);
+		}
+		Q.affine();
+		return Q;
+	}
+</java function>
+<rust function signature>
+pub fn clear_cofactor(&mut self) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::fp2::FP2;
+use super::rom;
+use crate::types::{CurvePairingType, SexticTwist, SignOfX};
+use std::fmt;
+use std::str::SplitWhitespace;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn clear_cofactor(&mut self) {
+        let mut X = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            X.inverse();
+            X.norm();
+        }
+        let x = Big::new_ints(&rom::CURVE_BNX);
+
+        if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+            let mut T = self.mul(&x);
+            if ecp::SIGN_OF_X == SignOfX::NegativeX {
+                T.neg();
+            }
+            let mut K = T.clone();
+            K.dbl();
+            K.add(&T);
+
+            K.frob(&X);
+            self.frob(&X);
+            self.frob(&X);
+            self.frob(&X);
+            self.add(&T);
+            self.add(&K);
+            T.frob(&X);
+            T.frob(&X);
+            self.add(&T);
+        }
+        if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bls {
+            let mut xQ = self.mul(&x);
+            let mut x2Q = xQ.mul(&x);
+
+            if ecp::SIGN_OF_X == SignOfX::NegativeX {
+                xQ.neg();
+            }
+            x2Q.sub(&xQ);
+            x2Q.sub(&self);
+
+            xQ.sub(&self);
+            xQ.frob(&X);
+
+            self.dbl();
+            self.frob(&X);
+            self.frob(&X);
+
+            self.add(&x2Q);
+            self.add(&xQ);
+        }
+
+        self.affine();
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+impl ECP2 {
+    pub fn mapit(&mut self, h: &[u8]) -> Self {
+        let q = Big::new(rom::Modulus);
+        let mut x = Big::from_bytes(h);
+        let one = Big::new(1);
+        let mut X = FP2::new(one, x);
+        let mut Q = ECP2::new(X);
+
+        x.mod(&q);
+        while Q.is_infinity() {
+            X = FP2::new(one, x);
+            Q = ECP2::new(X);
+            x.inc(1);
+            x.norm();
+        }
+
+        let Fra = Big::new(rom::Fra);
+        let Frb = Big::new(rom::Frb);
+        X = FP2::new(Fra, Frb);
+
+        if ECP::SEXTIC_TWIST == ECP::M_TYPE {
+            X.inverse();
+            X.norm();
+        }
+
+        let Cnx = Big::new(rom::CURVE_Bnx);
+
+        if ECP::CURVE_PAIRING_TYPE == ECP::BN {
+            let mut T = ECP2::new();
+            T.copy(&Q);
+            T = T.mul(&x);
+            if ECP::SIGN_OF_X == ECP::NEGATIVEX {
+                T.neg();
+            }
+            let mut K = ECP2::new();
+            K.copy(&T);
+            K.dbl();
+            K.add(&T); // K.affine();
+
+            K.frob(&X);
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.add(&T);
+            Q.add(&K);
+            T.frob(&X);
+            T.frob(&X);
+            Q.add(&T);
+
+        } else if ECP::CURVE_PAIRING_TYPE == ECP::BLS {
+            let xQ = Q.mul(&x);
+            let x2Q = xQ.mul(&x);
+
+            if ECP::SIGN_OF_X == ECP::NEGATIVEX {
+                xQ.neg();
+            }
+
+            x2Q.sub(&xQ);
+            x2Q.sub(&Q);
+
+            xQ.sub(&Q);
+            xQ.frob(&X);
+
+            Q.dbl();
+            Q.frob(&X);
+            Q.frob(&X);
+
+            Q.add(&x2Q);
+            Q.add(&xQ);
+        }
+        Q.affine();
+        self.copy(&Q);
+        self
+    }
+}
+```
+Note that I've assumed that the `ECP2` struct has a `copy` method that takes a reference to another `ECP2` instance, and that the `FP2` and `Big` types have methods similar to their Java counterparts. I've also assumed that the `rom` module exports the necessary constants. If these assumptions are incorrect, please let me know and I'll be happy to adjust the translation accordingly.</translated function>Here is the translated Rust function:
+```rust
+impl ECP2 {
+    pub fn mapit(&mut self, h: &[u8]) -> Self {
+        let q = Big::new(rom::Modulus);
+        let mut x = Big::from_bytes(h);
+        let one = Big::new(1);
+        let mut X = FP2::new(one, x);
+        let mut Q = ECP2::new(X);
+
+        x.mod(&q);
+        while Q.is_infinity() {
+            X = FP2::new(one, x);
+            Q = ECP2::new(X);
+            x.inc(1);
+            x.norm();
+        }
+
+        let Fra = Big::new(rom::Fra);
+        let Frb = Big::new(rom::Frb);
+        X = FP2::new(Fra, Frb);
+
+        if ECP::SEXTIC_TWIST == ECP::M_TYPE {
+            X.inverse();
+            X.norm();
+        }
+
+        let Cnx = Big::new(rom::CURVE_Bnx);
+
+        if ECP::CURVE_PAIRING_TYPE == ECP::BN {
+            let mut T = ECP2::new();
+            T.copy(&Q);
+            T = T.mul(&x);
+            if ECP::SIGN_OF_X == ECP::NEGATIVEX {
+                T.neg();
+            }
+            let mut K = ECP2::new();
+            K.copy(&T);
+            K.dbl();
+            K.add(&T); // K.affine();
+
+            K.frob(&X);
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.frob(&X);
+            Q.add(&T);
+            Q.add(&K);
+            T.frob(&X);
+            T.frob(&X);
+            Q.add(&T);
+
+        } else if ECP::CURVE_PAIRING_TYPE == ECP::BLS {
+            let xQ = Q.mul(&x);
+            let x2Q = xQ.mul(&x);
+
+            if ECP::SIGN_OF_X == ECP::NEGATIVEX {
+                xQ.neg();
+            }
+
+            x2Q.sub(&xQ);
+            x2Q.sub(&Q);
+
+            xQ.sub(&Q);
+            xQ.frob(&X);
+
+            Q.dbl();
+            Q.frob(&X);
+            Q.frob(&X);
+
+            Q.add(&x2Q);
+            Q.add(&xQ);
+        }
+        Q.affine();
+        self.copy(&Q);
+        self
+    }
+}
+```
+Note that I've assumed that the `ECP2` struct has a `copy` method that takes a reference to another `ECP2` instance, and that the `FP2` and `Big` types have methods similar to their Java counterparts. I've also assumed that the `rom` module exports the necessary constants. If these assumptions are incorrect, please let me know and I'll be happy to adjust the translation accordingly.

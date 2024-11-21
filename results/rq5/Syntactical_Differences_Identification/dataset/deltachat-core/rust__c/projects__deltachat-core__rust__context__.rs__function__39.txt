@@ -1,0 +1,58 @@
+<path>
+projects/deltachat-core/rust/context.rs
+</path>
+<function>
+    pub async fn stop_ongoing(&self) {
+        let mut s = self.running_state.write().await;
+        match &*s {
+            RunningState::Running { cancel_sender } => {
+                if let Err(err) = cancel_sender.send(()).await {
+                    warn!(self, "could not cancel ongoing: {:#}", err);
+                }
+                info!(self, "Signaling the ongoing process to stop ASAP.",);
+                *s = RunningState::ShallStop {
+                    request: tools::Time::now(),
+                };
+            }
+            RunningState::ShallStop { .. } | RunningState::Stopped => {
+                info!(self, "No ongoing process to stop.",);
+            }
+        }
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_configure.c
+</path>
+<function>
+ * function not under the control of the core (eg. #DC_EVENT_HTTP_GET). Another
+ * reason for dc_stop_ongoing_process() not to wait is that otherwise it
+ * would be GUI-blocking and should be started in another thread then; this
+ * would make things even more complicated.
+ *
+ * Typical ongoing processes are started by dc_configure(),
+ * dc_initiate_key_transfer() or dc_imex(). As there is always at most only
+ * one onging process at the same time, there is no need to define _which_ process to exit.
+ *
+ * @memberof dc_context_t
+ * @param context The context object.
+ * @return None.
+ */
+void dc_stop_ongoing_process(dc_context_t* context)
+{
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		return;
+	}
+
+	if (context->ongoing_running && context->shall_stop_ongoing==0)
+	{
+		dc_log_info(context, 0, "Signaling the ongoing process to stop ASAP.");
+		context->shall_stop_ongoing = 1;
+	}
+	else
+	{
+		dc_log_info(context, 0, "No ongoing process to stop.");
+	}
+}
+</function>

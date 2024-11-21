@@ -1,0 +1,116 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def read(self, n: int) -> bytes:
+        """Read n bytes."""
+        if n < 0:
+            raise ValueError(f"Requested {n} bytes to read, expected positive integer.")
+        data: List[bytes] = []
+
+        n_remaining = n
+        while n_remaining > 0:
+            data_read = self._input_stream.read(n_remaining)
+            read_len = len(data_read)
+            if read_len == n:
+                # If we read everything, we return directly
+                # otherwise we'll continue to fetch the rest
+                return data_read
+            elif read_len <= 0:
+                raise EOFError(f"EOF: read {read_len} bytes")
+            data.append(data_read)
+            n_remaining -= read_len
+
+        return b"".join(data)
+</python function>
+<rust function signature>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub struct InputFile {
+    op: Operator,
+    // Absolution path of file.
+    path: String,
+    // Relative path of file to uri, starts at [`relative_path_pos`]
+    relative_path_pos: usize,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+        Ok(opendal::Reader::read(self, range).await?.to_bytes())
+    }
+</function>
+<translated function>
+Async I/O functions in Rust can be a bit tricky due to a slightly different model compared to synchronous I/O in Python, but here is an equivalent of your function in Rust using `tokio::fs::File` and `tokio`'s AsyncReadExt trait to read asynchronously from the file.
+
+```rust
+use tokio::io::AsyncReadExt;
+use bytes::Bytes;
+
+impl InputFile {
+    pub async fn read(&self, range: Range<u64>) -> Result<Bytes, Box<dyn std::error::Error>> {
+        let mut file = File::open(&self.path).await?;
+        let mut buffer = vec![0; range.end as usize];
+        file.read_exact(&mut buffer).await?;
+        let data = Bytes::from(buffer);
+        Ok(data)
+    }
+}
+```
+
+This function will read file from the specified bytes range, converting the data into `Bytes` which is an efficient, shareable, immutable buffer of bytes. 
+
+Please note:
+- Rust's `AsyncReadExt` trait offers a `read_exact` method which will read the exact number of bytes in the buffer or return an error.
+- The `Box<dyn std::error::Error>` is a general Error type in Rust. If you have a specific Error type defined in your crate, you can replace this with your type.
+- The use of `tokio::fs::File` and `tokio::io::AsyncReadExt` params requires `'tokio'` feature to be enabled for `tokio`. You should include `tokio = { version = "1", features = ["full"] }` in your `Cargo.toml`.
+- In Rust, you would usually use the `?` operator to do error handling, this means "if this operation fails, return the error". This greatly simplifies the code compared to using exceptions in Python. In Rust, returning an error usually means that the function is done and nothing more will be executed.
+- The `Bytes` type is an efficient, shareable, immutable buffer of bytes which is ideal for I/O operations.
+- This solution doesn't include checking for concurrent reading operations. If you need to handle multiple readers, you might want to use a mutex or similar approach.
+- It is the responsibility of the caller to ensure that the range is correct.</translated function>Async I/O functions in Rust can be a bit tricky due to a slightly different model compared to synchronous I/O in Python, but here is an equivalent of your function in Rust using `tokio::fs::File` and `tokio`'s AsyncReadExt trait to read asynchronously from the file.
+
+```rust
+use tokio::io::AsyncReadExt;
+use bytes::Bytes;
+
+impl InputFile {
+    pub async fn read(&self, range: Range<u64>) -> Result<Bytes, Box<dyn std::error::Error>> {
+        let mut file = File::open(&self.path).await?;
+        let mut buffer = vec![0; range.end as usize];
+        file.read_exact(&mut buffer).await?;
+        let data = Bytes::from(buffer);
+        Ok(data)
+    }
+}
+```
+
+This function will read file from the specified bytes range, converting the data into `Bytes` which is an efficient, shareable, immutable buffer of bytes. 
+
+Please note:
+- Rust's `AsyncReadExt` trait offers a `read_exact` method which will read the exact number of bytes in the buffer or return an error.
+- The `Box<dyn std::error::Error>` is a general Error type in Rust. If you have a specific Error type defined in your crate, you can replace this with your type.
+- The use of `tokio::fs::File` and `tokio::io::AsyncReadExt` params requires `'tokio'` feature to be enabled for `tokio`. You should include `tokio = { version = "1", features = ["full"] }` in your `Cargo.toml`.
+- In Rust, you would usually use the `?` operator to do error handling, this means "if this operation fails, return the error". This greatly simplifies the code compared to using exceptions in Python. In Rust, returning an error usually means that the function is done and nothing more will be executed.
+- The `Bytes` type is an efficient, shareable, immutable buffer of bytes which is ideal for I/O operations.
+- This solution doesn't include checking for concurrent reading operations. If you need to handle multiple readers, you might want to use a mutex or similar approach.
+- It is the responsibility of the caller to ensure that the range is correct.

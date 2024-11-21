@@ -1,0 +1,51 @@
+<path>
+projects/iceberg/rust/crates/iceberg/src/transaction.rs
+</path>
+<function>
+    pub fn upgrade_table_version(mut self, format_version: FormatVersion) -> Result<Self> {
+        let current_version = self.table.metadata().format_version();
+        match current_version.cmp(&format_version) {
+            Ordering::Greater => {
+                return Err(Error::new(
+                    ErrorKind::DataInvalid,
+                    format!(
+                        "Cannot downgrade table version from {} to {}",
+                        current_version, format_version
+                    ),
+                ));
+            }
+            Ordering::Less => {
+                self.append_updates(vec![UpgradeFormatVersion { format_version }])?;
+            }
+            Ordering::Equal => {
+                // Do nothing.
+            }
+        }
+        Ok(self)
+    }
+</function>
+------
+
+<path>
+projects/iceberg/python/pyiceberg/table/__init__.py
+</path>
+<function>
+    def upgrade_table_version(self, format_version: TableVersion) -> Transaction:
+        """Set the table to a certain version.
+
+        Args:
+            format_version: The newly set version.
+
+        Returns:
+            The alter table builder.
+        """
+
+        if format_version < self._table.metadata.format_version:
+            raise ValueError(f"Cannot downgrade v{self._table.metadata.format_version} table to v{format_version}")
+
+        if format_version > self._table.metadata.format_version:
+            return self._apply((UpgradeFormatVersionUpdate(format_version=format_version),))
+
+        return self
+
+</function>

@@ -1,0 +1,54 @@
+<path>
+projects/deltachat-core/rust/contact.rs
+</path>
+<function>
+    pub async fn create(context: &Context, name: &str, addr: &str) -> Result<ContactId> {
+        Self::create_ex(context, Sync, name, addr).await
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_contact.c
+</path>
+<function>
+ * normalize() is _not_ called for the name. If the contact is blocked, it is unblocked.
+ *
+ * To add a number of contacts, see dc_add_address_book() which is much faster for adding
+ * a bunch of addresses.
+ *
+ * May result in a #DC_EVENT_CONTACTS_CHANGED event.
+ *
+ * @memberof dc_context_t
+ * @param context The context object as created by dc_context_new().
+ * @param name Name of the contact to add. If you do not know the name belonging
+ *     to the address, you can give NULL here.
+ * @param addr E-mail-address of the contact to add. If the email address
+ *     already exists, the name is updated and the origin is increased to
+ *     "manually created".
+ * @return Contact ID of the created or reused contact.
+ */
+uint32_t dc_create_contact(dc_context_t* context, const char* name, const char* addr)
+{
+	uint32_t contact_id = 0;
+	int      sth_modified = 0;
+	int      blocked = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || addr==NULL || addr[0]==0) {
+		goto cleanup;
+	}
+
+	contact_id = dc_add_or_lookup_contact(context, name, addr, DC_ORIGIN_MANUALLY_CREATED, &sth_modified);
+
+	blocked = dc_is_contact_blocked(context, contact_id);
+
+	context->cb(context, DC_EVENT_CONTACTS_CHANGED, sth_modified==CONTACT_CREATED? contact_id : 0, 0);
+
+	if (blocked) {
+		dc_block_contact(context, contact_id, 0);
+	}
+
+cleanup:
+	return contact_id;
+}
+</function>

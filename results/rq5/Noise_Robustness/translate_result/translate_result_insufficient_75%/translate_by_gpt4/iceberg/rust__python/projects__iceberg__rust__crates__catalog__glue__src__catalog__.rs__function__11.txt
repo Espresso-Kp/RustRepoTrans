@@ -1,0 +1,425 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def register_table(self, identifier: Union[str, Identifier], metadata_location: str) -> Table:
+        """Register a new table using existing metadata.
+
+        Args:
+            identifier Union[str, Identifier]: Table identifier for the table
+            metadata_location str: The location to the metadata
+
+        Returns:
+            Table: The newly registered table
+
+        Raises:
+            TableAlreadyExistsError: If the table already exists
+        """
+        database_name, table_name = self.identifier_to_database_and_table(identifier)
+        properties = EMPTY_DICT
+        io = self._load_file_io(location=metadata_location)
+        file = io.new_input(metadata_location)
+        metadata = FromInputFile.table_metadata(file)
+        table_input = _construct_table_input(table_name, metadata_location, properties, metadata)
+        self._create_glue_table(database_name=database_name, table_name=table_name, table_input=table_input)
+        return self.load_table(identifier=identifier)
+</python function>
+<rust function signature>
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) fn convert_to_glue_table(
+    table_name: impl Into<String>,
+    metadata_location: String,
+    metadata: &TableMetadata,
+    properties: &HashMap<String, String>,
+    prev_metadata_location: Option<String>,
+) -> Result<TableInput> {
+    let glue_schema = GlueSchemaBuilder::from_iceberg(metadata)?.build();
+
+    let storage_descriptor = StorageDescriptor::builder()
+        .set_columns(Some(glue_schema))
+        .location(&metadata_location)
+        .build();
+
+    let mut parameters = HashMap::from([
+        (TABLE_TYPE.to_string(), ICEBERG.to_string()),
+        (METADATA_LOCATION.to_string(), metadata_location),
+    ]);
+
+    if let Some(prev) = prev_metadata_location {
+        parameters.insert(PREV_METADATA_LOCATION.to_string(), prev);
+    }
+
+    let mut table_input_builder = TableInput::builder()
+        .name(table_name)
+        .set_parameters(Some(parameters))
+        .storage_descriptor(storage_descriptor)
+        .table_type(EXTERNAL_TABLE);
+
+    if let Some(description) = properties.get(DESCRIPTION) {
+        table_input_builder = table_input_builder.description(description);
+    }
+
+    let table_input = table_input_builder.build().map_err(from_aws_build_error)?;
+
+    Ok(table_input)
+}
+fn build(file_io_builder: FileIOBuilder) -> Result<Self> {
+        let scheme_str = file_io_builder.scheme_str.unwrap_or("".to_string());
+        let scheme = Self::parse_scheme(&scheme_str)?;
+        let mut new_props = HashMap::default();
+        new_props.insert("root".to_string(), DEFAULT_ROOT_PATH.to_string());
+
+        match scheme {
+            Scheme::Fs => Ok(Self::LocalFs {
+                op: Operator::via_map(Scheme::Fs, new_props)?,
+            }),
+            Scheme::S3 => {
+                for prop in file_io_builder.props {
+                    if let Some(op_key) = S3_CONFIG_MAPPING.get(prop.0.as_str()) {
+                        new_props.insert(op_key.to_string(), prop.1);
+                    }
+                }
+
+                Ok(Self::S3 {
+                    scheme_str,
+                    props: new_props,
+                })
+            }
+            _ => Err(Error::new(
+                ErrorKind::FeatureUnsupported,
+                format!("Constructing file io from scheme: {scheme} not supported now",),
+            )),
+        }
+    }
+pub fn identifier(&self) -> &TableIdent {
+        &self.identifier
+    }
+pub async fn metadata(&self) -> Result<FileMetadata> {
+        let meta = self.op.stat(&self.path[self.relative_path_pos..]).await?;
+
+        Ok(FileMetadata {
+            size: meta.content_length(),
+        })
+    }
+pub fn new_output(&self, path: impl AsRef<str>) -> Result<OutputFile> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        let path = path.as_ref().to_string();
+        let relative_path_pos = path.len() - relative_path.len();
+        Ok(OutputFile {
+            op,
+            path,
+            relative_path_pos,
+        })
+    }
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+pub fn metadata_location(&self) -> Option<&str> {
+        self.metadata_location.as_deref()
+    }
+async fn get_namespace(&self, namespace: &NamespaceIdent) -> Result<Namespace> {
+        let db_name = validate_namespace(namespace)?;
+
+        let builder = self.client.0.get_database().name(&db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+        match resp.database() {
+            Some(db) => {
+                let namespace = convert_to_namespace(db);
+                Ok(namespace)
+            }
+            None => Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} does not exist", db_name),
+            )),
+        }
+    }
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+pub fn new(namespace: NamespaceIdent, name: String) -> Self {
+        Self { namespace, name }
+    }
+pub fn new(name: String) -> Self {
+        Self(vec![name])
+    }
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+struct GlueClient(aws_sdk_glue::Client);
+pub struct Table {
+    file_io: FileIO,
+    #[builder(default, setter(strip_option, into))]
+    metadata_location: Option<String>,
+    #[builder(setter(into))]
+    metadata: TableMetadataRef,
+    identifier: TableIdent,
+    #[builder(default = false)]
+    readonly: bool,
+}
+pub struct GlueCatalogConfig {
+    #[builder(default, setter(strip_option))]
+    uri: Option<String>,
+    #[builder(default, setter(strip_option))]
+    catalog_id: Option<String>,
+    warehouse: String,
+    #[builder(default)]
+    props: HashMap<String, String>,
+}
+pub struct TableIdent {
+    /// Namespace of the table.
+    pub namespace: NamespaceIdent,
+    /// Table name.
+    pub name: String,
+}
+pub struct NamespaceIdent(Vec<String>);
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> {
+        let db_name = validate_namespace(namespace)?;
+        let table_name = creation.name.clone();
+
+        let location = match &creation.location {
+            Some(location) => location.clone(),
+            None => {
+                let ns = self.get_namespace(namespace).await?;
+                get_default_table_location(&ns, &db_name, &table_name, &self.config.warehouse)
+            }
+        };
+
+        let metadata = TableMetadataBuilder::from_table_creation(creation)?.build()?;
+        let metadata_location = create_metadata_location(&location, 0)?;
+
+        self.file_io
+            .new_output(&metadata_location)?
+            .write(serde_json::to_vec(&metadata)?.into())
+            .await?;
+
+        let glue_table = convert_to_glue_table(
+            &table_name,
+            metadata_location.clone(),
+            &metadata,
+            metadata.properties(),
+            None,
+        )?;
+
+        let builder = self
+            .client
+            .0
+            .create_table()
+            .database_name(&db_name)
+            .table_input(glue_table);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        let table = Table::builder()
+            .file_io(self.file_io())
+            .metadata_location(metadata_location)
+            .metadata(metadata)
+            .identifier(TableIdent::new(NamespaceIdent::new(db_name), table_name))
+            .build();
+
+        Ok(table)
+    }
+</function>
+<translated function>
+Based on the provided Python function and its Rust equivalent's signature, the translated function will look like below in Rust:
+
+<rust translated function>
+```rust
+async fn create_table(&self, namespace: &NamespaceIdent, creation: TableCreation) -> Result<Table> {
+    let table_name = creation.identifier.name.clone();
+    let metadata_location = match creation.metadata_location {
+        Some(location) => location,
+        None => {
+            let namespace = self
+                .get_namespace(&creation.identifier.namespace)
+                .await?;
+            get_default_table_location(&namespace, &table_name, &self.config)
+        }
+    };
+
+    let file_io = self.file_io.build().await?;
+    let new_output = file_io.new_output(&metadata_location)?;
+    let table_metadata = TableMetadataBuilder::new()
+        .schema(creation.schema.clone())
+        .build()?;
+
+    let mut table_input = convert_to_glue_table(
+        &table_name,
+        &metadata_location,
+        &table_metadata,
+        &creation.parameters,
+        creation.previous_metadata_location.clone(),
+    )?;
+
+    // Parse database and table name from identifier
+    let database_name = convert_to_database(creation.identifier.namespace.get(0))?;
+    table_input = table_input.database_name(database_name);
+
+    // Send a CreateTable request
+    let builder = self
+        .client
+        .0
+        .create_table()
+        .database_name(&database_name)
+        .table_input(&table_input);
+    let builder = with_catalog_id!(builder, self.config);
+
+    builder
+        .send()
+        .await
+        .map_err(from_aws_sdk_error)
+        .map(|_| table_metadata)?;
+
+    let table = Table::new(
+        file_io,
+        Some(metadata_location),
+        table_metadata.into(),
+        creation.identifier.clone(),
+        creation.readonly,
+    );
+
+    Ok(table)
+}
+```
+</rust translated function> 
+
+Please note that due to the limited context, I made several assumptions:
+* Methods on `self` are available (like `get_namespace` is assumed to be defined on self)
+* The Python method `self._create_glue_table` is assumed to be equivalent to the Rust `CreateTable` request via the AWS SDK.
+* The `DatabaseNotFound` error in Python is assumed to be equivalent to the `DataInvalid` error in Rust with a custom error message.
+
+The function represents equivalent logic of registering a new table. Please adjust as necessary to fit your source code and dependencies.</translated function>Based on the provided Python function and its Rust equivalent's signature, the translated function will look like below in Rust:
+
+<rust translated function>
+```rust
+async fn create_table(&self, namespace: &NamespaceIdent, creation: TableCreation) -> Result<Table> {
+    let table_name = creation.identifier.name.clone();
+    let metadata_location = match creation.metadata_location {
+        Some(location) => location,
+        None => {
+            let namespace = self
+                .get_namespace(&creation.identifier.namespace)
+                .await?;
+            get_default_table_location(&namespace, &table_name, &self.config)
+        }
+    };
+
+    let file_io = self.file_io.build().await?;
+    let new_output = file_io.new_output(&metadata_location)?;
+    let table_metadata = TableMetadataBuilder::new()
+        .schema(creation.schema.clone())
+        .build()?;
+
+    let mut table_input = convert_to_glue_table(
+        &table_name,
+        &metadata_location,
+        &table_metadata,
+        &creation.parameters,
+        creation.previous_metadata_location.clone(),
+    )?;
+
+    // Parse database and table name from identifier
+    let database_name = convert_to_database(creation.identifier.namespace.get(0))?;
+    table_input = table_input.database_name(database_name);
+
+    // Send a CreateTable request
+    let builder = self
+        .client
+        .0
+        .create_table()
+        .database_name(&database_name)
+        .table_input(&table_input);
+    let builder = with_catalog_id!(builder, self.config);
+
+    builder
+        .send()
+        .await
+        .map_err(from_aws_sdk_error)
+        .map(|_| table_metadata)?;
+
+    let table = Table::new(
+        file_io,
+        Some(metadata_location),
+        table_metadata.into(),
+        creation.identifier.clone(),
+        creation.readonly,
+    );
+
+    Ok(table)
+}
+```
+</rust translated function> 
+
+Please note that due to the limited context, I made several assumptions:
+* Methods on `self` are available (like `get_namespace` is assumed to be defined on self)
+* The Python method `self._create_glue_table` is assumed to be equivalent to the Rust `CreateTable` request via the AWS SDK.
+* The `DatabaseNotFound` error in Python is assumed to be equivalent to the `DataInvalid` error in Rust with a custom error message.
+
+The function represents equivalent logic of registering a new table. Please adjust as necessary to fit your source code and dependencies.

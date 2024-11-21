@@ -1,0 +1,257 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def prune_columns(schema: Schema, selected: Set[int], select_full_types: bool = True) -> Schema:
+    """Prunes a column by only selecting a set of field-ids.
+
+    Args:
+        schema: The schema to be pruned.
+        selected: The field-ids to be included.
+        select_full_types: Return the full struct when a subset is recorded
+
+    Returns:
+        The pruned schema.
+    """
+    result = visit(schema.as_struct(), _PruneColumnsVisitor(selected, select_full_types))
+    return Schema(
+        *(result or StructType()).fields,
+        schema_id=schema.schema_id,
+        identifier_field_ids=list(selected.intersection(schema.identifier_field_ids)),
+    )
+</python function>
+<rust function signature>
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use crate::error::Result;
+use crate::expr::accessor::StructAccessor;
+use crate::spec::datatypes::{
+    ListType, MapType, NestedFieldRef, PrimitiveType, StructType, Type, LIST_FILED_NAME,
+    MAP_KEY_FIELD_NAME, MAP_VALUE_FIELD_NAME,
+};
+use crate::{ensure_data_valid, Error, ErrorKind};
+use bimap::BiHashMap;
+use itertools::{zip_eq, Itertools};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use _serde::SchemaEnum;
+use super::NestedField;
+use serde::{Deserialize, Serialize};
+use crate::{spec::StructType, Error, Result};
+use super::{Schema, DEFAULT_SCHEMA_ID};
+use crate::spec::datatypes::Type::{List, Map, Primitive, Struct};
+use crate::spec::datatypes::{
+        ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, StructType, Type,
+    };
+use crate::spec::schema::Schema;
+use crate::spec::schema::_serde::{SchemaEnum, SchemaV1, SchemaV2};
+use crate::spec::values::Map as MapValue;
+use crate::spec::{prune_columns, Datum, Literal};
+use std::collections::{HashMap, HashSet};
+use super::DEFAULT_SCHEMA_ID;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> {
+    let mut visitor = PruneColumn::new(HashSet::from_iter(selected), select_full_types);
+    let result = visit_schema(schema, &mut visitor);
+
+    match result {
+        Ok(s) => {
+            if let Some(struct_type) = s {
+                Ok(struct_type)
+            } else {
+                Ok(Type::Struct(StructType::default()))
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, and dependencies:
+
+```rust
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> {
+    let selected_set: HashSet<i32> = selected.into_iter().collect();
+    
+    let pruned_struct = prune_columns_visitor(schema.as_struct(), &selected_set, select_full_types)?;
+    
+    let identifier_field_ids: Vec<i32> = schema
+        .identifier_field_ids()
+        .iter()
+        .filter(|&id| selected_set.contains(id))
+        .cloned()
+        .collect();
+
+    let pruned_schema = Schema::new(
+        pruned_struct.fields().to_vec(),
+        schema.schema_id(),
+        Some(identifier_field_ids),
+    );
+
+    Ok(Type::Struct(pruned_schema.as_struct().clone()))
+}
+
+fn prune_columns_visitor(
+    struct_type: &StructType,
+    selected: &HashSet<i32>,
+    select_full_types: bool,
+) -> Result<StructType> {
+    let mut pruned_fields = Vec::new();
+
+    for field in struct_type.fields() {
+        if selected.contains(&field.id()) {
+            match field.field_type() {
+                Type::Struct(nested_struct) => {
+                    let pruned_nested = prune_columns_visitor(nested_struct, selected, select_full_types)?;
+                    pruned_fields.push(NestedField::new(
+                        field.id(),
+                        field.name(),
+                        Type::Struct(pruned_nested),
+                        field.required(),
+                        field.doc().cloned(),
+                    ));
+                }
+                Type::List(list_type) => {
+                    let pruned_element = prune_columns_visitor(list_type.element_type(), selected, select_full_types)?;
+                    pruned_fields.push(NestedField::new(
+                        field.id(),
+                        field.name(),
+                        Type::List(Arc::new(ListType::new(field.id(), pruned_element))),
+                        field.required(),
+                        field.doc().cloned(),
+                    ));
+                }
+                Type::Map(map_type) => {
+                    let pruned_value = prune_columns_visitor(map_type.value_type(), selected, select_full_types)?;
+                    pruned_fields.push(NestedField::new(
+                        field.id(),
+                        field.name(),
+                        Type::Map(Arc::new(MapType::new(
+                            field.id(),
+                            map_type.key_type().clone(),
+                            pruned_value,
+                        ))),
+                        field.required(),
+                        field.doc().cloned(),
+                    ));
+                }
+                _ => pruned_fields.push(field.clone()),
+            }
+        } else if select_full_types {
+            pruned_fields.push(field.clone());
+        }
+    }
+
+    Ok(StructType::new(pruned_fields))
+}
+```
+
+This Rust implementation follows the structure of the Python function while adapting to Rust's type system and the provided dependencies. It uses a recursive approach to prune nested structures and handles different types (Struct, List, and Map) accordingly. The function returns a `Result<Type>` as specified in the function signature.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, and dependencies:
+
+```rust
+pub fn prune_columns(
+    schema: &Schema,
+    selected: impl IntoIterator<Item = i32>,
+    select_full_types: bool,
+) -> Result<Type> {
+    let selected_set: HashSet<i32> = selected.into_iter().collect();
+    
+    let pruned_struct = prune_columns_visitor(schema.as_struct(), &selected_set, select_full_types)?;
+    
+    let identifier_field_ids: Vec<i32> = schema
+        .identifier_field_ids()
+        .iter()
+        .filter(|&id| selected_set.contains(id))
+        .cloned()
+        .collect();
+
+    let pruned_schema = Schema::new(
+        pruned_struct.fields().to_vec(),
+        schema.schema_id(),
+        Some(identifier_field_ids),
+    );
+
+    Ok(Type::Struct(pruned_schema.as_struct().clone()))
+}
+
+fn prune_columns_visitor(
+    struct_type: &StructType,
+    selected: &HashSet<i32>,
+    select_full_types: bool,
+) -> Result<StructType> {
+    let mut pruned_fields = Vec::new();
+
+    for field in struct_type.fields() {
+        if selected.contains(&field.id()) {
+            match field.field_type() {
+                Type::Struct(nested_struct) => {
+                    let pruned_nested = prune_columns_visitor(nested_struct, selected, select_full_types)?;
+                    pruned_fields.push(NestedField::new(
+                        field.id(),
+                        field.name(),
+                        Type::Struct(pruned_nested),
+                        field.required(),
+                        field.doc().cloned(),
+                    ));
+                }
+                Type::List(list_type) => {
+                    let pruned_element = prune_columns_visitor(list_type.element_type(), selected, select_full_types)?;
+                    pruned_fields.push(NestedField::new(
+                        field.id(),
+                        field.name(),
+                        Type::List(Arc::new(ListType::new(field.id(), pruned_element))),
+                        field.required(),
+                        field.doc().cloned(),
+                    ));
+                }
+                Type::Map(map_type) => {
+                    let pruned_value = prune_columns_visitor(map_type.value_type(), selected, select_full_types)?;
+                    pruned_fields.push(NestedField::new(
+                        field.id(),
+                        field.name(),
+                        Type::Map(Arc::new(MapType::new(
+                            field.id(),
+                            map_type.key_type().clone(),
+                            pruned_value,
+                        ))),
+                        field.required(),
+                        field.doc().cloned(),
+                    ));
+                }
+                _ => pruned_fields.push(field.clone()),
+            }
+        } else if select_full_types {
+            pruned_fields.push(field.clone());
+        }
+    }
+
+    Ok(StructType::new(pruned_fields))
+}
+```
+
+This Rust implementation follows the structure of the Python function while adapting to Rust's type system and the provided dependencies. It uses a recursive approach to prune nested structures and handles different types (Struct, List, and Map) accordingly. The function returns a `Result<Type>` as specified in the function signature.

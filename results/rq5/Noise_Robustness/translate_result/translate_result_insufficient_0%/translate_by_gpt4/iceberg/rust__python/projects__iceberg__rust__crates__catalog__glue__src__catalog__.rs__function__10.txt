@@ -1,0 +1,197 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def list_tables(self, namespace: Union[str, Identifier]) -> List[Identifier]:
+        """List tables under the given namespace in the catalog (including non-Iceberg tables).
+
+        Args:
+            namespace (str | Identifier): Namespace identifier to search.
+
+        Returns:
+            List[Identifier]: list of table identifiers.
+
+        Raises:
+            NoSuchNamespaceError: If a namespace with the given name does not exist, or the identifier is invalid.
+        """
+        database_name = self.identifier_to_database(namespace, NoSuchNamespaceError)
+        table_list: List[TableTypeDef] = []
+        next_token: Optional[str] = None
+        try:
+            while True:
+                table_list_response = (
+                    self.glue.get_tables(DatabaseName=database_name)
+                    if not next_token
+                    else self.glue.get_tables(DatabaseName=database_name, NextToken=next_token)
+                )
+                table_list.extend(table_list_response["TableList"])
+                next_token = table_list_response.get("NextToken")
+                if not next_token:
+                    break
+
+        except self.glue.exceptions.EntityNotFoundException as e:
+            raise NoSuchNamespaceError(f"Database does not exist: {database_name}") from e
+        return [(database_name, table["Name"]) for table in table_list]
+</python function>
+<rust function signature>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let db_name = validate_namespace(namespace)?;
+
+        let mut table_list: Vec<TableIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self
+                    .client
+                    .0
+                    .get_tables()
+                    .database_name(&db_name)
+                    .next_token(token),
+                None => self.client.0.get_tables().database_name(&db_name),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let tables: Vec<_> = resp
+                .table_list()
+                .iter()
+                .map(|tbl| TableIdent::new(namespace.clone(), tbl.name().to_string()))
+                .collect();
+
+            table_list.extend(tables);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(table_list)
+    }
+</function>
+<translated function>
+In the `list_tables` function in Rust, you need to convert Python to Rust according to the way that Rust works with error handling, tables, and namespaces. Your Rust function should create a Vector of `TableIdent` objects and return this in the form of `Result<Vec<TableIdent>>`.
+
+Here is a possible translation of the Python function to Rust:
+
+```rust
+use aws_sdk_glue::error::NoSuchNamespaceError;
+use aws_sdk_glue::operation::GetTableInput;
+
+#[async_trait]
+impl Catalog for GlueCatalog {
+    async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let database_name = self.identifier_to_database(namespace)?;
+        
+        let mut table_list: Vec<TableIdent> = vec![];
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let list_input = GetTableInput {
+                database_name: Some(database_name.clone()),
+                next_token: next_token,
+                ..Default::default()
+            };
+
+            let list_output = self.glue.get_tables(list_input).await?;
+
+            if let Some(tables) = list_output["TableList"] {
+                for table in tables {
+                    table_list.push(table_ident_from_aws_table(conv_table)?);
+                }
+            }
+            next_token = list_output.get("NextToken").map(|s| s.clone());
+
+            if next_token.is_none() {
+                break;
+            }
+        }
+        
+        Ok(table_list)
+    }
+}
+```
+
+Please note that the exact method on how to retrieve tables (i.e., `get_tables`) may not exactly match what the AWS Glue SDK in Rust provides, as their API may be different from the Python API. This is something you would need to adjust depending on the actual AWS SDK in Rust.
+
+Also, the error handling in Rust works a bit differently, in Rust we typically don't raise exceptions but rather return an Err(result). You might need to define your own function to map AWS Glue errors to your custom errors.
+
+Also consider that `TableIdent` and `NamespaceIdent` may need to implement or derive some traits (like clone) in order for this code to compile.</translated function>In the `list_tables` function in Rust, you need to convert Python to Rust according to the way that Rust works with error handling, tables, and namespaces. Your Rust function should create a Vector of `TableIdent` objects and return this in the form of `Result<Vec<TableIdent>>`.
+
+Here is a possible translation of the Python function to Rust:
+
+```rust
+use aws_sdk_glue::error::NoSuchNamespaceError;
+use aws_sdk_glue::operation::GetTableInput;
+
+#[async_trait]
+impl Catalog for GlueCatalog {
+    async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let database_name = self.identifier_to_database(namespace)?;
+        
+        let mut table_list: Vec<TableIdent> = vec![];
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let list_input = GetTableInput {
+                database_name: Some(database_name.clone()),
+                next_token: next_token,
+                ..Default::default()
+            };
+
+            let list_output = self.glue.get_tables(list_input).await?;
+
+            if let Some(tables) = list_output["TableList"] {
+                for table in tables {
+                    table_list.push(table_ident_from_aws_table(conv_table)?);
+                }
+            }
+            next_token = list_output.get("NextToken").map(|s| s.clone());
+
+            if next_token.is_none() {
+                break;
+            }
+        }
+        
+        Ok(table_list)
+    }
+}
+```
+
+Please note that the exact method on how to retrieve tables (i.e., `get_tables`) may not exactly match what the AWS Glue SDK in Rust provides, as their API may be different from the Python API. This is something you would need to adjust depending on the actual AWS SDK in Rust.
+
+Also, the error handling in Rust works a bit differently, in Rust we typically don't raise exceptions but rather return an Err(result). You might need to define your own function to map AWS Glue errors to your custom errors.
+
+Also consider that `TableIdent` and `NamespaceIdent` may need to implement or derive some traits (like clone) in order for this code to compile.

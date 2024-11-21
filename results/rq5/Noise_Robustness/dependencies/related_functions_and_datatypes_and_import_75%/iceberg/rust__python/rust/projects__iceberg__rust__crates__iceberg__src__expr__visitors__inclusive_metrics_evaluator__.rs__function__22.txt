@@ -1,0 +1,123 @@
+fn contains_nulls_only(&self, field_id: i32) -> bool {
+        let null_count = self.null_count(field_id);
+        let value_count = self.value_count(field_id);
+
+        null_count.is_some() && null_count == value_count
+    }
+fn lower_bound(&self, field_id: i32) -> Option<&Datum> {
+        self.data_file.lower_bounds.get(&field_id)
+    }
+pub(crate) fn literal(&self) -> &Datum {
+        &self.literal
+    }
+fn upper_bound(&self, field_id: i32) -> Option<&Datum> {
+        self.data_file.upper_bounds.get(&field_id)
+    }
+pub struct BoundReference {
+    // This maybe different from [`name`] filed in [`NestedField`] since this contains full path.
+    // For example, if the field is `a.b.c`, then `field.name` is `c`, but `original_name` is `a.b.c`.
+    column_name: String,
+    field: NestedFieldRef,
+    accessor: StructAccessorRef,
+}
+pub fn field(&self) -> &NestedField {
+    &self.field
+}
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+pub enum PrimitiveLiteral {
+    /// 0x00 for false, non-zero byte for true
+    Boolean(bool),
+    /// Stored as 4-byte little-endian
+    Int(i32),
+    /// Stored as 8-byte little-endian
+    Long(i64),
+    /// Stored as 4-byte little-endian
+    Float(OrderedFloat<f32>),
+    /// Stored as 8-byte little-endian
+    Double(OrderedFloat<f64>),
+    /// Stores days from the 1970-01-01 in an 4-byte little-endian int
+    Date(i32),
+    /// Stores microseconds from midnight in an 8-byte little-endian long
+    Time(i64),
+    /// Timestamp without timezone
+    Timestamp(i64),
+    /// Timestamp with timezone
+    Timestamptz(i64),
+    /// UTF-8 bytes (without length)
+    String(String),
+    /// 16-byte big-endian value
+    UUID(Uuid),
+    /// Binary value
+    Fixed(Vec<u8>),
+    /// Binary value (without length)
+    Binary(Vec<u8>),
+    /// Stores unscaled value as big int. According to iceberg spec, the precision must less than 38(`MAX_DECIMAL_PRECISION`) , so i128 is suit here.
+    Decimal(i128),
+}
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+pub struct NestedField {
+    /// Id unique in table schema
+    pub id: i32,
+    /// Field Name
+    pub name: String,
+    /// Optional or required
+    pub required: bool,
+    /// Datatype
+    pub field_type: Box<Type>,
+    /// Fields may have an optional comment or doc string.
+    pub doc: Option<String>,
+    /// Used to populate the field’s value for all records that were written before the field was added to the schema
+    pub initial_default: Option<Literal>,
+    /// Used to populate the field’s value for any records written after the field was added to the schema, if the writer does not supply the field’s value
+    pub write_default: Option<Literal>,
+}
+const ROWS_MIGHT_MATCH: crate::Result<bool> = Ok(true);
+------
+
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::spec::{DataFile, Datum, PrimitiveLiteral};
+use crate::{Error, ErrorKind};
+use fnv::FnvHashSet;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::PredicateOperator::{
+        Eq, GreaterThan, GreaterThanOrEq, In, IsNan, IsNull, LessThan, LessThanOrEq, NotEq, NotIn,
+        NotNan, NotNull, NotStartsWith, StartsWith,
+    };
+use crate::expr::{
+        BinaryExpression, Bind, BoundPredicate, Predicate, Reference, SetExpression,
+        UnaryExpression,
+    };
+use crate::spec::{
+        DataContentType, DataFile, DataFileFormat, Datum, NestedField, PartitionField,
+        PartitionSpec, PrimitiveType, Schema, Struct, Transform, Type,
+    };
+use fnv::FnvHashSet;
+use std::collections::HashMap;
+use std::ops::Not;
+use std::sync::Arc;

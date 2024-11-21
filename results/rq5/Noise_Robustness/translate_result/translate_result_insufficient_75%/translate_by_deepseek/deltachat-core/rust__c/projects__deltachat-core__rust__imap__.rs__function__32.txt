@@ -1,0 +1,260 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+static int get_folder_meaning_by_name(const char* folder_name)
+{
+	// try to get the folder meaning by the name of the folder.
+	// only used if the server does not support XLIST.
+	int ret_meaning = MEANING_UNKNOWN;
+
+	// TODO: lots languages missing - maybe there is a list somewhere on other MUAs?
+	// however, if we fail to find out the sent-folder,
+	// only watching this folder is not working. at least, this is no show stopper.
+	// CAVE: if possible, take care not to add a name here that is "sent" in one language
+	// but sth. different in others - a hard job.
+	static const char* sent_names =
+		",sent,sent objects,gesendet,";
+
+	char* lower = dc_mprintf(",%s,", folder_name);
+	dc_strlower_in_place(lower);
+	if (strstr(sent_names, lower)!=NULL) {
+		ret_meaning = MEANING_SENT_OBJECTS;
+	}
+
+	free(lower);
+	return ret_meaning;
+}
+</c function>
+<rust function signature>
+fn get_folder_meaning_by_name(folder_name: &str) -> FolderMeaning 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub enum FolderMeaning {
+    Unknown,
+
+    /// Spam folder.
+    Spam,
+    Inbox,
+    Mvbox,
+    Sent,
+    Trash,
+    Drafts,
+
+    /// Virtual folders.
+    ///
+    /// On Gmail there are virtual folders marked as \\All, \\Important and \\Flagged.
+    /// Delta Chat ignores these folders because the same messages can be fetched
+    /// from the real folder and the result of moving and deleting messages via
+    /// virtual folder is unclear.
+    Virtual,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::{
+    cmp::max,
+    cmp::min,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    iter::Peekable,
+    mem::take,
+    sync::atomic::Ordering,
+    time::{Duration, UNIX_EPOCH},
+};
+use anyhow::{bail, format_err, Context as _, Result};
+use async_channel::Receiver;
+use async_imap::types::{Fetch, Flag, Name, NameAttribute, UnsolicitedResponse};
+use deltachat_contact_tools::{normalize_name, ContactAddress};
+use futures::{FutureExt as _, StreamExt, TryStreamExt};
+use futures_lite::FutureExt;
+use num_traits::FromPrimitive;
+use rand::Rng;
+use ratelimit::Ratelimit;
+use url::Url;
+use crate::chat::{self, ChatId, ChatIdBlocked};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{self, Blocked, Chattype, ShowEmails};
+use crate::contact::{Contact, ContactId, Modifier, Origin};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::headerdef::{HeaderDef, HeaderDefMap};
+use crate::login_param::{CertificateChecks, LoginParam, ServerLoginParam};
+use crate::message::{self, Message, MessageState, MessengerMessage, MsgId, Viewtype};
+use crate::mimeparser;
+use crate::oauth2::get_oauth2_access_token;
+use crate::provider::Socket;
+use crate::receive_imf::{
+    from_field_to_contact_id, get_prefetch_parent_message, receive_imf_inner, ReceivedMsg,
+};
+use crate::scheduler::connectivity::ConnectivityStore;
+use crate::socks::Socks5Config;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{self, create_id, duration_to_str};
+use client::Client;
+use mailparse::SingleInfo;
+use session::Session;
+use async_imap::imap_proto::Response;
+use async_imap::imap_proto::ResponseCode;
+use UnsolicitedResponse::*;
+use super::*;
+use crate::test_utils::TestContext;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn get_folder_meaning_by_name(folder_name: &str) -> FolderMeaning {
+    // source: <https://stackoverflow.com/questions/2185391/localized-gmail-imap-folders>
+    const SENT_NAMES: &[&str] = &[
+        "sent",
+        "sentmail",
+        "sent objects",
+        "gesendet",
+        "Sent Mail",
+        "Sendte e-mails",
+        "Enviados",
+        "Messages envoyés",
+        "Messages envoyes",
+        "Posta inviata",
+        "Verzonden berichten",
+        "Wyslane",
+        "E-mails enviados",
+        "Correio enviado",
+        "Enviada",
+        "Enviado",
+        "Gönderildi",
+        "Inviati",
+        "Odeslaná pošta",
+        "Sendt",
+        "Skickat",
+        "Verzonden",
+        "Wysłane",
+        "Éléments envoyés",
+        "Απεσταλμένα",
+        "Отправленные",
+        "寄件備份",
+        "已发送邮件",
+        "送信済み",
+        "보낸편지함",
+    ];
+    const SPAM_NAMES: &[&str] = &[
+        "spam",
+        "junk",
+        "Correio electrónico não solicitado",
+        "Correo basura",
+        "Lixo",
+        "Nettsøppel",
+        "Nevyžádaná pošta",
+        "No solicitado",
+        "Ongewenst",
+        "Posta indesiderata",
+        "Skräp",
+        "Wiadomości-śmieci",
+        "Önemsiz",
+        "Ανεπιθύμητα",
+        "Спам",
+        "垃圾邮件",
+        "垃圾郵件",
+        "迷惑メール",
+        "스팸",
+    ];
+    const DRAFT_NAMES: &[&str] = &[
+        "Drafts",
+        "Kladder",
+        "Entw?rfe",
+        "Borradores",
+        "Brouillons",
+        "Bozze",
+        "Concepten",
+        "Wersje robocze",
+        "Rascunhos",
+        "Entwürfe",
+        "Koncepty",
+        "Kopie robocze",
+        "Taslaklar",
+        "Utkast",
+        "Πρόχειρα",
+        "Черновики",
+        "下書き",
+        "草稿",
+        "임시보관함",
+    ];
+    const TRASH_NAMES: &[&str] = &[
+        "Trash",
+        "Bin",
+        "Caixote do lixo",
+        "Cestino",
+        "Corbeille",
+        "Papelera",
+        "Papierkorb",
+        "Papirkurv",
+        "Papperskorgen",
+        "Prullenbak",
+        "Rubujo",
+        "Κάδος απορριμμάτων",
+        "Корзина",
+        "Кошик",
+        "ゴミ箱",
+        "垃圾桶",
+        "已删除邮件",
+        "휴지통",
+    ];
+    let lower = folder_name.to_lowercase();
+
+    if SENT_NAMES.iter().any(|s| s.to_lowercase() == lower) {
+        FolderMeaning::Sent
+    } else if SPAM_NAMES.iter().any(|s| s.to_lowercase() == lower) {
+        FolderMeaning::Spam
+    } else if DRAFT_NAMES.iter().any(|s| s.to_lowercase() == lower) {
+        FolderMeaning::Drafts
+    } else if TRASH_NAMES.iter().any(|s| s.to_lowercase() == lower) {
+        FolderMeaning::Trash
+    } else {
+        FolderMeaning::Unknown
+    }
+}
+</function>
+<translated function>
+ ```rust
+fn get_folder_meaning_by_name(folder_name: &str) -> FolderMeaning {
+    // try to get the folder meaning by the name of the folder.
+    // only used if the server does not support XLIST.
+    let mut ret_meaning = FolderMeaning::Unknown;
+
+    // TODO: lots languages missing - maybe there is a list somewhere on other MUAs?
+    // however, if we fail to find out the sent-folder,
+    // only watching this folder is not working. at least, this is no show stopper.
+    // CAVE: if possible, take care not to add a name here that is "sent" in one language
+    // but sth. different in others - a hard job.
+    let sent_names = ",sent,sent objects,gesendet,";
+
+    let lower = format!(",{}", folder_name).to_lowercase();
+    if sent_names.contains(&lower) {
+        ret_meaning = FolderMeaning::Sent;
+    }
+
+    ret_meaning
+}
+```</translated function> ```rust
+fn get_folder_meaning_by_name(folder_name: &str) -> FolderMeaning {
+    // try to get the folder meaning by the name of the folder.
+    // only used if the server does not support XLIST.
+    let mut ret_meaning = FolderMeaning::Unknown;
+
+    // TODO: lots languages missing - maybe there is a list somewhere on other MUAs?
+    // however, if we fail to find out the sent-folder,
+    // only watching this folder is not working. at least, this is no show stopper.
+    // CAVE: if possible, take care not to add a name here that is "sent" in one language
+    // but sth. different in others - a hard job.
+    let sent_names = ",sent,sent objects,gesendet,";
+
+    let lower = format!(",{}", folder_name).to_lowercase();
+    if sent_names.contains(&lower) {
+        ret_meaning = FolderMeaning::Sent;
+    }
+
+    ret_meaning
+}
+```

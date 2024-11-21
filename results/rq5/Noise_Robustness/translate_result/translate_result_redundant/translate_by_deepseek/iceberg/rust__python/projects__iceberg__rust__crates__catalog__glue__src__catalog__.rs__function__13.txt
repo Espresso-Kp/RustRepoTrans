@@ -1,0 +1,185 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def drop_table(self, identifier: Union[str, Identifier]) -> None:
+        """Drop a table.
+
+        Args:
+            identifier: Table identifier.
+
+        Raises:
+            NoSuchTableError: If a table with the name does not exist, or the identifier is invalid.
+        """
+        identifier_tuple = self.identifier_to_tuple_without_catalog(identifier)
+        database_name, table_name = self.identifier_to_database_and_table(identifier_tuple, NoSuchTableError)
+        try:
+            self.glue.delete_table(DatabaseName=database_name, Name=table_name)
+        except self.glue.exceptions.EntityNotFoundException as e:
+            raise NoSuchTableError(f"Table does not exist: {database_name}.{table_name}") from e
+</python function>
+<rust function signature>
+async fn drop_table(&self, table: &TableIdent) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+
+
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+struct GlueClient(aws_sdk_glue::Client);
+
+
+pub fn from_thrift_error<T>(error: volo_thrift::error::ResponseError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting thrift error".to_string(),
+    )
+    .with_source(anyhow!("thrift error: {:?}", error))
+}
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn drop_table(&self, table: &TableIdent) -> Result<()> {
+        let db_name = validate_namespace(table.namespace())?;
+        let table_name = table.name();
+
+        let builder = self
+            .client
+            .0
+            .delete_table()
+            .database_name(&db_name)
+            .name(table_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+<translated function>
+ ```rust
+async fn drop_table(&self, table: &TableIdent) -> Result<()> {
+    let database_name = validate_namespace(&table.namespace)?;
+    let table_name = &table.name;
+
+    let config = self.config.clone();
+    let client = self.client.clone();
+    let file_io = self.file_io.clone();
+
+    let result = client.delete_table().database_name(database_name).table_name(table_name).send().await;
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if e.is_not_found() {
+                let error_message = format!("Table does not exist: {}.{}", database_name, table_name);
+                Err(Error::new(ErrorKind::NotFound, error_message))
+            } else {
+                Err(from_aws_sdk_error(e))
+            }
+        }
+    }
+}
+```</translated function> ```rust
+async fn drop_table(&self, table: &TableIdent) -> Result<()> {
+    let database_name = validate_namespace(&table.namespace)?;
+    let table_name = &table.name;
+
+    let config = self.config.clone();
+    let client = self.client.clone();
+    let file_io = self.file_io.clone();
+
+    let result = client.delete_table().database_name(database_name).table_name(table_name).send().await;
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if e.is_not_found() {
+                let error_message = format!("Table does not exist: {}.{}", database_name, table_name);
+                Err(Error::new(ErrorKind::NotFound, error_message))
+            } else {
+                Err(from_aws_sdk_error(e))
+            }
+        }
+    }
+}
+```

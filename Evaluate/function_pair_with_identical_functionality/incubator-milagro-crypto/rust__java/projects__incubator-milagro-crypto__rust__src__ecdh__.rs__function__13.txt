@@ -1,0 +1,104 @@
+<path>
+projects/incubator-milagro-crypto/rust/src/ecdh.rs
+</path>
+<function>
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize {
+    let mut res = 0;
+
+    let mut b: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+
+    hashit(sha, f, 0, None, big::MODBYTES as usize, &mut b);
+
+    let G = ECP::generator();
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let cb = Big::from_bytes(c); // c or &c ?
+    let mut db = Big::from_bytes(d); // d or &d ?
+
+    if cb.is_zilch() || Big::comp(&cb, &r) >= 0 || db.is_zilch() || Big::comp(&db, &r) >= 0 {
+        res = INVALID;
+    }
+
+    if res == 0 {
+        let mut fb = Big::from_bytes(&b);
+        db.invmodp(&r);
+        let tb = Big::modmul(&fb, &db, &r);
+        fb = tb.clone();
+        let h2 = Big::modmul(&cb, &db, &r);
+
+        let WP = ECP::from_bytes(&w);
+        if WP.is_infinity() {
+            res = ERROR;
+        } else {
+            let mut P = WP.clone();
+
+            P = P.mul2(&h2, &G, &fb);
+
+            if P.is_infinity() {
+                res = INVALID;
+            } else {
+                db = P.getx();
+                db.rmod(&r);
+
+                if Big::comp(&db, &cb) != 0 {
+                    res = INVALID
+                }
+            }
+        }
+    }
+
+    res
+}
+</function>
+------
+
+<path>
+projects/incubator-milagro-crypto/java/src/main/java/org/apache/milagro/amcl/GOLDILOCKS/ECDH.java
+</path>
+<function>
+public static int VP_DSA(int sha,byte[] W,byte[] F, byte[] C,byte[] D)
+	{
+		BIG r,f,c,d,h2;
+		int res=0;
+		ECP G,WP,P;
+		int valid; 
+
+		byte[] B=hashit(sha,F,0,null,BIG.MODBYTES);
+
+		G=ECP.generator();
+		r=new BIG(ROM.CURVE_Order);
+
+		c=BIG.fromBytes(C);
+		d=BIG.fromBytes(D);
+		f=BIG.fromBytes(B);
+     
+		if (c.iszilch() || BIG.comp(c,r)>=0 || d.iszilch() || BIG.comp(d,r)>=0) 
+            res=INVALID;
+
+		if (res==0)
+		{
+			d.invmodp(r);
+			f.copy(BIG.modmul(f,d,r));
+			h2=BIG.modmul(c,d,r);
+
+			WP=ECP.fromBytes(W);
+			if (WP.is_infinity()) res=ERROR;
+			else
+			{
+				P=new ECP();
+				P.copy(WP);
+				P=P.mul2(h2,G,f);
+				if (P.is_infinity()) res=INVALID;
+				else
+				{
+					d=P.getX();
+					d.mod(r);
+					if (BIG.comp(d,c)!=0) res=INVALID;
+				}
+			}
+		}
+
+		return res;
+	}
+</function>
+

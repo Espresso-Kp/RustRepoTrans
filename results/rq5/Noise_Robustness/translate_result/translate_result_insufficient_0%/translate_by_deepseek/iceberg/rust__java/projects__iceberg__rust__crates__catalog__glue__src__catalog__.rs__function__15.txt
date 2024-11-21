@@ -1,0 +1,354 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public void renameTable(TableIdentifier from, TableIdentifier to) {
+    // check new namespace exists
+    if (!namespaceExists(to.namespace())) {
+      throw new NoSuchNamespaceException(
+          "Cannot rename %s to %s because namespace %s does not exist", from, to, to.namespace());
+    }
+    // keep metadata
+    Table fromTable = null;
+    String fromTableDbName =
+        IcebergToGlueConverter.getDatabaseName(from, awsProperties.glueCatalogSkipNameValidation());
+    String fromTableName =
+        IcebergToGlueConverter.getTableName(from, awsProperties.glueCatalogSkipNameValidation());
+    String toTableDbName =
+        IcebergToGlueConverter.getDatabaseName(to, awsProperties.glueCatalogSkipNameValidation());
+    String toTableName =
+        IcebergToGlueConverter.getTableName(to, awsProperties.glueCatalogSkipNameValidation());
+    try {
+      GetTableResponse response =
+          glue.getTable(
+              GetTableRequest.builder()
+                  .catalogId(awsProperties.glueCatalogId())
+                  .databaseName(fromTableDbName)
+                  .name(fromTableName)
+                  .build());
+      fromTable = response.table();
+    } catch (EntityNotFoundException e) {
+      throw new NoSuchTableException(
+          e, "Cannot rename %s because the table does not exist in Glue", from);
+    }
+
+    // use the same Glue info to create the new table, pointing to the old metadata
+    TableInput.Builder tableInputBuilder =
+        TableInput.builder()
+            .owner(fromTable.owner())
+            .tableType(fromTable.tableType())
+            .parameters(fromTable.parameters())
+            .storageDescriptor(fromTable.storageDescriptor());
+
+    glue.createTable(
+        CreateTableRequest.builder()
+            .catalogId(awsProperties.glueCatalogId())
+            .databaseName(toTableDbName)
+            .tableInput(tableInputBuilder.name(toTableName).build())
+            .build());
+    LOG.info("created rename destination table {}", to);
+
+    try {
+      dropTable(from, false);
+    } catch (Exception e) {
+      // rollback, delete renamed table
+      LOG.error(
+          "Fail to drop old table {} after renaming to {}, rollback to use the old table",
+          from,
+          to,
+          e);
+      glue.deleteTable(
+          DeleteTableRequest.builder()
+              .catalogId(awsProperties.glueCatalogId())
+              .databaseName(toTableDbName)
+              .name(toTableName)
+              .build());
+      throw e;
+    }
+
+    LOG.info("Successfully renamed table from {} to {}", from, to);
+  }
+</java function>
+<rust function signature>
+async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> {
+        let src_db_name = validate_namespace(src.namespace())?;
+        let dest_db_name = validate_namespace(dest.namespace())?;
+
+        let src_table_name = src.name();
+        let dest_table_name = dest.name();
+
+        let builder = self
+            .client
+            .0
+            .get_table()
+            .database_name(&src_db_name)
+            .name(src_table_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        let glue_table_output = builder.send().await.map_err(from_aws_sdk_error)?;
+
+        match glue_table_output.table() {
+            None => Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "'Table' object for database: {} and table: {} does not exist",
+                    src_db_name, src_table_name
+                ),
+            )),
+            Some(table) => {
+                let rename_table_input = TableInput::builder()
+                    .name(dest_table_name)
+                    .set_parameters(table.parameters.clone())
+                    .set_storage_descriptor(table.storage_descriptor.clone())
+                    .set_table_type(table.table_type.clone())
+                    .set_description(table.description.clone())
+                    .build()
+                    .map_err(from_aws_build_error)?;
+
+                let builder = self
+                    .client
+                    .0
+                    .create_table()
+                    .database_name(&dest_db_name)
+                    .table_input(rename_table_input);
+                let builder = with_catalog_id!(builder, self.config);
+
+                builder.send().await.map_err(from_aws_sdk_error)?;
+
+                let drop_src_table_result = self.drop_table(src).await;
+
+                match drop_src_table_result {
+                    Ok(_) => Ok(()),
+                    Err(_) => {
+                        let err_msg_src_table = format!(
+                            "Failed to drop old table {}.{}.",
+                            src_db_name, src_table_name
+                        );
+
+                        let drop_dest_table_result = self.drop_table(dest).await;
+
+                        match drop_dest_table_result {
+                            Ok(_) => Err(Error::new(
+                                ErrorKind::Unexpected,
+                                format!(
+                                    "{} Rolled back table creation for {}.{}.",
+                                    err_msg_src_table, dest_db_name, dest_table_name
+                                ),
+                            )),
+                            Err(_) => Err(Error::new(
+                                ErrorKind::Unexpected,
+                                format!(
+                                    "{} Failed to roll back table creation for {}.{}. Please clean up manually.",
+                                    err_msg_src_table, dest_db_name, dest_table_name
+                                ),
+                            )),
+                        }
+                    }
+                }
+            }
+        }
+    }
+</function>
+<translated function>
+ ```rust
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+#[async_trait]
+impl<C: Catalog + Send + Sync> crate::TableOperations for C {
+    async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> {
+        // Check if the new namespace exists
+        if !self.namespace_exists(&dest.namespace).await? {
+            return Err(Error::from_kind(ErrorKind::NoSuchNamespace(format!(
+                "Cannot rename {} to {} because namespace {} does not exist",
+                src, dest, dest.namespace
+            ))));
+        }
+
+        // Get the Glue table information
+        let from_table_db_name = convert_to_database(&src, &self.properties().glue_catalog_skip_name_validation)?;
+        let from_table_name = convert_to_glue_table(&src, &self.properties().glue_catalog_skip_name_validation)?;
+        let to_table_db_name = convert_to_database(&dest, &self.properties().glue_catalog_skip_name_validation)?;
+        let to_table_name = convert_to_glue_table(&dest, &self.properties().glue_catalog_skip_name_validation)?;
+
+        let client = self.glue_client().await?;
+        let response = client
+            .get_table()
+            .catalog_id(self.properties().glue_catalog_id.as_str())
+            .database_name(from_table_db_name.as_str())
+            .name(from_table_name.as_str())
+            .send()
+            .await
+            .map_err(|e| {
+                Error::from_kind(ErrorKind::NoSuchTable(format!(
+                    "Cannot rename {} because the table does not exist in Glue",
+                    src
+                )))
+            })?;
+
+        let from_table = response.table().ok_or_else(|| {
+            Error::from_kind(ErrorKind::NoSuchTable(format!(
+                "Cannot rename {} because the table does not exist in Glue",
+                src
+            )))
+        })?;
+
+        // Create the new table with the same Glue information
+        let mut table_input_builder = TableInput::builder()
+            .owner(from_table.owner.as_str())
+            .table_type(from_table.table_type.as_str())
+            .parameters(from_table.parameters.clone())
+            .storage_descriptor(from_table.storage_descriptor.clone());
+
+        client
+            .create_table()
+            .catalog_id(self.properties().glue_catalog_id.as_str())
+            .database_name(to_table_db_name.as_str())
+            .table_input(table_input_builder.name(to_table_name.as_str()).build())
+            .send()
+            .await
+            .map_err(|e| {
+                Error::from_kind(ErrorKind::CreateTable(format!(
+                    "Failed to create table at destination: {}",
+                    e
+                )))
+            })?;
+
+        // Drop the old table
+        self.drop_table(src, false).await?;
+
+        Ok(())
+    }
+}
+```</translated function> ```rust
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+#[async_trait]
+impl<C: Catalog + Send + Sync> crate::TableOperations for C {
+    async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> {
+        // Check if the new namespace exists
+        if !self.namespace_exists(&dest.namespace).await? {
+            return Err(Error::from_kind(ErrorKind::NoSuchNamespace(format!(
+                "Cannot rename {} to {} because namespace {} does not exist",
+                src, dest, dest.namespace
+            ))));
+        }
+
+        // Get the Glue table information
+        let from_table_db_name = convert_to_database(&src, &self.properties().glue_catalog_skip_name_validation)?;
+        let from_table_name = convert_to_glue_table(&src, &self.properties().glue_catalog_skip_name_validation)?;
+        let to_table_db_name = convert_to_database(&dest, &self.properties().glue_catalog_skip_name_validation)?;
+        let to_table_name = convert_to_glue_table(&dest, &self.properties().glue_catalog_skip_name_validation)?;
+
+        let client = self.glue_client().await?;
+        let response = client
+            .get_table()
+            .catalog_id(self.properties().glue_catalog_id.as_str())
+            .database_name(from_table_db_name.as_str())
+            .name(from_table_name.as_str())
+            .send()
+            .await
+            .map_err(|e| {
+                Error::from_kind(ErrorKind::NoSuchTable(format!(
+                    "Cannot rename {} because the table does not exist in Glue",
+                    src
+                )))
+            })?;
+
+        let from_table = response.table().ok_or_else(|| {
+            Error::from_kind(ErrorKind::NoSuchTable(format!(
+                "Cannot rename {} because the table does not exist in Glue",
+                src
+            )))
+        })?;
+
+        // Create the new table with the same Glue information
+        let mut table_input_builder = TableInput::builder()
+            .owner(from_table.owner.as_str())
+            .table_type(from_table.table_type.as_str())
+            .parameters(from_table.parameters.clone())
+            .storage_descriptor(from_table.storage_descriptor.clone());
+
+        client
+            .create_table()
+            .catalog_id(self.properties().glue_catalog_id.as_str())
+            .database_name(to_table_db_name.as_str())
+            .table_input(table_input_builder.name(to_table_name.as_str()).build())
+            .send()
+            .await
+            .map_err(|e| {
+                Error::from_kind(ErrorKind::CreateTable(format!(
+                    "Failed to create table at destination: {}",
+                    e
+                )))
+            })?;
+
+        // Drop the old table
+        self.drop_table(src, false).await?;
+
+        Ok(())
+    }
+}
+```

@@ -1,0 +1,142 @@
+<path>
+projects/deltachat-core/rust/location.rs
+</path>
+<function>
+pub async fn get_range(
+    context: &Context,
+    chat_id: Option<ChatId>,
+    contact_id: Option<u32>,
+    timestamp_from: i64,
+    mut timestamp_to: i64,
+) -> Result<Vec<Location>> {
+    if timestamp_to == 0 {
+        timestamp_to = time() + 10;
+    }
+
+    let (disable_chat_id, chat_id) = match chat_id {
+        Some(chat_id) => (0, chat_id),
+        None => (1, ChatId::new(0)), // this ChatId is unused
+    };
+    let (disable_contact_id, contact_id) = match contact_id {
+        Some(contact_id) => (0, contact_id),
+        None => (1, 0), // this contact_id is unused
+    };
+    let list = context
+        .sql
+        .query_map(
+            "SELECT l.id, l.latitude, l.longitude, l.accuracy, l.timestamp, l.independent, \
+             COALESCE(m.id, 0) AS msg_id, l.from_id, l.chat_id, COALESCE(m.txt, '') AS txt \
+             FROM locations l  LEFT JOIN msgs m ON l.id=m.location_id  WHERE (? OR l.chat_id=?) \
+             AND (? OR l.from_id=?) \
+             AND (l.independent=1 OR (l.timestamp>=? AND l.timestamp<=?)) \
+             ORDER BY l.timestamp DESC, l.id DESC, msg_id DESC;",
+            (
+                disable_chat_id,
+                chat_id,
+                disable_contact_id,
+                contact_id as i32,
+                timestamp_from,
+                timestamp_to,
+            ),
+            |row| {
+                let msg_id = row.get(6)?;
+                let txt: String = row.get(9)?;
+                let marker = if msg_id != 0 && is_marker(&txt) {
+                    Some(txt)
+                } else {
+                    None
+                };
+                let loc = Location {
+                    location_id: row.get(0)?,
+                    latitude: row.get(1)?,
+                    longitude: row.get(2)?,
+                    accuracy: row.get(3)?,
+                    timestamp: row.get(4)?,
+                    independent: row.get(5)?,
+                    msg_id,
+                    contact_id: row.get(7)?,
+                    chat_id: row.get(8)?,
+                    marker,
+                };
+                Ok(loc)
+            },
+            |locations| {
+                let mut ret = Vec::new();
+
+                for location in locations {
+                    ret.push(location?);
+                }
+                Ok(ret)
+            },
+        )
+        .await?;
+    Ok(list)
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_location.c
+</path>
+<function>
+dc_array_t* dc_get_locations(dc_context_t* context,
+                             uint32_t chat_id, uint32_t  contact_id,
+                             time_t timestamp_from, time_t timestamp_to)
+{
+	dc_array_t*   ret = dc_array_new_typed(context, DC_ARRAY_LOCATIONS, 500);
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	if (timestamp_to==0) {
+		timestamp_to = time(NULL) + 10/*messages may be inserted by another thread just now*/;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+			"SELECT l.id, l.latitude, l.longitude, l.accuracy, l.timestamp, l.independent, "
+			"       m.id, l.from_id, l.chat_id, m.txt "
+			" FROM locations l "
+			" LEFT JOIN msgs m ON l.id=m.location_id "
+			" WHERE (? OR l.chat_id=?) "
+			"   AND (? OR l.from_id=?) "
+			"   AND (l.independent=1 OR (l.timestamp>=? AND l.timestamp<=?)) "
+			" ORDER BY l.timestamp DESC, l.id DESC, m.id DESC;");
+	sqlite3_bind_int(stmt, 1, chat_id==0? 1 : 0);
+	sqlite3_bind_int(stmt, 2, chat_id);
+	sqlite3_bind_int(stmt, 3, contact_id==0? 1 : 0);
+	sqlite3_bind_int(stmt, 4, contact_id);
+	sqlite3_bind_int(stmt, 5, timestamp_from);
+	sqlite3_bind_int(stmt, 6, timestamp_to);
+
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+        struct _dc_location* loc = calloc(1, sizeof(struct _dc_location));
+        if (loc==NULL) {
+			goto cleanup;
+        }
+
+		loc->location_id = sqlite3_column_double(stmt, 0);
+		loc->latitude    = sqlite3_column_double(stmt, 1);
+		loc->longitude   = sqlite3_column_double(stmt, 2);
+		loc->accuracy    = sqlite3_column_double(stmt, 3);
+		loc->timestamp   = sqlite3_column_int64 (stmt, 4);
+		loc->independent = sqlite3_column_int   (stmt, 5);
+		loc->msg_id      = sqlite3_column_int   (stmt, 6);
+		loc->contact_id  = sqlite3_column_int   (stmt, 7);
+		loc->chat_id     = sqlite3_column_int   (stmt, 8);
+		if (loc->msg_id) {
+			const char* txt = (const char*)sqlite3_column_text(stmt, 9);
+			if (is_marker(txt)) {
+				loc->marker = strdup(txt);
+			}
+		}
+
+		dc_array_add_ptr(ret, loc);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</function>

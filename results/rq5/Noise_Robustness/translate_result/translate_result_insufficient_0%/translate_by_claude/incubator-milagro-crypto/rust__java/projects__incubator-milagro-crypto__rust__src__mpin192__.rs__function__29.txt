@@ -1,0 +1,252 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int SERVER_KEY(int sha,byte[] Z,byte[] SST,byte[] W,byte[] H,byte[] HID,byte[] xID,byte[] xCID,byte[] SK)
+	{
+		byte[] t;
+
+		ECP4 sQ=ECP4.fromBytes(SST);
+		if (sQ.is_infinity()) return INVALID_POINT; 
+		ECP R=ECP.fromBytes(Z);
+		if (R.is_infinity()) return INVALID_POINT; 
+		ECP A=ECP.fromBytes(HID);
+		if (A.is_infinity()) return INVALID_POINT; 
+
+		ECP U;
+		if (xCID!=null)
+			U=ECP.fromBytes(xCID);
+		else
+			U=ECP.fromBytes(xID);
+		if (U.is_infinity()) return INVALID_POINT; 
+
+		BIG w=BIG.fromBytes(W);
+		BIG h=BIG.fromBytes(H);
+		A=PAIR192.G1mul(A,h);	// new
+		R.add(A); //R.affine();
+
+		U=PAIR192.G1mul(U,w);
+		FP24 g=PAIR192.ate(sQ,R);
+		g=PAIR192.fexp(g);
+
+		FP8 c=g.trace();
+
+		t=mpin_hash(sha,c,U);
+
+		for (int i=0;i<ECP.AESKEY;i++) SK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let sQ = ECP4::from_bytes(&sst);
+    if sQ.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut R = ECP::from_bytes(&z);
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut A = ECP::from_bytes(&hid);
+    if A.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut U = if let Some(rxcid) = xcid {
+        ECP::from_bytes(&rxcid)
+    } else {
+        ECP::from_bytes(&xid)
+    };
+
+    if U.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut w = Big::from_bytes(&w);
+    let mut h = Big::from_bytes(&h);
+    A = pair192::g1mul(&mut A, &mut h); // new
+    R.add(&mut A);
+
+    U = pair192::g1mul(&mut U, &mut w);
+    let mut g = pair192::ate(&sQ, &R);
+    g = pair192::fexp(&g);
+
+    let mut c = g.trace();
+
+    hash(sha, &mut c, &mut U, sk);
+
+    return 0;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let s_q = ECP4::frombytes(sst);
+    if s_q.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let r = ECP::frombytes(z);
+    if r.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut a = ECP::frombytes(hid);
+    if a.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let u = match xcid {
+        Some(xcid_bytes) => ECP::frombytes(xcid_bytes),
+        None => ECP::frombytes(xid),
+    };
+    if u.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let w_big = Big::frombytes(w);
+    let h_big = Big::frombytes(h);
+
+    a = pair192::g1mul(&a, &h_big);
+    r.add(&a);
+
+    let u = pair192::g1mul(&u, &w_big);
+    let g = pair192::ate(&s_q, &r);
+    let g = pair192::fexp(&g);
+
+    let c = g.trace();
+
+    let t = mpin_hash(sha, &c, &u);
+
+    sk[..ecp::AESKEY].copy_from_slice(&t[..ecp::AESKEY]);
+
+    0
+}
+```
+
+Note that this translation assumes the existence of certain functions and constants that were present in the Java version, such as `INVALID_POINT`, `mpin_hash`, and `AESKEY`. Make sure these are defined in your Rust codebase or adjust the code accordingly.
+
+Also, the Rust version uses `match` for handling the optional `xcid` parameter, which is more idiomatic in Rust compared to the if-else statement in the Java version.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let s_q = ECP4::frombytes(sst);
+    if s_q.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let r = ECP::frombytes(z);
+    if r.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut a = ECP::frombytes(hid);
+    if a.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let u = match xcid {
+        Some(xcid_bytes) => ECP::frombytes(xcid_bytes),
+        None => ECP::frombytes(xid),
+    };
+    if u.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let w_big = Big::frombytes(w);
+    let h_big = Big::frombytes(h);
+
+    a = pair192::g1mul(&a, &h_big);
+    r.add(&a);
+
+    let u = pair192::g1mul(&u, &w_big);
+    let g = pair192::ate(&s_q, &r);
+    let g = pair192::fexp(&g);
+
+    let c = g.trace();
+
+    let t = mpin_hash(sha, &c, &u);
+
+    sk[..ecp::AESKEY].copy_from_slice(&t[..ecp::AESKEY]);
+
+    0
+}
+```
+
+Note that this translation assumes the existence of certain functions and constants that were present in the Java version, such as `INVALID_POINT`, `mpin_hash`, and `AESKEY`. Make sure these are defined in your Rust codebase or adjust the code accordingly.
+
+Also, the Rust version uses `match` for handling the optional `xcid` parameter, which is more idiomatic in Rust compared to the if-else statement in the Java version.

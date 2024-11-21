@@ -1,0 +1,148 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def create_namespace(self, namespace: Union[str, Identifier], properties: Properties = EMPTY_DICT) -> None:
+        """Create a namespace in the catalog.
+
+        Args:
+            namespace: Namespace identifier.
+            properties: A string dictionary of properties for the given namespace.
+
+        Raises:
+            ValueError: If the identifier is invalid.
+            AlreadyExistsError: If a namespace with the given name already exists.
+        """
+        database_name = self.identifier_to_database(namespace)
+        try:
+            self.glue.create_database(DatabaseInput=_construct_database_input(database_name, properties))
+        except self.glue.exceptions.AlreadyExistsException as e:
+            raise NamespaceAlreadyExistsError(f"Database {database_name} already exists") from e
+</python function>
+<rust function signature>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) fn convert_to_database(
+    namespace: &NamespaceIdent,
+    properties: &HashMap<String, String>,
+) -> Result<DatabaseInput> {
+    let db_name = validate_namespace(namespace)?;
+    let mut builder = DatabaseInput::builder().name(db_name);
+
+    for (k, v) in properties.iter() {
+        match k.as_ref() {
+            DESCRIPTION => {
+                builder = builder.description(v);
+            }
+            LOCATION => {
+                builder = builder.location_uri(v);
+            }
+            _ => {
+                builder = builder.parameters(k, v);
+            }
+        }
+    }
+
+    builder.build().map_err(from_aws_build_error)
+}
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+pub fn with_properties(name: NamespaceIdent, properties: HashMap<String, String>) -> Self {
+        Self { name, properties }
+    }
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+
+        let builder = self.client.0.create_database().database_input(db_input);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(Namespace::with_properties(namespace.clone(), properties))
+    }
+</function>
+<translated function>
+Based on the provided Python function and the provided Rust function's signature, related variables, functions, and data type declarations, the translated Rust function might look like below:
+
+```rust
+#[derive(Error, Debug)]
+pub enum DatabaseError {
+    #[error("Database {0} already exists")]
+    AlreadyExistsError(String),
+}
+
+async fn create_namespace(
+    &self,
+    namespace: &NamespaceIdent,
+    properties: HashMap<String, String>,
+) -> Result<Namespace, DatabaseError> {
+    let database_input = convert_to_database(namespace, &properties)
+        .map_err(|_| DatabaseError::AlreadyExistsError(namespace.to_string()))?;
+    match self.client.create_database(database_input).await {
+        Ok(_) => Ok(namespace.clone()),
+        Err(_) => Err(DatabaseError::AlreadyExistsError(namespace.to_string())),
+    }
+}
+```
+
+Please note that the exact translation of the function depends on the exact context in your Rust codebase, as some details in Python can be done differently in Rust. Also, Python uses exceptions to manage errors, while Rust uses Result for error handling, so there will be differences in how errors are processed and propagated.</translated function>Based on the provided Python function and the provided Rust function's signature, related variables, functions, and data type declarations, the translated Rust function might look like below:
+
+```rust
+#[derive(Error, Debug)]
+pub enum DatabaseError {
+    #[error("Database {0} already exists")]
+    AlreadyExistsError(String),
+}
+
+async fn create_namespace(
+    &self,
+    namespace: &NamespaceIdent,
+    properties: HashMap<String, String>,
+) -> Result<Namespace, DatabaseError> {
+    let database_input = convert_to_database(namespace, &properties)
+        .map_err(|_| DatabaseError::AlreadyExistsError(namespace.to_string()))?;
+    match self.client.create_database(database_input).await {
+        Ok(_) => Ok(namespace.clone()),
+        Err(_) => Err(DatabaseError::AlreadyExistsError(namespace.to_string())),
+    }
+}
+```
+
+Please note that the exact translation of the function depends on the exact context in your Rust codebase, as some details in Python can be done differently in Rust. Also, Python uses exceptions to manage errors, while Rust uses Result for error handling, so there will be differences in how errors are processed and propagated.

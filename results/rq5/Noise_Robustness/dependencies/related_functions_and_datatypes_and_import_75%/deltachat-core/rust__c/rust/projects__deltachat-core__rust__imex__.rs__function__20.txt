@@ -1,0 +1,120 @@
+pub(crate) async fn write_file(
+    context: &Context,
+    path: impl AsRef<Path>,
+    buf: &[u8],
+) -> Result<(), io::Error> {
+    let path_abs = get_abs_path(context, path.as_ref());
+    fs::write(&path_abs, buf).await.map_err(|err| {
+        warn!(
+            context,
+            "Cannot write {} bytes to \"{}\": {}",
+            buf.len(),
+            path.as_ref().display(),
+            err
+        );
+        err
+    })
+}
+pub fn emit_event(&self, event: EventType) {
+        {
+            let lock = self.debug_logging.read().expect("RwLock is poisoned");
+            if let Some(debug_logging) = &*lock {
+                debug_logging.log_event(event.clone());
+            }
+        }
+        self.events.emit(Event {
+            id: self.id,
+            typ: event,
+        });
+    }
+fn to_asc(&self, header: Option<(&str, &str)>) -> String {
+        // Not using .to_armored_string() to make clear *why* it is
+        // safe to do these unwraps.
+        // Because we write to a Vec<u8> the io::Write impls never
+        // fail and we can hide this error.  The string is always ASCII.
+        let headers = header.map(|(key, value)| {
+            let mut m = BTreeMap::new();
+            m.insert(key.to_string(), value.to_string());
+            m
+        });
+        let mut buf = Vec::new();
+        self.to_armored_writer(&mut buf, headers.as_ref())
+            .unwrap_or_default();
+        std::string::String::from_utf8(buf).unwrap_or_default()
+    }
+macro_rules! info {
+    ($ctx:expr,  $msg:expr) => {
+        info!($ctx, $msg,)
+    };
+    ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
+        let formatted = format!($msg, $($args),*);
+        let full = format!("{file}:{line}: {msg}",
+                           file = file!(),
+                           line = line!(),
+                           msg = &formatted);
+        $ctx.emit_event($crate::EventType::Info(full));
+    }};
+}
+pub(crate) async fn delete_file(context: &Context, path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    let path_abs = get_abs_path(context, path);
+    if !path_abs.exists() {
+        bail!("path {} does not exist", path_abs.display());
+    }
+    if !path_abs.is_file() {
+        warn!(context, "refusing to delete non-file {}.", path.display());
+        bail!("not a file: \"{}\"", path.display());
+    }
+
+    let dpath = format!("{}", path.to_string_lossy());
+    fs::remove_file(path_abs)
+        .await
+        .with_context(|| format!("cannot delete {dpath:?}"))?;
+    context.emit_event(EventType::DeletedBlobFile(dpath));
+    Ok(())
+}
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+------
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};

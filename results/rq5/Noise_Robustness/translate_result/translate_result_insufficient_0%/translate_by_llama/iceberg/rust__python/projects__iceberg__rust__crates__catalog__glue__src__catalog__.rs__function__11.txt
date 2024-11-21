@@ -1,0 +1,170 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def register_table(self, identifier: Union[str, Identifier], metadata_location: str) -> Table:
+        """Register a new table using existing metadata.
+
+        Args:
+            identifier Union[str, Identifier]: Table identifier for the table
+            metadata_location str: The location to the metadata
+
+        Returns:
+            Table: The newly registered table
+
+        Raises:
+            TableAlreadyExistsError: If the table already exists
+        """
+        database_name, table_name = self.identifier_to_database_and_table(identifier)
+        properties = EMPTY_DICT
+        io = self._load_file_io(location=metadata_location)
+        file = io.new_input(metadata_location)
+        metadata = FromInputFile.table_metadata(file)
+        table_input = _construct_table_input(table_name, metadata_location, properties, metadata)
+        self._create_glue_table(database_name=database_name, table_name=table_name, table_input=table_input)
+        return self.load_table(identifier=identifier)
+</python function>
+<rust function signature>
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> {
+        let db_name = validate_namespace(namespace)?;
+        let table_name = creation.name.clone();
+
+        let location = match &creation.location {
+            Some(location) => location.clone(),
+            None => {
+                let ns = self.get_namespace(namespace).await?;
+                get_default_table_location(&ns, &db_name, &table_name, &self.config.warehouse)
+            }
+        };
+
+        let metadata = TableMetadataBuilder::from_table_creation(creation)?.build()?;
+        let metadata_location = create_metadata_location(&location, 0)?;
+
+        self.file_io
+            .new_output(&metadata_location)?
+            .write(serde_json::to_vec(&metadata)?.into())
+            .await?;
+
+        let glue_table = convert_to_glue_table(
+            &table_name,
+            metadata_location.clone(),
+            &metadata,
+            metadata.properties(),
+            None,
+        )?;
+
+        let builder = self
+            .client
+            .0
+            .create_table()
+            .database_name(&db_name)
+            .table_input(glue_table);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        let table = Table::builder()
+            .file_io(self.file_io())
+            .metadata_location(metadata_location)
+            .metadata(metadata)
+            .identifier(TableIdent::new(NamespaceIdent::new(db_name), table_name))
+            .build();
+
+        Ok(table)
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+async fn create_table(
+    &self,
+    identifier: &str,
+    metadata_location: &str,
+) -> Result<Table> {
+    let (database_name, table_name) = self.identifier_to_database_and_table(identifier);
+    let properties = HashMap::new();
+    let io = self._load_file_io(location=metadata_location);
+    let file = io.new_input(metadata_location);
+    let metadata = TableMetadataBuilder::from_input_file(file).build();
+    let table_input = TableInput::builder()
+       .table_name(table_name)
+       .location(get_default_table_location(metadata_location))
+       .build();
+    self._create_glue_table(database_name, table_name, table_input).await?;
+    Ok(self.load_table(identifier).await?)
+}
+```
+Note that I've made the following assumptions:
+
+* `identifier_to_database_and_table` is a method on the `self` type that takes a `&str` and returns a tuple of `&str`.
+* `_load_file_io` is a method on the `self` type that takes a `&str` and returns a `FileIO`.
+* `_create_glue_table` is a method on the `self` type that takes a `&str`, a `&str`, and a `TableInput` and returns a `Result`.
+* `load_table` is a method on the `self` type that takes a `&str` and returns a `Table`.
+
+I've also assumed that the `TableCreation` type is not needed in this implementation, as it is not used in the provided Python code. If this is not the case, please let me know and I'll update the implementation accordingly.</translated function>Here is the translated Rust function:
+```rust
+async fn create_table(
+    &self,
+    identifier: &str,
+    metadata_location: &str,
+) -> Result<Table> {
+    let (database_name, table_name) = self.identifier_to_database_and_table(identifier);
+    let properties = HashMap::new();
+    let io = self._load_file_io(location=metadata_location);
+    let file = io.new_input(metadata_location);
+    let metadata = TableMetadataBuilder::from_input_file(file).build();
+    let table_input = TableInput::builder()
+       .table_name(table_name)
+       .location(get_default_table_location(metadata_location))
+       .build();
+    self._create_glue_table(database_name, table_name, table_input).await?;
+    Ok(self.load_table(identifier).await?)
+}
+```
+Note that I've made the following assumptions:
+
+* `identifier_to_database_and_table` is a method on the `self` type that takes a `&str` and returns a tuple of `&str`.
+* `_load_file_io` is a method on the `self` type that takes a `&str` and returns a `FileIO`.
+* `_create_glue_table` is a method on the `self` type that takes a `&str`, a `&str`, and a `TableInput` and returns a `Result`.
+* `load_table` is a method on the `self` type that takes a `&str` and returns a `Table`.
+
+I've also assumed that the `TableCreation` type is not needed in this implementation, as it is not used in the provided Python code. If this is not the case, please let me know and I'll update the implementation accordingly.

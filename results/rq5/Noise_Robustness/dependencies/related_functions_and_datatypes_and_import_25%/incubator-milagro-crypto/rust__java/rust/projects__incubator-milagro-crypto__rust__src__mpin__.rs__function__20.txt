@@ -1,0 +1,63 @@
+pub fn to_bytes(&self, b: &mut [u8]) {
+        self.to_byte_array(b, 0)
+    }
+pub fn is_infinity(&self) -> bool {
+        self.x.is_zilch() && self.z.is_zilch()
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+pub struct Big {
+    pub w: [Chunk; NLEN],
+}
+pub const PBLEN: i32 = 14;
+------
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

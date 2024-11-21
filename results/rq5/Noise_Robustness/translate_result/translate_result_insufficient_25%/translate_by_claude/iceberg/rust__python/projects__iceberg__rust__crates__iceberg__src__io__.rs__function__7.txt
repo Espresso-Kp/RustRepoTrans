@@ -1,0 +1,130 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def delete(self, location: Union[str, InputFile, OutputFile]) -> None:
+        """Delete the file at the given location.
+
+        Args:
+            location (Union[str, InputFile, OutputFile]): The URI to the file--if an InputFile instance or an OutputFile instance is provided,
+                the location attribute for that instance is used as the location to delete.
+
+        Raises:
+            FileNotFoundError: When the file at the provided location does not exist.
+            PermissionError: If the file at the provided location cannot be accessed due to a permission error such as
+                an AWS error code 15.
+        """
+        str_location = location.location if isinstance(location, (InputFile, OutputFile)) else location
+        scheme, netloc, path = self.parse_location(str_location)
+        fs = self.fs_by_scheme(scheme, netloc)
+
+        try:
+            fs.delete_file(path)
+        except:
+            raise
+</python function>
+<rust function signature>
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct FileIO {
+    inner: Arc<Storage>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        Ok(op.delete(relative_path).await?)
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+    let str_path = path.as_ref();
+    let url = Url::parse(str_path).map_err(|e| Error::new(ErrorKind::InvalidInput, e))?;
+    
+    let scheme = url.scheme();
+    let netloc = url.host_str().unwrap_or("");
+    let path = url.path();
+
+    let operator = self.inner.get_operator(scheme, netloc)?;
+
+    operator.delete(path).await.map_err(|e| {
+        match e.kind() {
+            opendal::ErrorKind::NotFound => Error::new(ErrorKind::NotFound, e),
+            opendal::ErrorKind::PermissionDenied => Error::new(ErrorKind::PermissionDenied, e),
+            _ => Error::new(ErrorKind::Unexpected, e),
+        }
+    })?;
+
+    Ok(())
+}
+```
+
+This Rust implementation follows the provided function signature and uses the dependencies and libraries specified. It performs the following steps:
+
+1. Converts the input `path` to a string.
+2. Parses the path as a URL.
+3. Extracts the scheme, netloc (host), and path from the URL.
+4. Gets the appropriate operator from the inner storage based on the scheme and netloc.
+5. Attempts to delete the file using the operator.
+6. Maps any errors to the appropriate Error types.
+
+Note that this implementation assumes that the `Storage` struct has a method `get_operator` that returns an `Operator` based on the scheme and netloc. If this method doesn't exist, you may need to implement it or adjust the code accordingly.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+    let str_path = path.as_ref();
+    let url = Url::parse(str_path).map_err(|e| Error::new(ErrorKind::InvalidInput, e))?;
+    
+    let scheme = url.scheme();
+    let netloc = url.host_str().unwrap_or("");
+    let path = url.path();
+
+    let operator = self.inner.get_operator(scheme, netloc)?;
+
+    operator.delete(path).await.map_err(|e| {
+        match e.kind() {
+            opendal::ErrorKind::NotFound => Error::new(ErrorKind::NotFound, e),
+            opendal::ErrorKind::PermissionDenied => Error::new(ErrorKind::PermissionDenied, e),
+            _ => Error::new(ErrorKind::Unexpected, e),
+        }
+    })?;
+
+    Ok(())
+}
+```
+
+This Rust implementation follows the provided function signature and uses the dependencies and libraries specified. It performs the following steps:
+
+1. Converts the input `path` to a string.
+2. Parses the path as a URL.
+3. Extracts the scheme, netloc (host), and path from the URL.
+4. Gets the appropriate operator from the inner storage based on the scheme and netloc.
+5. Attempts to delete the file using the operator.
+6. Maps any errors to the appropriate Error types.
+
+Note that this implementation assumes that the `Storage` struct has a method `get_operator` that returns an `Operator` based on the scheme and netloc. If this method doesn't exist, you may need to implement it or adjust the code accordingly.

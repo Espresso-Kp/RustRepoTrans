@@ -1,0 +1,416 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+* If the group is already _promoted_ (any message was sent to the group),
+ * all group members are informed by a special status message that is sent automatically by this function.
+ *
+ * Sends out #DC_EVENT_CHAT_MODIFIED and #DC_EVENT_MSGS_CHANGED if a status message was sent.
+ *
+ * @memberof dc_context_t
+ * @param chat_id The chat ID to set the name for.  Must be a group chat.
+ * @param new_name New name of the group.
+ * @param context The context as created by dc_context_new().
+ * @return 1=success, 0=error
+ */
+int dc_set_chat_name(dc_context_t* context, uint32_t chat_id, const char* new_name)
+{
+	/* the function only sets the names of group chats; normal chats get their names from the contacts */
+	int        success = 0;
+	dc_chat_t* chat = dc_chat_new(context);
+	dc_msg_t*  msg = dc_msg_new_untyped(context);
+	char*      q3 = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || new_name==NULL || new_name[0]==0 || chat_id<=DC_CHAT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+	if (0==real_group_exists(context, chat_id)
+	 || 0==dc_chat_load_from_db(chat, chat_id)) {
+		goto cleanup;
+	}
+
+	if (strcmp(chat->name, new_name)==0) {
+		success = 1;
+		goto cleanup; /* name not modified */
+	}
+
+	if (!IS_SELF_IN_GROUP) {
+		dc_log_event(context, DC_EVENT_ERROR_SELF_NOT_IN_GROUP, 0,
+		             "Cannot set chat name; self not in group");
+		goto cleanup; /* we shoud respect this - whatever we send to the group, it gets discarded anyway! */
+	}
+
+	q3 = sqlite3_mprintf("UPDATE chats SET name=%Q WHERE id=%i;", new_name, chat_id);
+	if (!dc_sqlite3_execute(context->sql, q3)) {
+		goto cleanup;
+	}
+
+	/* send a status mail to all group members, also needed for outself to allow multi-client */
+	if (DO_SEND_STATUS_MAILS)
+	{
+		msg->type = DC_MSG_TEXT;
+		msg->text = dc_stock_system_msg(context, DC_STR_MSGGRPNAME, chat->name, new_name, DC_CONTACT_ID_SELF);
+		dc_param_set_int(msg->param, DC_PARAM_CMD,     DC_CMD_GROUPNAME_CHANGED);
+		dc_param_set    (msg->param, DC_PARAM_CMD_ARG, chat->name);
+		msg->id = dc_send_msg(context, chat_id, msg);
+		context->cb(context, DC_EVENT_MSGS_CHANGED, chat_id, msg->id);
+	}
+	context->cb(context, DC_EVENT_CHAT_MODIFIED, chat_id, 0);
+
+	success = 1;
+
+cleanup:
+	sqlite3_free(q3);
+	dc_chat_unref(chat);
+	dc_msg_unref(msg);
+	return success;
+}
+</c function>
+<rust function signature>
+pub async fn set_chat_name(context: &Context, chat_id: ChatId, new_name: &str) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+async fn rename_ex(
+    context: &Context,
+    mut sync: sync::Sync,
+    chat_id: ChatId,
+    new_name: &str,
+) -> Result<()> {
+    let new_name = improve_single_line_input(new_name);
+    /* the function only sets the names of group chats; normal chats get their names from the contacts */
+    let mut success = false;
+
+    ensure!(!new_name.is_empty(), "Invalid name");
+    ensure!(!chat_id.is_special(), "Invalid chat ID");
+
+    let chat = Chat::load_from_db(context, chat_id).await?;
+    let mut msg = Message::default();
+
+    if chat.typ == Chattype::Group
+        || chat.typ == Chattype::Mailinglist
+        || chat.typ == Chattype::Broadcast
+    {
+        if chat.name == new_name {
+            success = true;
+        } else if !chat.is_self_in_chat(context).await? {
+            context.emit_event(EventType::ErrorSelfNotInGroup(
+                "Cannot set chat name; self not in group".into(),
+            ));
+        } else {
+            context
+                .sql
+                .execute(
+                    "UPDATE chats SET name=? WHERE id=?;",
+                    (new_name.to_string(), chat_id),
+                )
+                .await?;
+            if chat.is_promoted()
+                && !chat.is_mailing_list()
+                && chat.typ != Chattype::Broadcast
+                && improve_single_line_input(&chat.name) != new_name
+            {
+                msg.viewtype = Viewtype::Text;
+                msg.text =
+                    stock_str::msg_grp_name(context, &chat.name, &new_name, ContactId::SELF).await;
+                msg.param.set_cmd(SystemMessage::GroupNameChanged);
+                if !chat.name.is_empty() {
+                    msg.param.set(Param::Arg, &chat.name);
+                }
+                msg.id = send_msg(context, chat_id, &mut msg).await?;
+                context.emit_msgs_changed(chat_id, msg.id);
+                sync = Nosync;
+            }
+            context.emit_event(EventType::ChatModified(chat_id));
+            chatlist_events::emit_chatlist_item_changed(context, chat_id);
+            success = true;
+        }
+    }
+
+    if !success {
+        bail!("Failed to set name");
+    }
+    if sync.into() && chat.name != new_name {
+        let sync_name = new_name.to_string();
+        chat.sync(context, SyncAction::Rename(sync_name))
+            .await
+            .log_err(context)
+            .ok();
+    }
+    Ok(())
+}
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct ChatId(u32);
+
+
+pub async fn set_chat_profile_image(
+    context: &Context,
+    chat_id: ChatId,
+    new_image: &str, // XXX use PathBuf
+) -> Result<()> {
+    ensure!(!chat_id.is_special(), "Invalid chat ID");
+    let mut chat = Chat::load_from_db(context, chat_id).await?;
+    ensure!(
+        chat.typ == Chattype::Group || chat.typ == Chattype::Mailinglist,
+        "Failed to set profile image; group does not exist"
+    );
+    /* we should respect this - whatever we send to the group, it gets discarded anyway! */
+    if !is_contact_in_chat(context, chat_id, ContactId::SELF).await? {
+        context.emit_event(EventType::ErrorSelfNotInGroup(
+            "Cannot set chat profile image; self not in group.".into(),
+        ));
+        bail!("Failed to set profile image");
+    }
+    let mut msg = Message::new(Viewtype::Text);
+    msg.param
+        .set_int(Param::Cmd, SystemMessage::GroupImageChanged as i32);
+    if new_image.is_empty() {
+        chat.param.remove(Param::ProfileImage);
+        msg.param.remove(Param::Arg);
+        msg.text = stock_str::msg_grp_img_deleted(context, ContactId::SELF).await;
+    } else {
+        let mut image_blob = BlobObject::new_from_path(context, Path::new(new_image)).await?;
+        image_blob.recode_to_avatar_size(context).await?;
+        chat.param.set(Param::ProfileImage, image_blob.as_name());
+        msg.param.set(Param::Arg, image_blob.as_name());
+        msg.text = stock_str::msg_grp_img_changed(context, ContactId::SELF).await;
+    }
+    chat.update_param(context).await?;
+    if chat.is_promoted() && !chat.is_mailing_list() {
+        msg.id = send_msg(context, chat_id, &mut msg).await?;
+        context.emit_msgs_changed(chat_id, msg.id);
+    }
+    context.emit_event(EventType::ChatModified(chat_id));
+    chatlist_events::emit_chatlist_item_changed(context, chat_id);
+    Ok(())
+}
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn set_chat_name(context: &Context, chat_id: ChatId, new_name: &str) -> Result<()> {
+    rename_ex(context, Sync, chat_id, new_name).await
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn set_chat_name(context: &Context, chat_id: ChatId, new_name: &str) -> Result<()> {
+    let mut sync = sync::Sync::Normal;
+    rename_ex(context, sync, chat_id, new_name).await
+}
+
+async fn rename_ex(
+    context: &Context,
+    mut sync: sync::Sync,
+    chat_id: ChatId,
+    new_name: &str,
+) -> Result<()> {
+    let new_name = improve_single_line_input(new_name);
+    
+    ensure!(!new_name.is_empty(), "Invalid name");
+    ensure!(!chat_id.is_special(), "Invalid chat ID");
+
+    let chat = Chat::load_from_db(context, chat_id).await?;
+    let mut msg = Message::default();
+
+    if chat.typ == Chattype::Group
+        || chat.typ == Chattype::Mailinglist
+        || chat.typ == Chattype::Broadcast
+    {
+        if chat.name == new_name {
+            return Ok(());
+        } else if !chat.is_self_in_chat(context).await? {
+            context.emit_event(EventType::ErrorSelfNotInGroup(
+                "Cannot set chat name; self not in group".into(),
+            ));
+            bail!("Failed to set name");
+        } else {
+            context
+                .sql
+                .execute(
+                    "UPDATE chats SET name=? WHERE id=?;",
+                    (new_name.to_string(), chat_id),
+                )
+                .await?;
+            
+            if chat.is_promoted()
+                && !chat.is_mailing_list()
+                && chat.typ != Chattype::Broadcast
+                && improve_single_line_input(&chat.name) != new_name
+            {
+                msg.viewtype = Viewtype::Text;
+                msg.text =
+                    stock_str::msg_grp_name(context, &chat.name, &new_name, ContactId::SELF).await;
+                msg.param.set_cmd(SystemMessage::GroupNameChanged);
+                if !chat.name.is_empty() {
+                    msg.param.set(Param::Arg, &chat.name);
+                }
+                msg.id = send_msg(context, chat_id, &mut msg).await?;
+                context.emit_msgs_changed(chat_id, msg.id);
+                sync = sync::Sync::Nosync;
+            }
+            context.emit_event(EventType::ChatModified(chat_id));
+            chatlist_events::emit_chatlist_item_changed(context, chat_id);
+        }
+    } else {
+        bail!("Failed to set name");
+    }
+
+    if sync.into() && chat.name != new_name {
+        let sync_name = new_name.to_string();
+        chat.sync(context, SyncAction::Rename(sync_name))
+            .await
+            .log_err(context)
+            .ok();
+    }
+    Ok(())
+}
+```
+
+This Rust function closely follows the logic of the original C function while adapting to Rust's async/await syntax and error handling. It uses the provided dependencies and adheres to the given function signature. The function renames a chat, updates the database, sends a status message if necessary, and emits appropriate events.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn set_chat_name(context: &Context, chat_id: ChatId, new_name: &str) -> Result<()> {
+    let mut sync = sync::Sync::Normal;
+    rename_ex(context, sync, chat_id, new_name).await
+}
+
+async fn rename_ex(
+    context: &Context,
+    mut sync: sync::Sync,
+    chat_id: ChatId,
+    new_name: &str,
+) -> Result<()> {
+    let new_name = improve_single_line_input(new_name);
+    
+    ensure!(!new_name.is_empty(), "Invalid name");
+    ensure!(!chat_id.is_special(), "Invalid chat ID");
+
+    let chat = Chat::load_from_db(context, chat_id).await?;
+    let mut msg = Message::default();
+
+    if chat.typ == Chattype::Group
+        || chat.typ == Chattype::Mailinglist
+        || chat.typ == Chattype::Broadcast
+    {
+        if chat.name == new_name {
+            return Ok(());
+        } else if !chat.is_self_in_chat(context).await? {
+            context.emit_event(EventType::ErrorSelfNotInGroup(
+                "Cannot set chat name; self not in group".into(),
+            ));
+            bail!("Failed to set name");
+        } else {
+            context
+                .sql
+                .execute(
+                    "UPDATE chats SET name=? WHERE id=?;",
+                    (new_name.to_string(), chat_id),
+                )
+                .await?;
+            
+            if chat.is_promoted()
+                && !chat.is_mailing_list()
+                && chat.typ != Chattype::Broadcast
+                && improve_single_line_input(&chat.name) != new_name
+            {
+                msg.viewtype = Viewtype::Text;
+                msg.text =
+                    stock_str::msg_grp_name(context, &chat.name, &new_name, ContactId::SELF).await;
+                msg.param.set_cmd(SystemMessage::GroupNameChanged);
+                if !chat.name.is_empty() {
+                    msg.param.set(Param::Arg, &chat.name);
+                }
+                msg.id = send_msg(context, chat_id, &mut msg).await?;
+                context.emit_msgs_changed(chat_id, msg.id);
+                sync = sync::Sync::Nosync;
+            }
+            context.emit_event(EventType::ChatModified(chat_id));
+            chatlist_events::emit_chatlist_item_changed(context, chat_id);
+        }
+    } else {
+        bail!("Failed to set name");
+    }
+
+    if sync.into() && chat.name != new_name {
+        let sync_name = new_name.to_string();
+        chat.sync(context, SyncAction::Rename(sync_name))
+            .await
+            .log_err(context)
+            .ok();
+    }
+    Ok(())
+}
+```
+
+This Rust function closely follows the logic of the original C function while adapting to Rust's async/await syntax and error handling. It uses the provided dependencies and adheres to the given function signature. The function renames a chat, updates the database, sends a status message if necessary, and emits appropriate events.

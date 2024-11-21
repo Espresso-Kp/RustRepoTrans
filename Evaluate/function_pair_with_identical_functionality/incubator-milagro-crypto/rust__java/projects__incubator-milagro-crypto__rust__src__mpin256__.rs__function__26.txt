@@ -1,0 +1,112 @@
+<path>
+projects/incubator-milagro-crypto/rust/src/mpin256.rs
+</path>
+<function>
+pub fn kangaroo(e: &[u8], f: &[u8]) -> isize {
+    let mut ge = FP48::from_bytes(e);
+    let mut gf = FP48::from_bytes(f);
+    let mut distance: [isize; TS] = [0; TS];
+    let mut t = gf.clone();
+
+    let mut table: Vec<FP48> = Vec::with_capacity(TS);
+    let mut s: isize = 1;
+    for m in 0..TS {
+        distance[m] = s;
+        table.push(t.clone());
+        s *= 2;
+        t.usqr();
+    }
+    t.one();
+    let mut dn: isize = 0;
+    let mut i: usize;
+    for _ in 0..TRAP {
+        i = (t.geta().geta().geta().geta().geta().lastbits(20) % (TS as isize)) as usize;
+        t.mul(&mut table[i]);
+        dn += distance[i];
+    }
+    gf = t.clone();
+    gf.conj();
+    let mut steps: usize = 0;
+    let mut dm: isize = 0;
+    let mut res: isize = 0;
+    while dm - dn < MAXPIN as isize {
+        steps += 1;
+        if steps > 4 * TRAP {
+            break;
+        }
+        i = (ge.geta().geta().geta().geta().geta().lastbits(20) % (TS as isize)) as usize;
+        ge.mul(&mut table[i]);
+        dm += distance[i];
+        if ge.equals(&mut t) {
+            res = dm - dn;
+            break;
+        }
+        if ge.equals(&mut gf) {
+            res = dn - dm;
+            break;
+        }
+    }
+    if steps > 4 * TRAP || dm - dn >= MAXPIN as isize {
+        res = 0
+    } // Trap Failed  - probable invalid token
+    return res;
+}
+</function>
+------
+
+<path>
+projects/incubator-milagro-crypto/java/src/main/java/org/apache/milagro/amcl/BLS48/MPIN256.java
+</path>
+<function>
+public static int KANGAROO(byte[] E,byte[] F)
+	{
+		FP48 ge=FP48.fromBytes(E);
+		FP48 gf=FP48.fromBytes(F);
+		int[] distance = new int[TS];
+		FP48 t=new FP48(gf);
+		FP48[] table=new FP48[TS];
+		int i,j,m,s,dn,dm,res,steps;
+
+		s=1;
+		for (m=0;m<TS;m++)
+		{
+			distance[m]=s;
+			table[m]=new FP48(t);
+			s*=2;
+			t.usqr();
+		}
+		t.one();
+		dn=0;
+		for (j=0;j<TRAP;j++)
+		{
+			i=t.geta().geta().geta().geta().getA().lastbits(20)%TS;
+			t.mul(table[i]);
+			dn+=distance[i];
+		}
+		gf.copy(t); gf.conj();
+		steps=0; dm=0;
+		res=0;
+		while (dm-dn<MAXPIN)
+		{
+			steps++;
+			if (steps>4*TRAP) break;
+			i=ge.geta().geta().geta().geta().getA().lastbits(20)%TS;
+			ge.mul(table[i]);
+			dm+=distance[i];
+			if (ge.equals(t))
+			{
+				res=dm-dn;
+				break;
+			}
+			if (ge.equals(gf))
+			{
+				res=dn-dm;
+				break;
+			}
+
+		}
+		if (steps>4*TRAP || dm-dn>=MAXPIN) {res=0; }    // Trap Failed  - probable invalid token
+		return res;
+	}
+</function>
+

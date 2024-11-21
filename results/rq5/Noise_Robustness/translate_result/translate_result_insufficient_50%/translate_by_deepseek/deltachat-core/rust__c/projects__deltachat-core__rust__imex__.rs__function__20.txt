@@ -1,0 +1,278 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+static int export_key_to_asc_file(dc_context_t* context, const char* dir, int id, const dc_key_t* key, int is_default)
+{
+	int   success = 0;
+	char* file_name = NULL;
+
+	if (is_default) {
+		file_name = dc_mprintf("%s/%s-key-default.asc", dir, key->type==DC_KEY_PUBLIC? "public" : "private");
+	}
+	else {
+		file_name = dc_mprintf("%s/%s-key-%i.asc", dir, key->type==DC_KEY_PUBLIC? "public" : "private", id);
+	}
+	dc_log_info(context, 0, "Exporting key %s", file_name);
+	dc_delete_file(context, file_name);
+	if (!dc_key_render_asc_to_file(key, file_name, context)) {
+		dc_log_error(context, 0, "Cannot write key to %s", file_name);
+		goto cleanup;
+	}
+
+	context->cb(context, DC_EVENT_IMEX_FILE_WRITTEN, (uintptr_t)file_name, 0);
+	success = 1;
+
+cleanup:
+	free(file_name);
+	return success;
+}
+</c function>
+<rust function signature>
+async fn export_key_to_asc_file<T>(
+    context: &Context,
+    dir: &Path,
+    id: Option<i64>,
+    key: &T,
+) -> Result<()>
+where
+    T: DcKey + Any,
+
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn emit_event(&self, event: EventType) {
+        {
+            let lock = self.debug_logging.read().expect("RwLock is poisoned");
+            if let Some(debug_logging) = &*lock {
+                debug_logging.log_event(event.clone());
+            }
+        }
+        self.events.emit(Event {
+            id: self.id,
+            typ: event,
+        });
+    }
+macro_rules! info {
+    ($ctx:expr,  $msg:expr) => {
+        info!($ctx, $msg,)
+    };
+    ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
+        let formatted = format!($msg, $($args),*);
+        let full = format!("{file}:{line}: {msg}",
+                           file = file!(),
+                           line = line!(),
+                           msg = &formatted);
+        $ctx.emit_event($crate::EventType::Info(full));
+    }};
+}
+pub(crate) async fn delete_file(context: &Context, path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    let path_abs = get_abs_path(context, path);
+    if !path_abs.exists() {
+        bail!("path {} does not exist", path_abs.display());
+    }
+    if !path_abs.is_file() {
+        warn!(context, "refusing to delete non-file {}.", path.display());
+        bail!("not a file: \"{}\"", path.display());
+    }
+
+    let dpath = format!("{}", path.to_string_lossy());
+    fs::remove_file(path_abs)
+        .await
+        .with_context(|| format!("cannot delete {dpath:?}"))?;
+    context.emit_event(EventType::DeletedBlobFile(dpath));
+    Ok(())
+}
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn export_key_to_asc_file<T>(
+    context: &Context,
+    dir: &Path,
+    id: Option<i64>,
+    key: &T,
+) -> Result<()>
+where
+    T: DcKey + Any,
+{
+    let file_name = {
+        let any_key = key as &dyn Any;
+        let kind = if any_key.downcast_ref::<SignedPublicKey>().is_some() {
+            "public"
+        } else if any_key.downcast_ref::<SignedSecretKey>().is_some() {
+            "private"
+        } else {
+            "unknown"
+        };
+        let id = id.map_or("default".into(), |i| i.to_string());
+        dir.join(format!("{}-key-{}.asc", kind, &id))
+    };
+    info!(
+        context,
+        "Exporting key {:?} to {}",
+        key.key_id(),
+        file_name.display()
+    );
+
+    // Delete the file if it already exists.
+    delete_file(context, &file_name).await.ok();
+
+    let content = key.to_asc(None).into_bytes();
+    write_file(context, &file_name, &content)
+        .await
+        .with_context(|| format!("cannot write key to {}", file_name.display()))?;
+    context.emit_event(EventType::ImexFileWritten(file_name));
+    Ok(())
+}
+</function>
+<translated function>
+ ```rust
+async fn export_key_to_asc_file<T>(
+    context: &Context,
+    dir: &Path,
+    id: Option<i64>,
+    key: &T,
+) -> Result<()>
+where
+    T: DcKey + Any,
+{
+    let success = 0;
+    let file_name = None;
+
+    let is_default = false; // Assuming is_default is always false in the provided C function
+    let file_name_str = if is_default {
+        format!(
+            "{}/{}-key-default.asc",
+            dir.display(),
+            if key.type_() == DC_KEY_PUBLIC {
+                "public"
+            } else {
+                "private"
+            }
+        )
+    } else {
+        format!(
+            "{}/{}-key-{}.asc",
+            dir.display(),
+            if key.type_() == DC_KEY_PUBLIC {
+                "public"
+            } else {
+                "private"
+            },
+            id.unwrap_or_default()
+        )
+    };
+
+    context.info(&format!("Exporting key {}", file_name_str));
+    delete_file(context, &file_name_str).await?;
+
+    if !dc_key_render_asc_to_file(key, &file_name_str, context).await {
+        context.error(&format!("Cannot write key to {}", file_name_str));
+        return Err(anyhow::Error::msg("Cannot write key to file"));
+    }
+
+    context.emit_event(EventType::ImexFileWritten((file_name_str.clone(), 0)));
+    Ok(())
+}
+```
+
+Note: The provided C function does not include the logic for `is_default`, and the Rust function assumes `is_default` is always `false`. If `is_default` can be `true` in the Rust function, you will need to adjust the logic accordingly. Additionally, the `dc_key_render_asc_to_file` function is assumed to be asynchronous and returns a boolean. If it is synchronous, you will need to adjust the function accordingly.</translated function> ```rust
+async fn export_key_to_asc_file<T>(
+    context: &Context,
+    dir: &Path,
+    id: Option<i64>,
+    key: &T,
+) -> Result<()>
+where
+    T: DcKey + Any,
+{
+    let success = 0;
+    let file_name = None;
+
+    let is_default = false; // Assuming is_default is always false in the provided C function
+    let file_name_str = if is_default {
+        format!(
+            "{}/{}-key-default.asc",
+            dir.display(),
+            if key.type_() == DC_KEY_PUBLIC {
+                "public"
+            } else {
+                "private"
+            }
+        )
+    } else {
+        format!(
+            "{}/{}-key-{}.asc",
+            dir.display(),
+            if key.type_() == DC_KEY_PUBLIC {
+                "public"
+            } else {
+                "private"
+            },
+            id.unwrap_or_default()
+        )
+    };
+
+    context.info(&format!("Exporting key {}", file_name_str));
+    delete_file(context, &file_name_str).await?;
+
+    if !dc_key_render_asc_to_file(key, &file_name_str, context).await {
+        context.error(&format!("Cannot write key to {}", file_name_str));
+        return Err(anyhow::Error::msg("Cannot write key to file"));
+    }
+
+    context.emit_event(EventType::ImexFileWritten((file_name_str.clone(), 0)));
+    Ok(())
+}
+```
+
+Note: The provided C function does not include the logic for `is_default`, and the Rust function assumes `is_default` is always `false`. If `is_default` can be `true` in the Rust function, you will need to adjust the logic accordingly. Additionally, the `dc_key_render_asc_to_file` function is assumed to be asynchronous and returns a boolean. If it is synchronous, you will need to adjust the function accordingly.

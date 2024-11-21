@@ -1,0 +1,442 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int SERVER_KEY(int sha,byte[] Z,byte[] SST,byte[] W,byte[] H,byte[] HID,byte[] xID,byte[] xCID,byte[] SK)
+	{
+		byte[] t;
+
+		ECP2 sQ=ECP2.fromBytes(SST);
+		if (sQ.is_infinity()) return INVALID_POINT; 
+		ECP R=ECP.fromBytes(Z);
+		if (R.is_infinity()) return INVALID_POINT; 
+		ECP A=ECP.fromBytes(HID);
+		if (A.is_infinity()) return INVALID_POINT; 
+
+		ECP U;
+		if (xCID!=null)
+			U=ECP.fromBytes(xCID);
+		else
+			U=ECP.fromBytes(xID);
+		if (U.is_infinity()) return INVALID_POINT; 
+
+		BIG w=BIG.fromBytes(W);
+		BIG h=BIG.fromBytes(H);
+		A=PAIR.G1mul(A,h);	// new
+		R.add(A); //R.affine();
+
+		U=PAIR.G1mul(U,w);
+		FP12 g=PAIR.ate(sQ,R);
+		g=PAIR.fexp(g);
+
+		FP4 c=g.trace();
+
+		t=mpin_hash(sha,c,U);
+
+		for (int i=0;i<ECP.AESKEY;i++) SK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn from_bytes(w: &[u8]) -> FP12 {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+
+        for i in 0..mb {
+            t[i] = w[i]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 2 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 3 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let e = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 4 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 5 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 6 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 7 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let f = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 8 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 9 * mb]
+        }
+        let b = Big::from_bytes(&t);
+
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 10 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 11 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let g = FP4::new_fp2s(c, d);
+
+        FP12::new_fp4s(e, f, g)
+    }
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub fn ate(P1: &ECP2, Q1: &ECP) -> FP12 {
+    let mut f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+    let mut n = Big::new();
+    let mut n3 = Big::new();
+
+    if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            f.inverse();
+            f.norm();
+        }
+    }
+
+    let mut P = P1.clone();
+    P.affine();
+    let mut Q = Q1.clone();
+    Q.affine();
+
+    let qx = Q.getpx();
+    let qy = Q.getpy();
+
+    let mut A = P.clone();
+    let mut NP = P.clone();
+    NP.neg();
+
+    let nb = lbits(&mut n3, &mut n);
+
+    let mut r = FP12::new_int(1);
+    for i in (1..nb - 1).rev() {
+        r.sqr();
+        let mut lv = linedbl(&mut A, &qx, &qy);
+        let bt = n3.bit(i) - n.bit(i);
+        if bt == 1 {
+            let lv2 = lineadd(&mut A, &P, &qx, &qy);
+            lv.smul(&lv2);
+        }
+        if bt == -1 {
+            let lv2 = lineadd(&mut A, &NP, &qx, &qy);
+            lv.smul(&lv2);
+        }
+        r.ssmul(&lv);
+    }
+
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        r.conj();
+    }
+
+    /* R-ate fixup required for BN curves */
+
+    if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            A.neg();
+        }
+
+        let mut K = P.clone();
+        K.frob(&f);
+
+        let mut lv = lineadd(&mut A, &K, &qx, &qy);
+        K.frob(&f);
+        K.neg();
+        let lv2 = lineadd(&mut A, &K, &qx, &qy);
+        lv.smul(&lv2);
+        r.ssmul(&lv);
+    }
+
+    return r;
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let sQ = ECP2::from_bytes(&sst);
+    if sQ.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut R = ECP::from_bytes(&z);
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut A = ECP::from_bytes(&hid);
+    if A.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut U = if let Some(rxcid) = xcid {
+        ECP::from_bytes(&rxcid)
+    } else {
+        ECP::from_bytes(&xid)
+    };
+
+    if U.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut w = Big::from_bytes(&w);
+    let mut h = Big::from_bytes(&h);
+    A = pair::g1mul(&A, &mut h); // new
+    R.add(&A);
+
+    U = pair::g1mul(&U, &mut w);
+    let mut g = pair::ate(&sQ, &R);
+    g = pair::fexp(&g);
+
+    let mut c = g.trace();
+
+    hash(sha, &mut c, &mut U, sk);
+
+    0
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let s_q = ECP2::from_bytes(sst);
+    if s_q.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let r = ECP::from_bytes(z);
+    if r.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut a = ECP::from_bytes(hid);
+    if a.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let u = match xcid {
+        Some(xcid_bytes) => ECP::from_bytes(xcid_bytes),
+        None => ECP::from_bytes(xid),
+    };
+    if u.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let w_big = Big::from_bytes(w);
+    let h_big = Big::from_bytes(h);
+
+    a = pair::g1mul(&a, &h_big);
+    r.add(&a);
+
+    let u = pair::g1mul(&u, &w_big);
+    let g = pair::ate(&s_q, &r);
+    let g = pair::fexp(&g);
+
+    let c = g.trace();
+
+    let t = mpin_hash(sha, &c, &u);
+
+    for i in 0..ecp::AESKEY {
+        sk[i] = t[i];
+    }
+
+    0
+}
+```
+
+Note that I've made some assumptions and adaptations:
+
+1. The `INVALID_POINT` constant is assumed to be defined elsewhere in your codebase.
+2. The `mpin_hash` function is assumed to be implemented elsewhere and accessible in this context.
+3. I've used `pair::g1mul` instead of `PAIR.G1mul`, assuming it's the equivalent in your Rust implementation.
+4. I've used `pair::ate` and `pair::fexp` instead of `PAIR.ate` and `PAIR.fexp`, respectively.
+5. The `ecp::AESKEY` constant is used instead of `ECP.AESKEY`.
+6. I've removed the explicit `.affine()` call on `r` as it might not be necessary in the Rust implementation.
+
+Please make sure to adjust any of these assumptions if they don't match your specific Rust implementation or requirements.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let s_q = ECP2::from_bytes(sst);
+    if s_q.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let r = ECP::from_bytes(z);
+    if r.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut a = ECP::from_bytes(hid);
+    if a.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let u = match xcid {
+        Some(xcid_bytes) => ECP::from_bytes(xcid_bytes),
+        None => ECP::from_bytes(xid),
+    };
+    if u.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let w_big = Big::from_bytes(w);
+    let h_big = Big::from_bytes(h);
+
+    a = pair::g1mul(&a, &h_big);
+    r.add(&a);
+
+    let u = pair::g1mul(&u, &w_big);
+    let g = pair::ate(&s_q, &r);
+    let g = pair::fexp(&g);
+
+    let c = g.trace();
+
+    let t = mpin_hash(sha, &c, &u);
+
+    for i in 0..ecp::AESKEY {
+        sk[i] = t[i];
+    }
+
+    0
+}
+```
+
+Note that I've made some assumptions and adaptations:
+
+1. The `INVALID_POINT` constant is assumed to be defined elsewhere in your codebase.
+2. The `mpin_hash` function is assumed to be implemented elsewhere and accessible in this context.
+3. I've used `pair::g1mul` instead of `PAIR.G1mul`, assuming it's the equivalent in your Rust implementation.
+4. I've used `pair::ate` and `pair::fexp` instead of `PAIR.ate` and `PAIR.fexp`, respectively.
+5. The `ecp::AESKEY` constant is used instead of `ECP.AESKEY`.
+6. I've removed the explicit `.affine()` call on `r` as it might not be necessary in the Rust implementation.
+
+Please make sure to adjust any of these assumptions if they don't match your specific Rust implementation or requirements.

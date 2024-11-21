@@ -1,0 +1,80 @@
+pub fn mapit(h: &[u8]) -> ECP {
+        let q = Big::new_ints(&rom::MODULUS);
+        let mut x = Big::from_bytes(h);
+        x.rmod(&q);
+        let mut P: ECP;
+
+        loop {
+            loop {
+                if CURVETYPE != CurveType::Montgomery {
+                    P = ECP::new_bigint(&x, 0);
+                } else {
+                    P = ECP::new_big(&x);
+                }
+                x.inc(1);
+                x.norm();
+                if !P.is_infinity() {
+                    break;
+                }
+            }
+            P.cfp();
+            if !P.is_infinity() {
+                break;
+            }
+        }
+
+        return P;
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+------
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

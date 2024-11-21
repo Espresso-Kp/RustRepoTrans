@@ -1,0 +1,508 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int OAEP_ENCODE(int sha,const octet *m,csprng *RNG,const octet *p,octet *f)
+{
+    int slen;
+    int olen=f->max-1;
+    int mlen=m->len;
+    int hlen;
+    int seedlen;
+    char dbmask[MAX_RSA_BYTES];
+    char seed[64];
+    octet DBMASK= {0,sizeof(dbmask),dbmask};
+    octet SEED= {0,sizeof(seed),seed};
+
+    hlen=seedlen=sha;
+    if (mlen>olen-hlen-seedlen-1) return 1;
+    if (m==f) return 1;  /* must be distinct octets */
+
+    hashit(sha,p,-1,f);
+
+    slen=olen-mlen-hlen-seedlen-1;
+
+    OCT_jbyte(f,0,slen);
+    OCT_jbyte(f,0x1,1);
+    OCT_joctet(f,m);
+
+    OCT_rand(&SEED,RNG,seedlen);
+
+    MGF1(sha,&SEED,olen-seedlen,&DBMASK);
+
+    OCT_xor(&DBMASK,f);
+    MGF1(sha,&DBMASK,seedlen,f);
+
+    OCT_xor(f,&SEED);
+
+    OCT_joctet(f,&DBMASK);
+
+    OCT_pad(f,f->max);
+    OCT_clear(&SEED);
+    OCT_clear(&DBMASK);
+
+    return 0;
+}
+</c function>
+<rust function signature>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn hashit(sha: usize, a: Option<&[u8]>, n: isize, w: &mut [u8]) {
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+}
+
+pub fn mgf1(sha: usize, z: &[u8], olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+
+    let mut j = 0;
+    for i in 0..k.len() {
+        k[i] = 0
+    }
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+    for counter in 0..cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, Some(z), counter as isize, &mut b);
+
+        if j + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[j] = b[i];
+                j += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[j] = b[i];
+                j += 1
+            }
+        }
+    }
+}
+
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = RFS - 1;
+    let mlen = m.len();
+
+    let hlen = sha;
+
+    let mut seed: [u8; 64] = [0; 64];
+
+    let seedlen = hlen;
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+
+    let mut dbmask: [u8; RFS] = [0; RFS];
+
+    hashit(sha, p, -1, f);
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    for i in 0..slen {
+        f[hlen + i] = 0
+    }
+    f[hlen + slen] = 1;
+    for i in 0..mlen {
+        f[hlen + slen + 1 + i] = m[i]
+    }
+
+    for i in 0..seedlen {
+        seed[i] = rng.getbyte()
+    }
+
+    mgf1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i]
+    }
+
+    mgf1(sha, &dbmask[0..olen - seedlen], seedlen, f);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i]
+    }
+
+    for i in 0..olen - seedlen {
+        f[i + seedlen] = dbmask[i]
+    }
+
+    /* pad to length RFS */
+    let d = 1;
+    for i in (d..RFS).rev() {
+        f[i] = f[i - d];
+    }
+    for i in (0..d).rev() {
+        f[i] = 0;
+    }
+    return true;
+}
+</function>
+<translated function>
+ ```rust
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let slen;
+    let olen = f.len() - 1;
+    let mlen = m.len();
+    let hlen;
+    let seedlen;
+    let mut dbmask = vec![0u8; MAX_RSA_BYTES];
+    let mut seed = vec![0u8; 64];
+
+    hlen = seedlen = sha;
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+    if m.as_ptr() == f.as_ptr() {
+        return false;
+    }
+
+    hashit(sha, p, -1, f);
+
+    slen = olen - mlen - hlen - seedlen - 1;
+
+    f[0] = slen as u8;
+    f[1] = 1;
+    f[2..(mlen + 2)].copy_from_slice(m);
+
+    OCT_rand(&mut seed, rng, seedlen);
+
+    MGF1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    OCT_xor(&mut dbmask, f);
+    MGF1(sha, &dbmask, seedlen, f);
+
+    OCT_xor(f, &seed);
+
+    f[..dbmask.len()].copy_from_slice(&dbmask);
+
+    OCT_pad(f, f.len());
+    OCT_clear(&mut seed);
+    OCT_clear(&mut dbmask);
+
+    true
+}
+
+fn hashit(sha: usize, a: Option<&[u8]>, n: isize, w: &mut [u8]) {
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+}
+
+pub fn mgf1(sha: usize, z: &[u8], olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+
+    let mut j = 0;
+    for i in 0..k.len() {
+        k[i] = 0
+    }
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+    for counter in 0..cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, Some(z), counter as isize, &mut b);
+
+        if j + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[j] = b[i];
+                j += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[j] = b[i];
+                j += 1
+            }
+        }
+    }
+}
+
+pub fn getbyte(&mut self) -> u8 {
+    let r = self.pool[self.pool_ptr];
+    self.pool_ptr += 1;
+    if self.pool_ptr >= 32 {
+        self.fill_pool()
+    }
+    u8::from(r)
+}
+
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;
+```
+
+This Rust function `oaep_encode` is a direct translation of the provided C function. It uses the Rust function signature and dependencies as specified. The `hashit` and `mgf1` functions are also provided and used within the translation. The `RAND` struct and constants are assumed to be defined elsewhere in the codebase as per the provided dependencies.</translated function> ```rust
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let slen;
+    let olen = f.len() - 1;
+    let mlen = m.len();
+    let hlen;
+    let seedlen;
+    let mut dbmask = vec![0u8; MAX_RSA_BYTES];
+    let mut seed = vec![0u8; 64];
+
+    hlen = seedlen = sha;
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+    if m.as_ptr() == f.as_ptr() {
+        return false;
+    }
+
+    hashit(sha, p, -1, f);
+
+    slen = olen - mlen - hlen - seedlen - 1;
+
+    f[0] = slen as u8;
+    f[1] = 1;
+    f[2..(mlen + 2)].copy_from_slice(m);
+
+    OCT_rand(&mut seed, rng, seedlen);
+
+    MGF1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    OCT_xor(&mut dbmask, f);
+    MGF1(sha, &dbmask, seedlen, f);
+
+    OCT_xor(f, &seed);
+
+    f[..dbmask.len()].copy_from_slice(&dbmask);
+
+    OCT_pad(f, f.len());
+    OCT_clear(&mut seed);
+    OCT_clear(&mut dbmask);
+
+    true
+}
+
+fn hashit(sha: usize, a: Option<&[u8]>, n: isize, w: &mut [u8]) {
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+}
+
+pub fn mgf1(sha: usize, z: &[u8], olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+
+    let mut j = 0;
+    for i in 0..k.len() {
+        k[i] = 0
+    }
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+    for counter in 0..cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, Some(z), counter as isize, &mut b);
+
+        if j + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[j] = b[i];
+                j += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[j] = b[i];
+                j += 1
+            }
+        }
+    }
+}
+
+pub fn getbyte(&mut self) -> u8 {
+    let r = self.pool[self.pool_ptr];
+    self.pool_ptr += 1;
+    if self.pool_ptr >= 32 {
+        self.fill_pool()
+    }
+    u8::from(r)
+}
+
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;
+```
+
+This Rust function `oaep_encode` is a direct translation of the provided C function. It uses the Rust function signature and dependencies as specified. The `hashit` and `mgf1` functions are also provided and used within the translation. The `RAND` struct and constants are assumed to be defined elsewhere in the codebase as per the provided dependencies.

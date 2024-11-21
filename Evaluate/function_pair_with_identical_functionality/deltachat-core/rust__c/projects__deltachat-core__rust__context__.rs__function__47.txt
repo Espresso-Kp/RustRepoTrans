@@ -1,0 +1,183 @@
+<path>
+projects/deltachat-core/rust/context.rs
+</path>
+<function>
+    pub async fn search_msgs(&self, chat_id: Option<ChatId>, query: &str) -> Result<Vec<MsgId>> {
+        let real_query = query.trim();
+        if real_query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let str_like_in_text = format!("%{real_query}%");
+
+        let list = if let Some(chat_id) = chat_id {
+            self.sql
+                .query_map(
+                    "SELECT m.id AS id
+                 FROM msgs m
+                 LEFT JOIN contacts ct
+                        ON m.from_id=ct.id
+                 WHERE m.chat_id=?
+                   AND m.hidden=0
+                   AND ct.blocked=0
+                   AND txt LIKE ?
+                 ORDER BY m.timestamp,m.id;",
+                    (chat_id, str_like_in_text),
+                    |row| row.get::<_, MsgId>("id"),
+                    |rows| {
+                        let mut ret = Vec::new();
+                        for id in rows {
+                            ret.push(id?);
+                        }
+                        Ok(ret)
+                    },
+                )
+                .await?
+        } else {
+            // For performance reasons results are sorted only by `id`, that is in the order of
+            // message reception.
+            //
+            // Unlike chat view, sorting by `timestamp` is not necessary but slows down the query by
+            // ~25% according to benchmarks.
+            //
+            // To speed up incremental search, where queries for few characters usually return lots
+            // of unwanted results that are discarded moments later, we added `LIMIT 1000`.
+            // According to some tests, this limit speeds up eg. 2 character searches by factor 10.
+            // The limit is documented and UI may add a hint when getting 1000 results.
+            self.sql
+                .query_map(
+                    "SELECT m.id AS id
+                 FROM msgs m
+                 LEFT JOIN contacts ct
+                        ON m.from_id=ct.id
+                 LEFT JOIN chats c
+                        ON m.chat_id=c.id
+                 WHERE m.chat_id>9
+                   AND m.hidden=0
+                   AND c.blocked!=1
+                   AND ct.blocked=0
+                   AND m.txt LIKE ?
+                 ORDER BY m.id DESC LIMIT 1000",
+                    (str_like_in_text,),
+                    |row| row.get::<_, MsgId>("id"),
+                    |rows| {
+                        let mut ret = Vec::new();
+                        for id in rows {
+                            ret.push(id?);
+                        }
+                        Ok(ret)
+                    },
+                )
+                .await?
+        };
+
+        Ok(list)
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_context.c
+</path>
+<function>
+ * Searching can be done globally (chat_id=0) or in a specified chat only (chat_id
+ * set).
+ *
+ * Global chat results are typically displayed using dc_msg_get_summary(), chat
+ * search results may just hilite the corresponding messages and present a
+ * prev/next button.
+ *
+ * @memberof dc_context_t
+ * @param context The context object as returned from dc_context_new().
+ * @param chat_id ID of the chat to search messages in.
+ *     Set this to 0 for a global search.
+ * @param query The query to search for.
+ * @return An array of message IDs. Must be freed using dc_array_unref() when no longer needed.
+ *     If nothing can be found, the function returns NULL.
+ */
+dc_array_t* dc_search_msgs(dc_context_t* context, uint32_t chat_id, const char* query)
+{
+	//clock_t       start = clock();
+
+	int           success = 0;
+	dc_array_t*   ret = dc_array_new(context, 100);
+	char*         strLikeInText = NULL;
+	char*         strLikeBeg = NULL;
+	char*         real_query = NULL;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || ret==NULL || query==NULL) {
+		goto cleanup;
+	}
+
+	real_query = dc_strdup(query);
+	dc_trim(real_query);
+	if (real_query[0]==0) {
+		success = 1; /*empty result*/
+		goto cleanup;
+	}
+
+	strLikeInText = dc_mprintf("%%%s%%", real_query);
+	strLikeBeg = dc_mprintf("%s%%", real_query); /*for the name search, we use "Name%" which is fast as it can use the index ("%Name%" could not). */
+
+	/* Incremental search with "LIKE %query%" cannot take advantages from any index
+	("query%" could for COLLATE NOCASE indexes, see http://www.sqlite.org/optoverview.html#like_opt)
+	An alternative may be the FULLTEXT sqlite stuff, however, this does not really help with incremental search.
+	An extra table with all words and a COLLATE NOCASE indexes may help, however,
+	this must be updated all the time and probably consumes more time than we can save in tenthousands of searches.
+	For now, we just expect the following query to be fast enough :-) */
+	if (chat_id) {
+		stmt = dc_sqlite3_prepare(context->sql,
+			"SELECT m.id AS id"
+			"FROM msgs m"
+			"LEFT JOIN contacts ct ON m.from_id=ct.id"
+			"WHERE m.chat_id=?"
+			"AND m.hidden=0"
+			"AND ct.blocked=0"
+			"AND txt LIKE ?"
+			"ORDER BY m.timestamp,m.id;");/* chats starts with the oldest message*/
+		sqlite3_bind_int (stmt, 1, chat_id);
+		sqlite3_bind_text(stmt, 2, strLikeInText, -1, SQLITE_STATIC);
+		sqlite3_bind_text(stmt, 3, strLikeBeg, -1, SQLITE_STATIC);
+	}
+	else {
+		int show_deaddrop = 0;//dc_sqlite3_get_config_int(context->sql, "show_deaddrop", 0);
+		stmt = dc_sqlite3_prepare(context->sql,
+			"SELECT m.id AS id FROM msgs m"
+			"LEFT JOIN contacts ct ON m.from_id=ct.id"
+			"LEFT JOIN chats c ON m.chat_id=c.id"
+			"WHERE m.chat_id>9"
+			"AND m.hidden=0"
+			"AND c.blocked!=1"
+			"AND ct.blocked=0"
+			"AND m.txt LIKE ?"
+			"ORDER BY m.id DESC LIMIT 1000"); /* chat overview starts with the newest message*/
+		sqlite3_bind_int (stmt, 1, show_deaddrop? DC_CHAT_DEADDROP_BLOCKED : 0);
+		sqlite3_bind_text(stmt, 2, strLikeInText, -1, SQLITE_STATIC);
+		sqlite3_bind_text(stmt, 3, strLikeBeg, -1, SQLITE_STATIC);
+	}
+
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+
+	success = 1;
+
+cleanup:
+	free(strLikeInText);
+	free(strLikeBeg);
+	free(real_query);
+	sqlite3_finalize(stmt);
+
+	//dc_log_info(context, 0, "Message list for search \"%s\" in chat #%i created in %.3f ms.", query, chat_id, (double)(clock()-start)*1000.0/CLOCKS_PER_SEC);
+
+	if (success) {
+		return ret;
+	}
+	else {
+		if (ret) {
+			dc_array_unref(ret);
+		}
+		return NULL;
+	}
+}
+</function>

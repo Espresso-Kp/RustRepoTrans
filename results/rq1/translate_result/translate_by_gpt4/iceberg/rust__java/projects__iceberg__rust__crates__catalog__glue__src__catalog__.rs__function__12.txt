@@ -1,0 +1,451 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public Table loadTable(SessionContext context, TableIdentifier identifier) {
+    checkIdentifierIsValid(identifier);
+
+    MetadataTableType metadataType;
+    LoadTableResponse response;
+    TableIdentifier loadedIdent;
+    try {
+      response = loadInternal(context, identifier, snapshotMode);
+      loadedIdent = identifier;
+      metadataType = null;
+
+    } catch (NoSuchTableException original) {
+      metadataType = MetadataTableType.from(identifier.name());
+      if (metadataType != null) {
+        // attempt to load a metadata table using the identifier's namespace as the base table
+        TableIdentifier baseIdent = TableIdentifier.of(identifier.namespace().levels());
+        try {
+          response = loadInternal(context, baseIdent, snapshotMode);
+          loadedIdent = baseIdent;
+        } catch (NoSuchTableException ignored) {
+          // the base table does not exist
+          throw original;
+        }
+      } else {
+        // name is not a metadata table
+        throw original;
+      }
+    }
+
+    TableIdentifier finalIdentifier = loadedIdent;
+    AuthSession session = tableSession(response.config(), session(context));
+    TableMetadata tableMetadata;
+
+    if (snapshotMode == SnapshotMode.REFS) {
+      tableMetadata =
+          TableMetadata.buildFrom(response.tableMetadata())
+              .withMetadataLocation(response.metadataLocation())
+              .setPreviousFileLocation(null)
+              .setSnapshotsSupplier(
+                  () ->
+                      loadInternal(context, finalIdentifier, SnapshotMode.ALL)
+                          .tableMetadata()
+                          .snapshots())
+              .discardChanges()
+              .build();
+    } else {
+      tableMetadata = response.tableMetadata();
+    }
+
+    RESTTableOperations ops =
+        new RESTTableOperations(
+            client,
+            paths.table(finalIdentifier),
+            session::headers,
+            tableFileIO(context, response.config()),
+            tableMetadata);
+
+    trackFileIO(ops);
+
+    BaseTable table =
+        new BaseTable(
+            ops,
+            fullTableName(finalIdentifier),
+            metricsReporter(paths.metrics(finalIdentifier), session::headers));
+    if (metadataType != null) {
+      return MetadataTableUtils.createMetadataTableInstance(table, metadataType);
+    }
+
+    return table;
+  }
+</java function>
+<rust function signature>
+async fn load_table(&self, table: &TableIdent) -> Result<Table> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub async fn metadata(&self) -> Result<FileMetadata> {
+        let meta = self.op.stat(&self.path[self.relative_path_pos..]).await?;
+
+        Ok(FileMetadata {
+            size: meta.content_length(),
+        })
+    }
+
+pub fn identifier(&self) -> &TableIdent {
+        &self.identifier
+    }
+
+pub fn metadata_location(&self) -> Option<&str> {
+        self.metadata_location.as_deref()
+    }
+
+pub(crate) fn get_metadata_location(
+    parameters: &Option<HashMap<String, String>>,
+) -> Result<String> {
+    match parameters {
+        Some(properties) => match properties.get(METADATA_LOCATION) {
+            Some(location) => Ok(location.to_string()),
+            None => Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("No '{}' set on table", METADATA_LOCATION),
+            )),
+        },
+        None => Err(Error::new(
+            ErrorKind::DataInvalid,
+            "No 'parameters' set on table. Location of metadata is undefined",
+        )),
+    }
+}
+
+pub fn new_input(&self, path: impl AsRef<str>) -> Result<InputFile> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        let path = path.as_ref().to_string();
+        let relative_path_pos = path.len() - relative_path.len();
+        Ok(InputFile {
+            op,
+            path,
+            relative_path_pos,
+        })
+    }
+
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+
+pub fn file_io(&self) -> FileIO {
+        self.file_io.clone()
+    }
+
+fn build(file_io_builder: FileIOBuilder) -> Result<Self> {
+        let scheme_str = file_io_builder.scheme_str.unwrap_or("".to_string());
+        let scheme = Self::parse_scheme(&scheme_str)?;
+        let mut new_props = HashMap::default();
+        new_props.insert("root".to_string(), DEFAULT_ROOT_PATH.to_string());
+
+        match scheme {
+            Scheme::Fs => Ok(Self::LocalFs {
+                op: Operator::via_map(Scheme::Fs, new_props)?,
+            }),
+            Scheme::S3 => {
+                for prop in file_io_builder.props {
+                    if let Some(op_key) = S3_CONFIG_MAPPING.get(prop.0.as_str()) {
+                        new_props.insert(op_key.to_string(), prop.1);
+                    }
+                }
+
+                Ok(Self::S3 {
+                    scheme_str,
+                    props: new_props,
+                })
+            }
+            _ => Err(Error::new(
+                ErrorKind::FeatureUnsupported,
+                format!("Constructing file io from scheme: {scheme} not supported now",),
+            )),
+        }
+    }
+
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub async fn read(&self) -> Result<Bytes> {
+        Ok(self
+            .op
+            .read(&self.path[self.relative_path_pos..])
+            .await?
+            .to_bytes())
+    }
+
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+
+pub fn new(namespace: NamespaceIdent, name: String) -> Self {
+        Self { namespace, name }
+    }
+
+pub fn new(name: String) -> Self {
+        Self(vec![name])
+    }
+
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+struct GlueClient(aws_sdk_glue::Client);
+
+pub struct Table {
+    file_io: FileIO,
+    #[builder(default, setter(strip_option, into))]
+    metadata_location: Option<String>,
+    #[builder(setter(into))]
+    metadata: TableMetadataRef,
+    identifier: TableIdent,
+    #[builder(default = false)]
+    readonly: bool,
+}
+
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+
+pub struct TableIdent {
+    /// Namespace of the table.
+    pub namespace: NamespaceIdent,
+    /// Table name.
+    pub name: String,
+}
+
+pub struct NamespaceIdent(Vec<String>);    
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn load_table(&self, table: &TableIdent) -> Result<Table> {
+        let db_name = validate_namespace(table.namespace())?;
+        let table_name = table.name();
+
+        let builder = self
+            .client
+            .0
+            .get_table()
+            .database_name(&db_name)
+            .name(table_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        let glue_table_output = builder.send().await.map_err(from_aws_sdk_error)?;
+
+        match glue_table_output.table() {
+            None => Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "Table object for database: {} and table: {} does not exist",
+                    db_name, table_name
+                ),
+            )),
+            Some(table) => {
+                let metadata_location = get_metadata_location(&table.parameters)?;
+
+                let input_file = self.file_io.new_input(&metadata_location)?;
+                let metadata_content = input_file.read().await?;
+                let metadata = serde_json::from_slice::<TableMetadata>(&metadata_content)?;
+
+                let table = Table::builder()
+                    .file_io(self.file_io())
+                    .metadata_location(metadata_location)
+                    .metadata(metadata)
+                    .identifier(TableIdent::new(
+                        NamespaceIdent::new(db_name),
+                        table_name.to_owned(),
+                    ))
+                    .build();
+
+                Ok(table)
+            }
+        }
+    }
+</function>
+<translated function>
+Your Java function implements multiple try-catch blocks and conditional logic, embedded within the function, which is typically divided into smaller functions in Rust. Here is the translated function, broken down into several parts:
+
+<rust function>
+```rust
+// The primary function
+pub async fn load_table(&self, table_ident: &TableIdent) -> Result<Table> {
+    let identifier_clone = table_ident.clone();
+
+    match self.try_load_table(table_ident).await {
+        Ok(table) => Ok(table),
+        Err(Error::Source(original)) => {
+            match MetadataTableType::from(&identifier_clone.name) {
+                Some(metadata_type) => {
+                    let base_ident = TableIdent::new(identifier_clone.namespace.clone(), identifier_clone.name);
+                    self.load_metadata_table(&base_ident, &metadata_type, original).await
+                }
+                None => Err(Error::Source(original)),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+// The internal function to attempt loading the table
+async fn try_load_table(&self, table_ident: &TableIdent) -> Result<Table> {
+    // Assuming that `load_internal` is a function that loads a table, similar to your Java code
+    let response = self.load_internal(table_ident).await?;
+    // The rest of your Java try block would go here
+
+    Ok(response.to_table()) // We'll assume that response has a method `to_table` that converts it to a `Table`
+}
+
+// The function to load a metadata table
+async fn load_metadata_table(&self, base_ident: &TableIdent, metadata_type: &MetadataTableType, original: Box<dyn Error>) -> Result<Table> {
+    match self.try_load_table(base_ident).await {
+        Ok(table) => {
+            // If the table was loaded successfully, create a metadata table instance (omitting tracking for simplicity)
+            Ok(MetadataTableUtils::create_metadata_table_instance(table, metadata_type.clone()))
+        }
+        Err(_) => {
+            // If no base table was found, re-throw the original error
+            Err(Error::Source(original))
+        }
+    }
+}
+```
+</rust function></translated function>Your Java function implements multiple try-catch blocks and conditional logic, embedded within the function, which is typically divided into smaller functions in Rust. Here is the translated function, broken down into several parts:
+
+<rust function>
+```rust
+// The primary function
+pub async fn load_table(&self, table_ident: &TableIdent) -> Result<Table> {
+    let identifier_clone = table_ident.clone();
+
+    match self.try_load_table(table_ident).await {
+        Ok(table) => Ok(table),
+        Err(Error::Source(original)) => {
+            match MetadataTableType::from(&identifier_clone.name) {
+                Some(metadata_type) => {
+                    let base_ident = TableIdent::new(identifier_clone.namespace.clone(), identifier_clone.name);
+                    self.load_metadata_table(&base_ident, &metadata_type, original).await
+                }
+                None => Err(Error::Source(original)),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+// The internal function to attempt loading the table
+async fn try_load_table(&self, table_ident: &TableIdent) -> Result<Table> {
+    // Assuming that `load_internal` is a function that loads a table, similar to your Java code
+    let response = self.load_internal(table_ident).await?;
+    // The rest of your Java try block would go here
+
+    Ok(response.to_table()) // We'll assume that response has a method `to_table` that converts it to a `Table`
+}
+
+// The function to load a metadata table
+async fn load_metadata_table(&self, base_ident: &TableIdent, metadata_type: &MetadataTableType, original: Box<dyn Error>) -> Result<Table> {
+    match self.try_load_table(base_ident).await {
+        Ok(table) => {
+            // If the table was loaded successfully, create a metadata table instance (omitting tracking for simplicity)
+            Ok(MetadataTableUtils::create_metadata_table_instance(table, metadata_type.clone()))
+        }
+        Err(_) => {
+            // If no base table was found, re-throw the original error
+            Err(Error::Source(original))
+        }
+    }
+}
+```
+</rust function>

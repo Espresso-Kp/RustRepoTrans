@@ -1,0 +1,194 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int KEY_PAIR_GENERATE(RAND RNG,byte[] S,byte[] W)
+	{
+		BIG r,s;
+		ECP G,WP;
+		int res=0;
+	//	byte[] T=new byte[EFS];
+
+		G=ECP.generator();
+
+		r=new BIG(ROM.CURVE_Order);
+
+		if (RNG==null)
+		{
+			s=BIG.fromBytes(S);
+			s.mod(r);
+		}
+		else
+		{
+			s=BIG.randomnum(r,RNG);
+		}
+
+		//if (ROM.AES_S>0)
+		//{
+		//	s.mod2m(2*ROM.AES_S);
+		//}
+		s.toBytes(S);
+
+		WP=G.mul(s);
+		WP.toBytes(W,false);  // To use point compression on public keys, change to true 
+
+		return res;
+	}
+</java function>
+<rust function signature>
+pub fn key_pair_generate(rng: Option<&mut RAND>, s: &mut [u8], w: &mut [u8]) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn generator() -> ECP {
+        let G: ECP;
+
+        let gx = Big::new_ints(&rom::CURVE_GX);
+
+        if CURVETYPE != CurveType::Montgomery {
+            let gy = Big::new_ints(&rom::CURVE_GY);
+            G = ECP::new_bigs(&gx, &gy);
+        } else {
+            G = ECP::new_big(&gx);
+        }
+        return G;
+    }
+pub fn randomnum(q: &Big, rng: &mut RAND) -> Big {
+        let mut d = DBig::new();
+        let mut j = 0;
+        let mut r: u8 = 0;
+        let t = q.clone();
+        for _ in 0..2 * t.nbits() {
+            if j == 0 {
+                r = rng.getbyte();
+            } else {
+                r >>= 1
+            }
+
+            let b = (r as Chunk) & 1;
+            d.shl(1);
+            d.w[0] += b;
+            j += 1;
+            j &= 7;
+        }
+        let m = d.dmod(q);
+        m
+    }
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn key_pair_generate(rng: Option<&mut RAND>, s: &mut [u8], w: &mut [u8]) -> isize {
+    let res = 0;
+    let mut sc: Big;
+    let G = ECP::generator();
+
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    if let Some(mut x) = rng {
+        sc = Big::randomnum(&r, &mut x);
+    } else {
+        sc = Big::from_bytes(&s);
+        sc.rmod(&r);
+    }
+
+    sc.to_bytes(s);
+
+    let WP = G.mul(&sc);
+
+    WP.to_bytes(w, false); // To use point compression on public keys, change to true
+
+    res
+}
+</function>
+<translated function>
+ ```rust
+use super::big::Big;
+use super::ecp::ECP;
+use super::rom;
+use crate::rand::RAND;
+
+pub fn key_pair_generate(rng: Option<&mut RAND>, s: &mut [u8], w: &mut [u8]) -> isize {
+    let G = generator();
+    let r = Big::from_bytes(&rom::CURVE_Order);
+    let mut s = if let Some(rng) = rng {
+        Big::randomnum(r, rng)
+    } else {
+        Big::from_bytes(s).mod_(&r)
+    };
+
+    s.to_bytes(s);
+    let WP = G.mul(&s);
+    WP.to_bytes(w, false); // To use point compression on public keys, change to true
+
+    0
+}
+```</translated function> ```rust
+use super::big::Big;
+use super::ecp::ECP;
+use super::rom;
+use crate::rand::RAND;
+
+pub fn key_pair_generate(rng: Option<&mut RAND>, s: &mut [u8], w: &mut [u8]) -> isize {
+    let G = generator();
+    let r = Big::from_bytes(&rom::CURVE_Order);
+    let mut s = if let Some(rng) = rng {
+        Big::randomnum(r, rng)
+    } else {
+        Big::from_bytes(s).mod_(&r)
+    };
+
+    s.to_bytes(s);
+    let WP = G.mul(&s);
+    WP.to_bytes(w, false); // To use point compression on public keys, change to true
+
+    0
+}
+```

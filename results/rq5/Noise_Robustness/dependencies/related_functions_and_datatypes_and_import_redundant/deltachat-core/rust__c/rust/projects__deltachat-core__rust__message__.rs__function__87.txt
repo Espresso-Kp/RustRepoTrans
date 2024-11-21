@@ -1,0 +1,116 @@
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+
+
+
+
+pub struct ChatlistWrapper {
+    context: *const dc_context_t,
+    list: chatlist::Chatlist,
+}
+------
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use anyhow::{ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::{parse_vcard, VcardContact};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use tokio::{fs, io};
+use crate::blob::BlobObject;
+use crate::chat::{Chat, ChatId, ChatIdBlocked};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    Blocked, Chattype, VideochatType, DC_CHAT_ID_TRASH, DC_DESIRED_TEXT_LEN, DC_MSG_ID_LAST_SPECIAL,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::debug_logging::set_debug_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::{start_ephemeral_timers_msgids, Timer as EphemeralTimer};
+use crate::events::EventType;
+use crate::imap::markseen_on_imap_table;
+use crate::location::delete_poi_location;
+use crate::mimeparser::{parse_message_id, SystemMessage};
+use crate::param::{Param, Params};
+use crate::pgp::split_armored_data;
+use crate::reaction::get_msg_reactions;
+use crate::sql;
+use crate::summary::Summary;
+use crate::tools::{
+    buf_compress, buf_decompress, get_filebytes, get_filemeta, gm2local_offset, read_file, time,
+    timestamp_to_str, truncate,
+};
+use MessageState::*;
+use MessageState::*;
+use num_traits::FromPrimitive;
+use super::*;
+use crate::chat::{
+        self, add_contact_to_chat, marknoticed_chat, send_text_msg, ChatItem, ProtectionStatus,
+    };
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::reaction::send_reaction;
+use crate::receive_imf::receive_imf;
+use crate::test_utils as test;
+use crate::test_utils::{TestContext, TestContextManager};

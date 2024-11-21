@@ -1,0 +1,401 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static void SERVER_1(int sha,int date,byte[] CID,byte[] HID,byte[] HTID)
+	{
+		byte[] h=hashit(sha,0,CID,EFS);
+		ECP R,P=ECP.mapit(h);
+
+		P.toBytes(HID,false);   // new
+		if (date!=0)
+		{
+	//		if (HID!=null) P.toBytes(HID,false);
+			h=hashit(sha,date,h,EFS);
+			R=ECP.mapit(h);
+			P.add(R); //P.affine();
+			P.toBytes(HTID,false);
+		}
+	//	else P.toBytes(HID,false);
+	}
+</java function>
+<rust function signature>
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn mapit(h: &[u8]) -> ECP {
+        let q = Big::new_ints(&rom::MODULUS);
+        let mut x = Big::from_bytes(h);
+        x.rmod(&q);
+        let mut P: ECP;
+
+        loop {
+            loop {
+                if CURVETYPE != CurveType::Montgomery {
+                    P = ECP::new_bigint(&x, 0);
+                } else {
+                    P = ECP::new_big(&x);
+                }
+                x.inc(1);
+                x.norm();
+                if !P.is_infinity() {
+                    break;
+                }
+            }
+            P.cfp();
+            if !P.is_infinity() {
+                break;
+            }
+        }
+
+        return P;
+    }
+fn hashit(sha: usize, n: usize, id: &[u8], w: &mut [u8]) -> bool {
+    let mut r: [u8; 64] = [0; 64];
+    let mut didit = false;
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if !didit {
+        return false;
+    }
+
+    let rm = big::MODBYTES as usize;
+
+    if sha > rm {
+        for i in 0..rm {
+            w[i] = r[i]
+        }
+    } else {
+        for i in 0..sha {
+            w[i + rm - sha] = r[i]
+        }
+        for i in 0..(rm - sha) {
+            w[i] = 0
+        }
+    }
+
+    return true;
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    const RM: usize = big::MODBYTES as usize;
+    let mut h: [u8; RM] = [0; RM];
+
+    hashit(sha, 0, cid, &mut h);
+
+    let mut P = ECP::mapit(&h);
+
+    P.to_bytes(hid, false);
+    if date != 0 {
+        let mut h2: [u8; RM] = [0; RM];
+        hashit(sha, date, &h, &mut h2);
+        let mut R = ECP::mapit(&h2);
+        P.add(&mut R);
+        if let Some(rhtid) = htid {
+            P.to_bytes(rhtid, false);
+        }
+    }
+}
+</function>
+<translated function>
+ ```rust
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use crate::test_utils::*;
+
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    let mut h = hashit(sha, 0, cid);
+    let mut p = mapit(&h);
+
+    p.to_bytes(hid, false);
+    if date != 0 {
+        let mut h = hashit(sha, date, &h);
+        let mut r = mapit(&h);
+        p.add(&r);
+        p.to_bytes(htid.unwrap(), false);
+    }
+}
+
+fn hashit(sha: usize, n: usize, id: &[u8]) -> Vec<u8> {
+    let mut r: [u8; 64] = [0; 64];
+    let mut didit = false;
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if !didit {
+        return vec![];
+    }
+
+    let rm = big::MODBYTES as usize;
+    let mut w = vec![0; rm];
+
+    if sha > rm {
+        for i in 0..rm {
+            w[i] = r[i]
+        }
+    } else {
+        for i in 0..sha {
+            w[i + rm - sha] = r[i]
+        }
+        for i in 0..(rm - sha) {
+            w[i] = 0
+        }
+    }
+
+    w
+}
+
+fn mapit(h: &[u8]) -> ECP {
+    let q = Big::new_ints(&rom::MODULUS);
+    let mut x = Big::from_bytes(h);
+    x.rmod(&q);
+    let mut p: ECP;
+
+    loop {
+        loop {
+            if CURVETYPE != CurveType::Montgomery {
+                p = ECP::new_bigint(&x, 0);
+            } else {
+                p = ECP::new_big(&x);
+            }
+            x.inc(1);
+            x.norm();
+            if !p.is_infinity() {
+                break;
+            }
+        }
+        p.cfp();
+        if !p.is_infinity() {
+            break;
+        }
+    }
+
+    p
+}
+```</translated function> ```rust
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use crate::test_utils::*;
+
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    let mut h = hashit(sha, 0, cid);
+    let mut p = mapit(&h);
+
+    p.to_bytes(hid, false);
+    if date != 0 {
+        let mut h = hashit(sha, date, &h);
+        let mut r = mapit(&h);
+        p.add(&r);
+        p.to_bytes(htid.unwrap(), false);
+    }
+}
+
+fn hashit(sha: usize, n: usize, id: &[u8]) -> Vec<u8> {
+    let mut r: [u8; 64] = [0; 64];
+    let mut didit = false;
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if !didit {
+        return vec![];
+    }
+
+    let rm = big::MODBYTES as usize;
+    let mut w = vec![0; rm];
+
+    if sha > rm {
+        for i in 0..rm {
+            w[i] = r[i]
+        }
+    } else {
+        for i in 0..sha {
+            w[i + rm - sha] = r[i]
+        }
+        for i in 0..(rm - sha) {
+            w[i] = 0
+        }
+    }
+
+    w
+}
+
+fn mapit(h: &[u8]) -> ECP {
+    let q = Big::new_ints(&rom::MODULUS);
+    let mut x = Big::from_bytes(h);
+    x.rmod(&q);
+    let mut p: ECP;
+
+    loop {
+        loop {
+            if CURVETYPE != CurveType::Montgomery {
+                p = ECP::new_bigint(&x, 0);
+            } else {
+                p = ECP::new_big(&x);
+            }
+            x.inc(1);
+            x.norm();
+            if !p.is_infinity() {
+                break;
+            }
+        }
+        p.cfp();
+        if !p.is_infinity() {
+            break;
+        }
+    }
+
+    p
+}
+```

@@ -1,0 +1,230 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int KEY_PAIR_GENERATE(RAND RNG,byte[] S,byte[] W)
+	{
+		BIG r,s;
+		ECP G,WP;
+		int res=0;
+	//	byte[] T=new byte[EFS];
+
+		G=ECP.generator();
+
+		r=new BIG(ROM.CURVE_Order);
+
+		if (RNG==null)
+		{
+			s=BIG.fromBytes(S);
+			s.mod(r);
+		}
+		else
+		{
+			s=BIG.randomnum(r,RNG);
+		}
+
+		//if (ROM.AES_S>0)
+		//{
+		//	s.mod2m(2*ROM.AES_S);
+		//}
+		s.toBytes(S);
+
+		WP=G.mul(s);
+		WP.toBytes(W,false);  // To use point compression on public keys, change to true 
+
+		return res;
+	}
+</java function>
+<rust function signature>
+pub fn key_pair_generate(mut rng: &mut RAND, s: &mut [u8], w: &mut [u8]) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn to_bytes(&self, b: &mut [u8]) {
+        self.to_byte_array(b, 0)
+    }
+
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+
+pub fn generator() -> ECP2 {
+        return ECP2::new_fp2s(
+            FP2::new_bigs(
+                Big::new_ints(&rom::CURVE_PXA),
+                Big::new_ints(&rom::CURVE_PXB),
+            ),
+            FP2::new_bigs(
+                Big::new_ints(&rom::CURVE_PYA),
+                Big::new_ints(&rom::CURVE_PYB),
+            ),
+        );
+    }
+
+pub fn randomnum(q: &Big, rng: &mut RAND) -> Big {
+        let mut d = DBig::new();
+        let mut j = 0;
+        let mut r: u8 = 0;
+        let t = q.clone();
+        for _ in 0..2 * t.nbits() {
+            if j == 0 {
+                r = rng.getbyte();
+            } else {
+                r >>= 1
+            }
+
+            let b = (r as Chunk) & 1;
+            d.shl(1);
+            d.w[0] += b;
+            j += 1;
+            j &= 7;
+        }
+        let m = d.dmod(q);
+        m
+    }  
+    
+pub fn g2mul(P: &ECP8, e: &Big) -> ECP8 {
+    if rom::USE_GS_G2 {
+        let mut Q: [ECP8; 16] = [
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+        ];
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut u = gs(e);
+
+        let f = ECP8::frob_constants();
+
+        Q[0] = P.clone();
+        for i in 1..16 {
+            Q[i] = Q[i - 1].clone();
+            Q[i].frob(&f, 1);
+        }
+        for i in 0..16 {
+            let np = u[i].nbits();
+            let t = Big::modneg(&mut u[i], &q);
+            let nn = t.nbits();
+            if nn < np {
+                u[i] = t.clone();
+                Q[i].neg();
+            }
+            u[i].norm();
+        }
+
+        ECP8::mul16(&mut Q, &u)
+    } else {
+        P.mul(e)
+    }
+}
+
+pub const BLS_OK: isize = 0;
+pub const BLS_FAIL: isize = -1;
+
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+
+pub fn new_dcopy(y: &DBig) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = y.w[i]
+        }
+        s
+    }
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use super::big;
+use super::big::Big;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::pair256;
+use super::rom;
+use crate::rand::RAND;
+use crate::sha3::SHA3;
+use crate::sha3::SHAKE256;
+use std::str;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn key_pair_generate(mut rng: &mut RAND, s: &mut [u8], w: &mut [u8]) -> isize {
+    let q = Big::new_ints(&rom::CURVE_ORDER);
+    let g = ECP8::generator();
+    let mut sc = Big::randomnum(&q, &mut rng);
+    sc.to_bytes(s);
+    pair256::g2mul(&g, &mut sc).to_bytes(w);
+    BLS_OK
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+pub fn key_pair_generate(mut rng: &mut RAND, s: &mut [u8], w: &mut [u8]) -> isize {
+    let g = ECP::generator();
+    let mut r = Big::new_ints(&rom::CURVE_Order);
+    let mut s = if rng.is_null() {
+        Big::from_bytes(s)
+    } else {
+        Big::randomnum(&r, rng)
+    };
+    s.mod(&r);
+    s.to_bytes(s);
+    let wp = g2mul(&g, &s);
+    wp.to_bytes(w, false);
+    BLS_OK
+}
+```
+
+Note that I've assumed that `ECP::generator()` returns an `ECP` instance, and that `Big::from_bytes(s)` and `Big::randomnum(&r, rng)` return a `Big` instance. I've also assumed that `g2mul` takes an `ECP` instance and a `Big` instance as arguments, and that `to_bytes` takes a `Big` instance and a mutable reference to a byte array as arguments. If these assumptions are incorrect, please let me know and I'll adjust the code accordingly.</translated function>Here is the translated Rust function:
+
+```rust
+pub fn key_pair_generate(mut rng: &mut RAND, s: &mut [u8], w: &mut [u8]) -> isize {
+    let g = ECP::generator();
+    let mut r = Big::new_ints(&rom::CURVE_Order);
+    let mut s = if rng.is_null() {
+        Big::from_bytes(s)
+    } else {
+        Big::randomnum(&r, rng)
+    };
+    s.mod(&r);
+    s.to_bytes(s);
+    let wp = g2mul(&g, &s);
+    wp.to_bytes(w, false);
+    BLS_OK
+}
+```
+
+Note that I've assumed that `ECP::generator()` returns an `ECP` instance, and that `Big::from_bytes(s)` and `Big::randomnum(&r, rng)` return a `Big` instance. I've also assumed that `g2mul` takes an `ECP` instance and a `Big` instance as arguments, and that `to_bytes` takes a `Big` instance and a mutable reference to a byte array as arguments. If these assumptions are incorrect, please let me know and I'll adjust the code accordingly.

@@ -1,0 +1,243 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def pyarrow_to_schema(schema: pa.Schema, name_mapping: Optional[NameMapping] = None) -> Schema:
+    has_ids = visit_pyarrow(schema, _HasIds())
+    if has_ids:
+        visitor = _ConvertToIceberg()
+    elif name_mapping is not None:
+        visitor = _ConvertToIceberg(name_mapping=name_mapping)
+    else:
+        raise ValueError(
+            "Parquet file does not have field-ids and the Iceberg table does not have 'schema.name-mapping.default' defined"
+        )
+    return visit_pyarrow(schema, visitor)
+</python function>
+<rust function signature>
+pub fn arrow_schema_to_schema(schema: &ArrowSchema) -> Result<Schema> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn visit_schema<V: ArrowSchemaVisitor>(schema: &ArrowSchema, visitor: &mut V) -> Result<V::U> {
+    let mut results = Vec::with_capacity(schema.fields().len());
+    for field in schema.fields() {
+        visitor.before_field(field)?;
+        let result = visit_type(field.data_type(), visitor)?;
+        visitor.after_field(field)?;
+        results.push(result);
+    }
+    visitor.schema(schema, results)
+}
+pub struct Schema {
+    r#struct: StructType,
+    schema_id: SchemaId,
+    highest_field_id: i32,
+    identifier_field_ids: HashSet<i32>,
+
+    alias_to_id: BiHashMap<String, i32>,
+    id_to_field: HashMap<i32, NestedFieldRef>,
+
+    name_to_id: HashMap<String, i32>,
+    lowercase_name_to_id: HashMap<String, i32>,
+    id_to_name: HashMap<i32, String>,
+
+    field_id_to_accessor: HashMap<i32, Arc<StructAccessor>>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use crate::error::Result;
+use crate::spec::{
+    Datum, ListType, MapType, NestedField, NestedFieldRef, PrimitiveLiteral, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{Error, ErrorKind};
+use arrow_array::types::{validate_decimal_precision_and_scale, Decimal128Type};
+use arrow_array::{
+    BooleanArray, Datum as ArrowDatum, Float32Array, Float64Array, Int32Array, Int64Array,
+};
+use arrow_schema::{DataType, Field, Fields, Schema as ArrowSchema, TimeUnit};
+use bitvec::macros::internal::funty::Fundamental;
+use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
+use rust_decimal::prelude::ToPrimitive;
+use std::collections::HashMap;
+use std::sync::Arc;
+use super::*;
+use crate::spec::Schema;
+use arrow_schema::DataType;
+use arrow_schema::Field;
+use arrow_schema::Schema as ArrowSchema;
+use arrow_schema::TimeUnit;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn arrow_schema_to_schema(schema: &ArrowSchema) -> Result<Schema> {
+    let mut visitor = ArrowSchemaConverter::new();
+    visit_schema(schema, &mut visitor)
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn arrow_schema_to_schema(schema: &ArrowSchema) -> Result<Schema> {
+    struct ConvertToIceberg {
+        highest_field_id: i32,
+    }
+
+    impl ArrowSchemaVisitor for ConvertToIceberg {
+        type U = Result<NestedField>;
+
+        fn schema(&mut self, _schema: &ArrowSchema, fields: Vec<Result<NestedField>>) -> Result<Schema> {
+            let fields: Result<Vec<NestedField>> = fields.into_iter().collect();
+            let fields = fields?;
+            let struct_type = StructType::new(fields);
+            Ok(Schema::new(struct_type, self.highest_field_id))
+        }
+
+        fn field(&mut self, field: &Field) -> Result<NestedField> {
+            let field_id = field
+                .metadata()
+                .get(PARQUET_FIELD_ID_META_KEY)
+                .and_then(|id| id.parse::<i32>().ok())
+                .ok_or_else(|| Error::new(ErrorKind::DataInvalid, "Field ID not found or invalid"))?;
+
+            self.highest_field_id = self.highest_field_id.max(field_id);
+
+            let field_type = convert_type(field.data_type())?;
+            Ok(NestedField::new(
+                field_id,
+                field.is_nullable(),
+                field.name().to_string(),
+                field_type,
+                field.metadata().clone(),
+            ))
+        }
+    }
+
+    fn convert_type(data_type: &DataType) -> Result<Type> {
+        match data_type {
+            DataType::Boolean => Ok(Type::Primitive(PrimitiveType::Boolean)),
+            DataType::Int32 => Ok(Type::Primitive(PrimitiveType::Int)),
+            DataType::Int64 => Ok(Type::Primitive(PrimitiveType::Long)),
+            DataType::Float32 => Ok(Type::Primitive(PrimitiveType::Float)),
+            DataType::Float64 => Ok(Type::Primitive(PrimitiveType::Double)),
+            DataType::Utf8 => Ok(Type::Primitive(PrimitiveType::String)),
+            DataType::Date32 => Ok(Type::Primitive(PrimitiveType::Date)),
+            DataType::Time64(TimeUnit::Microsecond) => Ok(Type::Primitive(PrimitiveType::Time)),
+            DataType::Timestamp(TimeUnit::Microsecond, _) => Ok(Type::Primitive(PrimitiveType::Timestamp)),
+            DataType::Decimal128(precision, scale) => {
+                validate_decimal_precision_and_scale(*precision, *scale)?;
+                Ok(Type::Primitive(PrimitiveType::Decimal {
+                    precision: *precision,
+                    scale: *scale,
+                }))
+            }
+            DataType::Binary => Ok(Type::Primitive(PrimitiveType::Binary)),
+            DataType::FixedSizeBinary(size) => Ok(Type::Primitive(PrimitiveType::Fixed(*size))),
+            DataType::List(field) => Ok(Type::List(ListType::new(
+                field.id(),
+                field.is_nullable(),
+                convert_type(field.data_type())?,
+            ))),
+            DataType::Struct(fields) => {
+                let nested_fields: Result<Vec<NestedField>> = fields
+                    .iter()
+                    .map(|f| {
+                        Ok(NestedField::new(
+                            f.id(),
+                            f.is_nullable(),
+                            f.name().to_string(),
+                            convert_type(f.data_type())?,
+                            f.metadata().clone(),
+                        ))
+                    })
+                    .collect();
+                Ok(Type::Struct(StructType::new(nested_fields?)))
+            }
+            DataType::Map(_, _) => {
+                // Implement map conversion if</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn arrow_schema_to_schema(schema: &ArrowSchema) -> Result<Schema> {
+    struct ConvertToIceberg {
+        highest_field_id: i32,
+    }
+
+    impl ArrowSchemaVisitor for ConvertToIceberg {
+        type U = Result<NestedField>;
+
+        fn schema(&mut self, _schema: &ArrowSchema, fields: Vec<Result<NestedField>>) -> Result<Schema> {
+            let fields: Result<Vec<NestedField>> = fields.into_iter().collect();
+            let fields = fields?;
+            let struct_type = StructType::new(fields);
+            Ok(Schema::new(struct_type, self.highest_field_id))
+        }
+
+        fn field(&mut self, field: &Field) -> Result<NestedField> {
+            let field_id = field
+                .metadata()
+                .get(PARQUET_FIELD_ID_META_KEY)
+                .and_then(|id| id.parse::<i32>().ok())
+                .ok_or_else(|| Error::new(ErrorKind::DataInvalid, "Field ID not found or invalid"))?;
+
+            self.highest_field_id = self.highest_field_id.max(field_id);
+
+            let field_type = convert_type(field.data_type())?;
+            Ok(NestedField::new(
+                field_id,
+                field.is_nullable(),
+                field.name().to_string(),
+                field_type,
+                field.metadata().clone(),
+            ))
+        }
+    }
+
+    fn convert_type(data_type: &DataType) -> Result<Type> {
+        match data_type {
+            DataType::Boolean => Ok(Type::Primitive(PrimitiveType::Boolean)),
+            DataType::Int32 => Ok(Type::Primitive(PrimitiveType::Int)),
+            DataType::Int64 => Ok(Type::Primitive(PrimitiveType::Long)),
+            DataType::Float32 => Ok(Type::Primitive(PrimitiveType::Float)),
+            DataType::Float64 => Ok(Type::Primitive(PrimitiveType::Double)),
+            DataType::Utf8 => Ok(Type::Primitive(PrimitiveType::String)),
+            DataType::Date32 => Ok(Type::Primitive(PrimitiveType::Date)),
+            DataType::Time64(TimeUnit::Microsecond) => Ok(Type::Primitive(PrimitiveType::Time)),
+            DataType::Timestamp(TimeUnit::Microsecond, _) => Ok(Type::Primitive(PrimitiveType::Timestamp)),
+            DataType::Decimal128(precision, scale) => {
+                validate_decimal_precision_and_scale(*precision, *scale)?;
+                Ok(Type::Primitive(PrimitiveType::Decimal {
+                    precision: *precision,
+                    scale: *scale,
+                }))
+            }
+            DataType::Binary => Ok(Type::Primitive(PrimitiveType::Binary)),
+            DataType::FixedSizeBinary(size) => Ok(Type::Primitive(PrimitiveType::Fixed(*size))),
+            DataType::List(field) => Ok(Type::List(ListType::new(
+                field.id(),
+                field.is_nullable(),
+                convert_type(field.data_type())?,
+            ))),
+            DataType::Struct(fields) => {
+                let nested_fields: Result<Vec<NestedField>> = fields
+                    .iter()
+                    .map(|f| {
+                        Ok(NestedField::new(
+                            f.id(),
+                            f.is_nullable(),
+                            f.name().to_string(),
+                            convert_type(f.data_type())?,
+                            f.metadata().clone(),
+                        ))
+                    })
+                    .collect();
+                Ok(Type::Struct(StructType::new(nested_fields?)))
+            }
+            DataType::Map(_, _) => {
+                // Implement map conversion if

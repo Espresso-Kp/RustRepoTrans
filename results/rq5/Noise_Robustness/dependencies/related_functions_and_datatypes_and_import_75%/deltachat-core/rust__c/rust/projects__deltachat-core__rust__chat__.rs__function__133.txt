@@ -1,0 +1,613 @@
+async fn set_group_explicitly_left(context: &Context, grpid: &str) -> Result<()> {
+    if !is_group_explicitly_left(context, grpid).await? {
+        context
+            .sql
+            .execute("INSERT INTO leftgrps (grpid) VALUES(?);", (grpid,))
+            .await?;
+    }
+
+    Ok(())
+}
+pub async fn send_msg(context: &Context, chat_id: ChatId, msg: &mut Message) -> Result<MsgId> {
+    if chat_id.is_unset() {
+        let forwards = msg.param.get(Param::PrepForwards);
+        if let Some(forwards) = forwards {
+            for forward in forwards.split(' ') {
+                if let Ok(msg_id) = forward.parse::<u32>().map(MsgId::new) {
+                    if let Ok(mut msg) = Message::load_from_db(context, msg_id).await {
+                        send_msg_inner(context, chat_id, &mut msg).await?;
+                    };
+                }
+            }
+            msg.param.remove(Param::PrepForwards);
+            msg.update_param(context).await?;
+        }
+        return send_msg_inner(context, chat_id, msg).await;
+    }
+
+    if msg.state != MessageState::Undefined && msg.state != MessageState::OutPreparing {
+        msg.param.remove(Param::GuaranteeE2ee);
+        msg.param.remove(Param::ForcePlaintext);
+        msg.update_param(context).await?;
+    }
+    send_msg_inner(context, chat_id, msg).await
+}
+pub fn set_cmd(&mut self, value: SystemMessage) {
+        self.set_int(Param::Cmd, value as i32);
+    }
+pub(crate) async fn is_self_in_chat(&self, context: &Context) -> Result<bool> {
+        match self.typ {
+            Chattype::Single | Chattype::Broadcast | Chattype::Mailinglist => Ok(true),
+            Chattype::Group => is_contact_in_chat(context, self.id, ContactId::SELF).await,
+        }
+    }
+pub fn set(&mut self, key: Param, value: impl ToString) -> &mut Self {
+        self.inner.insert(key, value.to_string());
+        self
+    }
+pub(crate) async fn remove_from_chat_contacts_table(
+    context: &Context,
+    chat_id: ChatId,
+    contact_id: ContactId,
+) -> Result<()> {
+    context
+        .sql
+        .execute(
+            "DELETE FROM chats_contacts WHERE chat_id=? AND contact_id=?",
+            (chat_id, contact_id),
+        )
+        .await?;
+    Ok(())
+}
+pub async fn load_from_db(context: &Context, chat_id: ChatId) -> Result<Self> {
+        let mut chat = context
+            .sql
+            .query_row(
+                "SELECT c.type, c.name, c.grpid, c.param, c.archived,
+                    c.blocked, c.locations_send_until, c.muted_until, c.protected
+             FROM chats c
+             WHERE c.id=?;",
+                (chat_id,),
+                |row| {
+                    let c = Chat {
+                        id: chat_id,
+                        typ: row.get(0)?,
+                        name: row.get::<_, String>(1)?,
+                        grpid: row.get::<_, String>(2)?,
+                        param: row.get::<_, String>(3)?.parse().unwrap_or_default(),
+                        visibility: row.get(4)?,
+                        blocked: row.get::<_, Option<_>>(5)?.unwrap_or_default(),
+                        is_sending_locations: row.get(6)?,
+                        mute_duration: row.get(7)?,
+                        protected: row.get(8)?,
+                    };
+                    Ok(c)
+                },
+            )
+            .await
+            .context(format!("Failed loading chat {chat_id} from database"))?;
+
+        if chat.id.is_archived_link() {
+            chat.name = stock_str::archived_chats(context).await;
+        } else {
+            if chat.typ == Chattype::Single && chat.name.is_empty() {
+                // chat.name is set to contact.display_name on changes,
+                // however, if things went wrong somehow, we do this here explicitly.
+                let mut chat_name = "Err [Name not found]".to_owned();
+                match get_chat_contacts(context, chat.id).await {
+                    Ok(contacts) => {
+                        if let Some(contact_id) = contacts.first() {
+                            if let Ok(contact) = Contact::get_by_id(context, *contact_id).await {
+                                contact.get_display_name().clone_into(&mut chat_name);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!(
+                            context,
+                            "Failed to load contacts for {}: {:#}.", chat.id, err
+                        );
+                    }
+                }
+                chat.name = chat_name;
+            }
+            if chat.param.exists(Param::Selftalk) {
+                chat.name = stock_str::saved_messages(context).await;
+            } else if chat.param.exists(Param::Devicetalk) {
+                chat.name = stock_str::device_messages(context).await;
+            }
+        }
+
+        Ok(chat)
+    }
+pub fn get_addr(&self) -> &str {
+        &self.addr
+    }
+pub async fn get_by_id_optional(
+        context: &Context,
+        contact_id: ContactId,
+    ) -> Result<Option<Self>> {
+        if let Some(mut contact) = context
+            .sql
+            .query_row_optional(
+                "SELECT c.name, c.addr, c.origin, c.blocked, c.last_seen,
+                c.authname, c.param, c.status, c.is_bot
+               FROM contacts c
+              WHERE c.id=?;",
+                (contact_id,),
+                |row| {
+                    let name: String = row.get(0)?;
+                    let addr: String = row.get(1)?;
+                    let origin: Origin = row.get(2)?;
+                    let blocked: Option<bool> = row.get(3)?;
+                    let last_seen: i64 = row.get(4)?;
+                    let authname: String = row.get(5)?;
+                    let param: String = row.get(6)?;
+                    let status: Option<String> = row.get(7)?;
+                    let is_bot: bool = row.get(8)?;
+                    let contact = Self {
+                        id: contact_id,
+                        name,
+                        authname,
+                        addr,
+                        blocked: blocked.unwrap_or_default(),
+                        last_seen,
+                        origin,
+                        param: param.parse().unwrap_or_default(),
+                        status: status.unwrap_or_default(),
+                        is_bot,
+                    };
+                    Ok(contact)
+                },
+            )
+            .await?
+        {
+            if contact_id == ContactId::SELF {
+                contact.name = stock_str::self_msg(context).await;
+                contact.authname = context
+                    .get_config(Config::Displayname)
+                    .await?
+                    .unwrap_or_default();
+                contact.addr = context
+                    .get_config(Config::ConfiguredAddr)
+                    .await?
+                    .unwrap_or_default();
+                contact.status = context
+                    .get_config(Config::Selfstatus)
+                    .await?
+                    .unwrap_or_default();
+            } else if contact_id == ContactId::DEVICE {
+                contact.name = stock_str::device_messages(context).await;
+                contact.addr = ContactId::DEVICE_ADDR.to_string();
+                contact.status = stock_str::device_messages_hint(context).await;
+            }
+            Ok(Some(contact))
+        } else {
+            Ok(None)
+        }
+    }
+pub(crate) async fn msg_group_left_local(context: &Context, by_contact: ContactId) -> String {
+    if by_contact == ContactId::SELF {
+        translated(context, StockMessage::MsgYouLeftGroup).await
+    } else {
+        translated(context, StockMessage::MsgGroupLeftBy)
+            .await
+            .replace1(&by_contact.get_stock_name_n_addr(context).await)
+    }
+}
+pub(crate) async fn msg_del_member_local(
+    context: &Context,
+    removed_member_addr: &str,
+    by_contact: ContactId,
+) -> String {
+    let addr = removed_member_addr;
+    let whom = &match Contact::lookup_id_by_addr(context, addr, Origin::Unknown).await {
+        Ok(Some(contact_id)) => Contact::get_by_id(context, contact_id)
+            .await
+            .map(|contact| contact.get_name_n_addr())
+            .unwrap_or_else(|_| addr.to_string()),
+        _ => addr.to_string(),
+    };
+    if by_contact == ContactId::SELF {
+        translated(context, StockMessage::MsgYouDelMember)
+            .await
+            .replace1(whom)
+    } else {
+        translated(context, StockMessage::MsgDelMemberBy)
+            .await
+            .replace1(whom)
+            .replace2(&by_contact.get_stock_name_n_addr(context).await)
+    }
+}
+pub enum Param {
+    /// For messages
+    File = b'f',
+
+    /// For messages: original filename (as shown in chat)
+    Filename = b'v',
+
+    /// For messages: This name should be shown instead of contact.get_display_name()
+    /// (used if this is a mailinglist
+    /// or explicitly set using set_override_sender_name(), eg. by bots)
+    OverrideSenderDisplayname = b'O',
+
+    /// For Messages
+    Width = b'w',
+
+    /// For Messages
+    Height = b'h',
+
+    /// For Messages
+    Duration = b'd',
+
+    /// For Messages
+    MimeType = b'm',
+
+    /// For Messages: HTML to be written to the database and to be send.
+    /// `SendHtml` param is not used for received messages.
+    /// Use `MsgId::get_html()` to get HTML of received messages.
+    SendHtml = b'T',
+
+    /// For Messages: message is encrypted, outgoing: guarantee E2EE or the message is not send
+    GuaranteeE2ee = b'c',
+
+    /// For Messages: quoted message is encrypted.
+    ///
+    /// If this message is sent unencrypted, quote text should be replaced.
+    ProtectQuote = b'0',
+
+    /// For Messages: decrypted with validation errors or without mutual set, if neither
+    /// 'c' nor 'e' are preset, the messages is only transport encrypted.
+    ErroneousE2ee = b'e',
+
+    /// For Messages: force unencrypted message, a value from `ForcePlaintext` enum.
+    ForcePlaintext = b'u',
+
+    /// For Messages: do not include Autocrypt header.
+    SkipAutocrypt = b'o',
+
+    /// For Messages
+    WantsMdn = b'r',
+
+    /// For Messages: the message is a reaction.
+    Reaction = b'x',
+
+    /// For Chats: the timestamp of the last reaction.
+    LastReactionTimestamp = b'y',
+
+    /// For Chats: Message ID of the last reaction.
+    LastReactionMsgId = b'Y',
+
+    /// For Chats: Contact ID of the last reaction.
+    LastReactionContactId = b'1',
+
+    /// For Messages: a message with "Auto-Submitted: auto-generated" header ("bot").
+    Bot = b'b',
+
+    /// For Messages: unset or 0=not forwarded,
+    /// 1=forwarded from unknown msg_id, >9 forwarded from msg_id
+    Forwarded = b'a',
+
+    /// For Messages: quoted text.
+    Quote = b'q',
+
+    /// For Messages
+    Cmd = b'S',
+
+    /// For Messages
+    Arg = b'E',
+
+    /// For Messages
+    Arg2 = b'F',
+
+    /// `Secure-Join-Fingerprint` header for `{vc,vg}-request-with-auth` messages.
+    Arg3 = b'G',
+
+    /// Deprecated `Secure-Join-Group` header for messages.
+    Arg4 = b'H',
+
+    /// For Messages
+    AttachGroupImage = b'A',
+
+    /// For Messages
+    WebrtcRoom = b'V',
+
+    /// For Messages: space-separated list of messaged IDs of forwarded copies.
+    ///
+    /// This is used when a [crate::message::Message] is in the
+    /// [crate::message::MessageState::OutPending] state but is already forwarded.
+    /// In this case the forwarded messages are written to the
+    /// database and their message IDs are added to this parameter of
+    /// the original message, which is also saved in the database.
+    /// When the original message is then finally sent this parameter
+    /// is used to also send all the forwarded messages.
+    PrepForwards = b'P',
+
+    /// For Messages
+    SetLatitude = b'l',
+
+    /// For Messages
+    SetLongitude = b'n',
+
+    /// For Groups
+    ///
+    /// An unpromoted group has not had any messages sent to it and thus only exists on the
+    /// creator's device.  Any changes made to an unpromoted group do not need to send
+    /// system messages to the group members to update them of the changes.  Once a message
+    /// has been sent to a group it is promoted and group changes require sending system
+    /// messages to all members.
+    Unpromoted = b'U',
+
+    /// For Groups and Contacts
+    ProfileImage = b'i',
+
+    /// For Chats
+    /// Signals whether the chat is the `saved messages` chat
+    Selftalk = b'K',
+
+    /// For Chats: On sending a new message we set the subject to `Re: <last subject>`.
+    /// Usually we just use the subject of the parent message, but if the parent message
+    /// is deleted, we use the LastSubject of the chat.
+    LastSubject = b't',
+
+    /// For Chats
+    Devicetalk = b'D',
+
+    /// For Chats: If this is a mailing list chat, contains the List-Post address.
+    /// None if there simply is no `List-Post` header in the mailing list.
+    /// Some("") if the mailing list is using multiple different List-Post headers.
+    ///
+    /// The List-Post address is the email address where the user can write to in order to
+    /// post something to the mailing list.
+    ListPost = b'p',
+
+    /// For Contacts: If this is the List-Post address of a mailing list, contains
+    /// the List-Id of the mailing list (which is also used as the group id of the chat).
+    ListId = b's',
+
+    /// For Contacts: timestamp of status (aka signature or footer) update.
+    StatusTimestamp = b'j',
+
+    /// For Contacts and Chats: timestamp of avatar update.
+    AvatarTimestamp = b'J',
+
+    /// For Chats: timestamp of status/signature/footer update.
+    EphemeralSettingsTimestamp = b'B',
+
+    /// For Chats: timestamp of subject update.
+    SubjectTimestamp = b'C',
+
+    /// For Chats: timestamp of group name update.
+    GroupNameTimestamp = b'g',
+
+    /// For Chats: timestamp of member list update.
+    MemberListTimestamp = b'k',
+
+    /// For Webxdc Message Instances: Current document name
+    WebxdcDocument = b'R',
+
+    /// For Webxdc Message Instances: timestamp of document name update.
+    WebxdcDocumentTimestamp = b'W',
+
+    /// For Webxdc Message Instances: Current summary
+    WebxdcSummary = b'N',
+
+    /// For Webxdc Message Instances: timestamp of summary update.
+    WebxdcSummaryTimestamp = b'Q',
+
+    /// For Webxdc Message Instances: Webxdc is an integration, see init_webxdc_integration()
+    WebxdcIntegration = b'3',
+
+    /// For Webxdc Message Instances: Chat to integrate the Webxdc for.
+    WebxdcIntegrateFor = b'2',
+
+    /// For messages: Whether [crate::message::Viewtype::Sticker] should be forced.
+    ForceSticker = b'X',
+    // 'L' was defined as ProtectionSettingsTimestamp for Chats, however, never used in production.
+}
+pub struct ContactId(u32);
+pub struct ChatId(u32);
+impl ContactId {
+    /// The owner of the account.
+    ///
+    /// The email-address is set by `set_config` using "addr".
+    pub const SELF: ContactId = ContactId::new(1);
+}
+pub enum Chattype {
+    /// 1:1 chat.
+    Single = 100,
+
+    /// Group chat.
+    Group = 120,
+
+    /// Mailing list.
+    Mailinglist = 140,
+
+    /// Broadcast list.
+    Broadcast = 160,
+}
+pub enum SystemMessage {
+    /// Unknown type of system message.
+    #[default]
+    Unknown = 0,
+
+    /// Group name changed.
+    GroupNameChanged = 2,
+
+    /// Group avatar changed.
+    GroupImageChanged = 3,
+
+    /// Member was added to the group.
+    MemberAddedToGroup = 4,
+
+    /// Member was removed from the group.
+    MemberRemovedFromGroup = 5,
+
+    /// Autocrypt Setup Message.
+    AutocryptSetupMessage = 6,
+
+    /// Secure-join message.
+    SecurejoinMessage = 7,
+
+    /// Location streaming is enabled.
+    LocationStreamingEnabled = 8,
+
+    /// Location-only message.
+    LocationOnly = 9,
+
+    /// Chat ephemeral message timer is changed.
+    EphemeralTimerChanged = 10,
+
+    /// "Messages are guaranteed to be end-to-end encrypted from now on."
+    ChatProtectionEnabled = 11,
+
+    /// "%1$s sent a message from another device."
+    ChatProtectionDisabled = 12,
+
+    /// Message can't be sent because of `Invalid unencrypted mail to <>`
+    /// which is sent by chatmail servers.
+    InvalidUnencryptedMail = 13,
+
+    /// 1:1 chats info message telling that SecureJoin has started and the user should wait for it
+    /// to complete.
+    SecurejoinWait = 14,
+
+    /// 1:1 chats info message telling that SecureJoin is still running, but the user may already
+    /// send messages.
+    SecurejoinWaitTimeout = 15,
+
+    /// Self-sent-message that contains only json used for multi-device-sync;
+    /// if possible, we attach that to other messages as for locations.
+    MultiDeviceSync = 20,
+
+    /// Sync message that contains a json payload
+    /// sent to the other webxdc instances
+    /// These messages are not shown in the chat.
+    WebxdcStatusUpdate = 30,
+
+    /// Webxdc info added with `info` set in `send_webxdc_status_update()`.
+    WebxdcInfoMessage = 32,
+
+    /// This message contains a users iroh node address.
+    IrohNodeAddr = 40,
+}
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+------
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;

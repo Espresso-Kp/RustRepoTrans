@@ -1,0 +1,204 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public boolean dropNamespace(Namespace namespace) throws NamespaceNotEmptyException {
+    namespaceExists(namespace);
+
+    GetTablesResponse response =
+        glue.getTables(
+            GetTablesRequest.builder()
+                .catalogId(awsProperties.glueCatalogId())
+                .databaseName(
+                    IcebergToGlueConverter.toDatabaseName(
+                        namespace, awsProperties.glueCatalogSkipNameValidation()))
+                .build());
+
+    if (response.hasTableList() && !response.tableList().isEmpty()) {
+      Table table = response.tableList().get(0);
+      if (isGlueIcebergTable(table)) {
+        throw new NamespaceNotEmptyException(
+            "Cannot drop namespace %s because it still contains Iceberg tables", namespace);
+      } else {
+        throw new NamespaceNotEmptyException(
+            "Cannot drop namespace %s because it still contains non-Iceberg tables", namespace);
+      }
+    }
+
+    glue.deleteDatabase(
+        DeleteDatabaseRequest.builder()
+            .catalogId(awsProperties.glueCatalogId())
+            .name(
+                IcebergToGlueConverter.toDatabaseName(
+                    namespace, awsProperties.glueCatalogSkipNameValidation()))
+            .build());
+    LOG.info("Dropped namespace: {}", namespace);
+    // Always successful, otherwise exception is thrown
+    return true;
+  }
+</java function>
+<rust function signature>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+        let db_name = validate_namespace(namespace)?;
+        let table_list = self.list_tables(namespace).await?;
+
+        if !table_list.is_empty() {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} is not empty", &db_name),
+            ));
+        }
+
+        let builder = self.client.0.delete_database().name(db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    self.namespace_exists(namespace).await?;
+
+    let database_name = convert_to_database(namespace, self.aws_properties.glue_catalog_skip_name_validation());
+
+    let response = self.glue
+        .get_tables()
+        .catalog_id(self.aws_properties.glue_catalog_id())
+        .database_name(database_name.clone())
+        .send()
+        .await
+        .map_err(from_aws_sdk_error)?;
+
+    if let Some(table_list) = response.table_list() {
+        if !table_list.is_empty() {
+            let table = &table_list[0];
+            if self.is_glue_iceberg_table(table) {
+                return Err(Error::new(
+                    ErrorKind::NamespaceNotEmpty,
+                    format!("Cannot drop namespace {} because it still contains Iceberg tables", namespace),
+                ));
+            } else {
+                return Err(Error::new(
+                    ErrorKind::NamespaceNotEmpty,
+                    format!("Cannot drop namespace {} because it still contains non-Iceberg tables", namespace),
+                ));
+            }
+        }
+    }
+
+    self.glue
+        .delete_database()
+        .catalog_id(self.aws_properties.glue_catalog_id())
+        .name(database_name)
+        .send()
+        .await
+        .map_err(from_aws_sdk_error)?;
+
+    log::info!("Dropped namespace: {:?}", namespace);
+    Ok(())
+}
+```
+
+This translation makes the following assumptions and adaptations:
+
+1. The `namespaceExists` method is translated to `self.namespace_exists(namespace).await?`.
+2. The `IcebergToGlueConverter.toDatabaseName` is replaced with `convert_to_database` function.
+3. The `isGlueIcebergTable` method is translated to `self.is_glue_iceberg_table(table)`.
+4. The `NamespaceNotEmptyException` is replaced with `Error::new(ErrorKind::NamespaceNotEmpty, ...)`.
+5. The `LOG.info` is replaced with `log::info!`.
+6. The return type is changed from `boolean` to `Result<()>` to match the Rust function signature.
+7. AWS SDK errors are mapped using the `from_aws_sdk_error` function.
+
+Please note that some of the exact implementations (like `aws_properties`, `glue`, `is_glue_iceberg_table`) are not provided in the given context, so they are assumed to exist as methods or fields on `self`.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    self.namespace_exists(namespace).await?;
+
+    let database_name = convert_to_database(namespace, self.aws_properties.glue_catalog_skip_name_validation());
+
+    let response = self.glue
+        .get_tables()
+        .catalog_id(self.aws_properties.glue_catalog_id())
+        .database_name(database_name.clone())
+        .send()
+        .await
+        .map_err(from_aws_sdk_error)?;
+
+    if let Some(table_list) = response.table_list() {
+        if !table_list.is_empty() {
+            let table = &table_list[0];
+            if self.is_glue_iceberg_table(table) {
+                return Err(Error::new(
+                    ErrorKind::NamespaceNotEmpty,
+                    format!("Cannot drop namespace {} because it still contains Iceberg tables", namespace),
+                ));
+            } else {
+                return Err(Error::new(
+                    ErrorKind::NamespaceNotEmpty,
+                    format!("Cannot drop namespace {} because it still contains non-Iceberg tables", namespace),
+                ));
+            }
+        }
+    }
+
+    self.glue
+        .delete_database()
+        .catalog_id(self.aws_properties.glue_catalog_id())
+        .name(database_name)
+        .send()
+        .await
+        .map_err(from_aws_sdk_error)?;
+
+    log::info!("Dropped namespace: {:?}", namespace);
+    Ok(())
+}
+```
+
+This translation makes the following assumptions and adaptations:
+
+1. The `namespaceExists` method is translated to `self.namespace_exists(namespace).await?`.
+2. The `IcebergToGlueConverter.toDatabaseName` is replaced with `convert_to_database` function.
+3. The `isGlueIcebergTable` method is translated to `self.is_glue_iceberg_table(table)`.
+4. The `NamespaceNotEmptyException` is replaced with `Error::new(ErrorKind::NamespaceNotEmpty, ...)`.
+5. The `LOG.info` is replaced with `log::info!`.
+6. The return type is changed from `boolean` to `Result<()>` to match the Rust function signature.
+7. AWS SDK errors are mapped using the `from_aws_sdk_error` function.
+
+Please note that some of the exact implementations (like `aws_properties`, `glue`, `is_glue_iceberg_table`) are not provided in the given context, so they are assumed to exist as methods or fields on `self`.

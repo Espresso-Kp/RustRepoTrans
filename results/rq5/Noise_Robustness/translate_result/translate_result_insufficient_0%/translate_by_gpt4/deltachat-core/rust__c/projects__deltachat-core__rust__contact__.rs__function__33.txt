@@ -1,0 +1,245 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_delete_contact(dc_context_t* context, uint32_t contact_id)
+{
+	int           success = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || contact_id<=DC_CONTACT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+	/* we can only delete contacts that are not in use anywhere; this function is mainly for the user who has just
+	created an contact manually and wants to delete it a moment later */
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_ROW || sqlite3_column_int(stmt, 0) >= 1) {
+		goto cleanup;
+	}
+	sqlite3_finalize(stmt);
+	stmt = NULL;
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM msgs WHERE from_id=? OR to_id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	sqlite3_bind_int(stmt, 2, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_ROW || sqlite3_column_int(stmt, 0) >= 1) {
+		goto cleanup;
+	}
+	sqlite3_finalize(stmt);
+	stmt = NULL;
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"DELETE FROM contacts WHERE id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	if (sqlite3_step(stmt)!=SQLITE_DONE) {
+		goto cleanup;
+	}
+
+	context->cb(context, DC_EVENT_CONTACTS_CHANGED, 0, 0);
+
+	success = 1;
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return success;
+}
+</c function>
+<rust function signature>
+pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp::{min, Reverse};
+use std::collections::BinaryHeap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use base64::Engine as _;
+use deltachat_contact_tools::may_be_valid_addr;
+use deltachat_contact_tools::{
+    self as contact_tools, addr_cmp, addr_normalize, sanitize_name_and_addr, strip_rtlo_characters,
+    ContactAddress, VcardContact,
+};
+use deltachat_derive::{FromSql, ToSql};
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use tokio::task;
+use tokio::time::{timeout, Duration};
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::blob::BlobObject;
+use crate::chat::{ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{Blocked, Chattype, DC_GCL_ADD_SELF, DC_GCL_VERIFIED_ONLY};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{load_self_public_key, DcKey, SignedPublicKey};
+use crate::log::LogExt;
+use crate::login_param::LoginParam;
+use crate::message::MessageState;
+use crate::mimeparser::AvatarAction;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::sql::{self, params_iter};
+use crate::sync::{self, Sync::*};
+use crate::tools::{
+    duration_to_str, get_abs_path, improve_single_line_input, smeared_time, time, SystemTime,
+};
+use crate::{chat, chatlist_events, stock_str};
+use deltachat_contact_tools::{may_be_valid_addr, normalize_name};
+use super::*;
+use crate::chat::{get_chat_contacts, send_text_msg, Chat};
+use crate::chatlist::Chatlist;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{self, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> {
+        ensure!(!contact_id.is_special(), "Can not delete special contact");
+
+        context
+            .sql
+            .transaction(move |transaction| {
+                // make sure, the transaction starts with a write command and becomes EXCLUSIVE by that -
+                // upgrading later may be impossible by races.
+                let deleted_contacts = transaction.execute(
+                    "DELETE FROM contacts WHERE id=?
+                     AND (SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?)=0;",
+                    (contact_id, contact_id),
+                )?;
+                if deleted_contacts == 0 {
+                    transaction.execute(
+                        "UPDATE contacts SET origin=? WHERE id=?;",
+                        (Origin::Hidden, contact_id),
+                    )?;
+                }
+                Ok(())
+            })
+            .await?;
+
+        context.emit_event(EventType::ContactsChanged(None));
+        Ok(())
+    }
+</function>
+<translated function>
+Here is your translated function from C to Rust:
+
+```rust
+pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> {
+    if context.is_null()
+        || context.magic != DC_CONTEXT_MAGIC
+        || contact_id <= Ok(ContactId::from_u32(DC_CONTACT_ID_LAST_SPECIAL))
+    {
+        bail!("Invalid context or contact_id");
+    }
+
+    let res = context
+        .sql
+        .query_get_value::<_, isize>(
+            context,
+            "SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?;",
+            paramsv![contact_id],
+        )
+        .await?;
+
+    if res != 0 {
+        bail!("Cannot delete contact_id");
+    }
+
+    let res = context
+        .sql
+        .query_get_value::<_, isize>(
+            context,
+            "SELECT COUNT(*) FROM msgs WHERE from_id=? OR to_id=?;",
+            paramsv![contact_id, contact_id],
+        )
+        .await?;
+
+    if res != 0 {
+        bail!("Cannot delete contact_id");
+    }
+
+    context
+        .sql
+        .execute(
+            "DELETE FROM contacts WHERE id=?;",
+            params![contact_id],
+        )
+        .await?;
+
+    context.emit_event(EventType::ContactsChanged);
+
+    Ok(())
+}
+```
+
+Please note the differences in error handling in Rust compared to C, where we don't use `goto cleanup;` instead on error situation we simply `bail!` out. We return `Result<()>` instead of an integer. In case of a successful operation, we return `Ok(())` and in case of any error, we return `bail!` with a message.
+Now the function is asynchronous. Some of the function (like `query_get_value`, `execute`) are refactored to async variant. Adjust it based on your real module. The `params[]` is used to bind the value to the query.
+The implementation could differ a little depending on the specific rust libraries implementation. The provided code is just a general translation for the given C function.</translated function>Here is your translated function from C to Rust:
+
+```rust
+pub async fn delete(context: &Context, contact_id: ContactId) -> Result<()> {
+    if context.is_null()
+        || context.magic != DC_CONTEXT_MAGIC
+        || contact_id <= Ok(ContactId::from_u32(DC_CONTACT_ID_LAST_SPECIAL))
+    {
+        bail!("Invalid context or contact_id");
+    }
+
+    let res = context
+        .sql
+        .query_get_value::<_, isize>(
+            context,
+            "SELECT COUNT(*) FROM chats_contacts WHERE contact_id=?;",
+            paramsv![contact_id],
+        )
+        .await?;
+
+    if res != 0 {
+        bail!("Cannot delete contact_id");
+    }
+
+    let res = context
+        .sql
+        .query_get_value::<_, isize>(
+            context,
+            "SELECT COUNT(*) FROM msgs WHERE from_id=? OR to_id=?;",
+            paramsv![contact_id, contact_id],
+        )
+        .await?;
+
+    if res != 0 {
+        bail!("Cannot delete contact_id");
+    }
+
+    context
+        .sql
+        .execute(
+            "DELETE FROM contacts WHERE id=?;",
+            params![contact_id],
+        )
+        .await?;
+
+    context.emit_event(EventType::ContactsChanged);
+
+    Ok(())
+}
+```
+
+Please note the differences in error handling in Rust compared to C, where we don't use `goto cleanup;` instead on error situation we simply `bail!` out. We return `Result<()>` instead of an integer. In case of a successful operation, we return `Ok(())` and in case of any error, we return `bail!` with a message.
+Now the function is asynchronous. Some of the function (like `query_get_value`, `execute`) are refactored to async variant. Adjust it based on your real module. The `params[]` is used to bind the value to the query.
+The implementation could differ a little depending on the specific rust libraries implementation. The provided code is just a general translation for the given C function.

@@ -1,0 +1,58 @@
+<path>
+projects/deltachat-core/rust/oauth2.rs
+</path>
+<function>
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    let socks5_enabled = context.get_config_bool(Config::Socks5Enabled).await?;
+    if let Some(oauth2) = Oauth2::from_address(context, addr, socks5_enabled).await {
+        context
+            .sql
+            .set_raw_config("oauth2_pending_redirect_uri", Some(redirect_uri))
+            .await?;
+        let oauth2_url = replace_in_uri(oauth2.get_code, "$CLIENT_ID", oauth2.client_id);
+        let oauth2_url = replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+        Ok(Some(oauth2_url))
+    } else {
+        Ok(None)
+    }
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_oauth2.c
+</path>
+<function>
+char* dc_get_oauth2_url(dc_context_t* context, const char* addr,
+                        const char* redirect_uri)
+{
+	#define CLIENT_ID     "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com"
+	oauth2_t*   oauth2 = NULL;
+	char*       oauth2_url = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || redirect_uri==NULL || redirect_uri[0]==0) {
+		goto cleanup;
+	}
+
+	oauth2 = get_info(addr);
+	if (oauth2==NULL) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_set_config(context->sql, "oauth2_pending_redirect_uri", redirect_uri);
+
+	oauth2_url = dc_strdup(oauth2->get_code);
+	replace_in_uri(&oauth2_url, "$CLIENT_ID", oauth2->client_id);
+	replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+cleanup:
+	free(oauth2);
+	return oauth2_url;
+}
+</function>

@@ -1,0 +1,243 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public List<TableIdentifier> listTables(SessionContext context, Namespace ns) {
+    checkNamespaceIsValid(ns);
+    Map<String, String> queryParams = Maps.newHashMap();
+    ImmutableList.Builder<TableIdentifier> tables = ImmutableList.builder();
+    String pageToken = "";
+
+    do {
+      queryParams.put("pageToken", pageToken);
+      ListTablesResponse response =
+          client.get(
+              paths.tables(ns),
+              queryParams,
+              ListTablesResponse.class,
+              headers(context),
+              ErrorHandlers.namespaceErrorHandler());
+      pageToken = response.nextPageToken();
+      tables.addAll(response.identifiers());
+    } while (pageToken != null);
+
+    return tables.build();
+  }
+</java function>
+<rust function signature>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+async fn query<
+        R: DeserializeOwned,
+        E: DeserializeOwned + Into<Error>,
+        const SUCCESS_CODE: u16,
+    >(
+        &self,
+        request: Request,
+    ) -> Result<R> {
+        let resp = self.0.execute(request).await?;
+
+        if resp.status().as_u16() == SUCCESS_CODE {
+            let text = resp.bytes().await?;
+            Ok(serde_json::from_slice::<R>(&text).map_err(|e| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    "Failed to parse response from rest catalog server!",
+                )
+                .with_context("json", String::from_utf8_lossy(&text))
+                .with_source(e)
+            })?)
+        } else {
+            let code = resp.status();
+            let text = resp.bytes().await?;
+            let e = serde_json::from_slice::<E>(&text).map_err(|e| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    "Failed to parse response from rest catalog server!",
+                )
+                .with_context("json", String::from_utf8_lossy(&text))
+                .with_context("code", code.to_string())
+                .with_source(e)
+            })?;
+            Err(e.into())
+        }
+    }
+pub struct RestCatalog {
+    config: RestCatalogConfig,
+    client: HttpClient,
+}
+pub(super) struct ListTableResponse {
+        pub(super) identifiers: Vec<TableIdent>,
+    }
+struct HttpClient(Client);
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::collections::HashMap;
+use std::str::FromStr;
+use async_trait::async_trait;
+use itertools::Itertools;
+use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, Request, Response, StatusCode, Url};
+use serde::de::DeserializeOwned;
+use typed_builder::TypedBuilder;
+use urlencoding::encode;
+use crate::catalog::_serde::{
+    CommitTableRequest, CommitTableResponse, CreateTableRequest, LoadTableResponse,
+};
+use iceberg::io::FileIO;
+use iceberg::table::Table;
+use iceberg::Result;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+};
+use self::_serde::{
+    CatalogConfig, ErrorResponse, ListNamespaceResponse, ListTableResponse, NamespaceSerde,
+    RenameTableRequest, TokenResponse, NO_CONTENT, OK,
+};
+use std::collections::HashMap;
+use serde_derive::{Deserialize, Serialize};
+use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
+use iceberg::{Error, ErrorKind, Namespace, TableIdent, TableRequirement, TableUpdate};
+use chrono::{TimeZone, Utc};
+use iceberg::spec::{
+        FormatVersion, NestedField, NullOrder, Operation, PrimitiveType, Schema, Snapshot,
+        SnapshotLog, SortDirection, SortField, SortOrder, Summary, Transform, Type,
+        UnboundPartitionField, UnboundPartitionSpec,
+    };
+use iceberg::transaction::Transaction;
+use mockito::{Mock, Server, ServerGuard};
+use serde_json::json;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+use uuid::uuid;
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let request = self
+            .client
+            .0
+            .get(self.config.tables_endpoint(namespace))
+            .build()?;
+
+        let resp = self
+            .client
+            .query::<ListTableResponse, ErrorResponse, OK>(request)
+            .await?;
+
+        Ok(resp.identifiers)
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+use serde::{Serialize, Deserialize};
+use crate::ErrorHandlers;
+
+#[derive(Serialize, Deserialize)]
+pub struct ListTablesResponse {
+    pub(super) identifiers: Vec<TableIdent>,
+    pub(super) next_page_token: Option<String>,
+}
+
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>>  {
+    let mut tables = Vec::new();
+    let mut page_token = None;
+
+    loop {
+        let mut query_params = HashMap::new();
+
+        if let Some(token) = &page_token {
+            query_params.insert("pageToken", token.clone());
+        }
+
+        let request = Request::new(
+            Url::from_str(&format!("{}/tables", namespace)),
+            HeaderMap::new(),
+            query_params,
+            Method::Get,
+        );
+
+        let response: ListTablesResponse = self.query::<
+                    ListTablesResponse, 
+                    ErrorHandlers::NamespaceErrorHandler, 
+                    OK 
+                >(request).await?;
+
+        if let Some(identifiers) = response.identifiers {
+            tables.extend(identifiers);
+        }
+
+        match response.next_page_token {
+            Some(token) => page_token = Some(token),
+            None => break,
+        }
+    }
+
+    Ok(tables)
+}
+```
+
+Please note that the `rest-catelog` server's path may need to be adjusted based on the real case. Another note is that `Request::new`'s parameters, here, `Url`, `HeaderMap`, `query_params`, `Method::Get`, are all presumptive items depending on how a `Request` instance is expected to be created in the context. Also note that original java-based HTTP request headers are not implemented here as there should be a dedicated place handling the headers. The error handler for namespace error is translated but it might require implementation of the trait for the provided error type. `OK` is the success status code of this server, it maybe needs to be declared. 
+
+And also the `ListTablesResponse` is translated accordingly, but fields' visibility might need to adjust to fit dependency usage in other parts of the system related. If it's not fitting the context or causing issues, you could need to adjust the translated function to fit the actual context where it is used.</translated function>Here is the translated Rust function:
+
+```rust
+use serde::{Serialize, Deserialize};
+use crate::ErrorHandlers;
+
+#[derive(Serialize, Deserialize)]
+pub struct ListTablesResponse {
+    pub(super) identifiers: Vec<TableIdent>,
+    pub(super) next_page_token: Option<String>,
+}
+
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>>  {
+    let mut tables = Vec::new();
+    let mut page_token = None;
+
+    loop {
+        let mut query_params = HashMap::new();
+
+        if let Some(token) = &page_token {
+            query_params.insert("pageToken", token.clone());
+        }
+
+        let request = Request::new(
+            Url::from_str(&format!("{}/tables", namespace)),
+            HeaderMap::new(),
+            query_params,
+            Method::Get,
+        );
+
+        let response: ListTablesResponse = self.query::<
+                    ListTablesResponse, 
+                    ErrorHandlers::NamespaceErrorHandler, 
+                    OK 
+                >(request).await?;
+
+        if let Some(identifiers) = response.identifiers {
+            tables.extend(identifiers);
+        }
+
+        match response.next_page_token {
+            Some(token) => page_token = Some(token),
+            None => break,
+        }
+    }
+
+    Ok(tables)
+}
+```
+
+Please note that the `rest-catelog` server's path may need to be adjusted based on the real case. Another note is that `Request::new`'s parameters, here, `Url`, `HeaderMap`, `query_params`, `Method::Get`, are all presumptive items depending on how a `Request` instance is expected to be created in the context. Also note that original java-based HTTP request headers are not implemented here as there should be a dedicated place handling the headers. The error handler for namespace error is translated but it might require implementation of the trait for the provided error type. `OK` is the success status code of this server, it maybe needs to be declared. 
+
+And also the `ListTablesResponse` is translated accordingly, but fields' visibility might need to adjust to fit dependency usage in other parts of the system related. If it's not fitting the context or causing issues, you could need to adjust the translated function to fit the actual context where it is used.

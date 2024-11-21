@@ -1,0 +1,195 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void dc_update_msg_state(dc_context_t* context, uint32_t msg_id, int state)
+{
+	sqlite3_stmt* stmt = dc_sqlite3_prepare(context->sql,
+        "UPDATE msgs SET state=? WHERE id=? AND (?=? OR state<?)")；
+	sqlite3_bind_int(stmt, 1, state);
+	sqlite3_bind_int(stmt, 2, msg_id);
+    sqlite3_bind_int(stmt, 3, state);
+    sqlite3_bind_int(stmt, 4, DC_STATE_OUT_DELIVERED);
+    sqlite3_bind_int(stmt, 5, DC_STATE_OUT_DELIVERED);
+	sqlite3_step(stmt);
+	sqlite3_finalize(stmt);
+}
+</c function>
+<rust function signature>
+pub(crate) async fn update_msg_state(
+    context: &Context,
+    msg_id: MsgId,
+    state: MessageState,
+) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub async fn execute(
+        &self,
+        query: &str,
+        params: impl rusqlite::Params + Send,
+    ) -> Result<usize> {
+        self.call_write(move |conn| {
+            let res = conn.execute(query, params)?;
+            Ok(res)
+        })
+        .await
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+pub enum MessageState {
+    /// Undefined message state.
+    #[default]
+    Undefined = 0,
+
+    /// Incoming *fresh* message. Fresh messages are neither noticed
+    /// nor seen and are typically shown in notifications.
+    InFresh = 10,
+
+    /// Incoming *noticed* message. E.g. chat opened but message not
+    /// yet read - noticed messages are not counted as unread but did
+    /// not marked as read nor resulted in MDNs.
+    InNoticed = 13,
+
+    /// Incoming message, really *seen* by the user. Marked as read on
+    /// IMAP and MDN may be sent.
+    InSeen = 16,
+
+    /// For files which need time to be prepared before they can be
+    /// sent, the message enters this state before
+    /// OutPending.
+    OutPreparing = 18,
+
+    /// Message saved as draft.
+    OutDraft = 19,
+
+    /// The user has pressed the "send" button but the message is not
+    /// yet sent and is pending in some way. Maybe we're offline (no
+    /// checkmark).
+    OutPending = 20,
+
+    /// *Unrecoverable* error (*recoverable* errors result in pending
+    /// messages).
+    OutFailed = 24,
+
+    /// Outgoing message successfully delivered to server (one
+    /// checkmark). Note, that already delivered messages may get into
+    /// the OutFailed state if we get such a hint from the server.
+    OutDelivered = 26,
+
+    /// Outgoing message read by the recipient (two checkmarks; this
+    /// requires goodwill on the receiver's side)
+    OutMdnRcvd = 28,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use anyhow::{ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::{parse_vcard, VcardContact};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use tokio::{fs, io};
+use crate::blob::BlobObject;
+use crate::chat::{Chat, ChatId, ChatIdBlocked};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    Blocked, Chattype, VideochatType, DC_CHAT_ID_TRASH, DC_DESIRED_TEXT_LEN, DC_MSG_ID_LAST_SPECIAL,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::debug_logging::set_debug_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::{start_ephemeral_timers_msgids, Timer as EphemeralTimer};
+use crate::events::EventType;
+use crate::imap::markseen_on_imap_table;
+use crate::location::delete_poi_location;
+use crate::mimeparser::{parse_message_id, SystemMessage};
+use crate::param::{Param, Params};
+use crate::pgp::split_armored_data;
+use crate::reaction::get_msg_reactions;
+use crate::sql;
+use crate::summary::Summary;
+use crate::tools::{
+    buf_compress, buf_decompress, get_filebytes, get_filemeta, gm2local_offset, read_file, time,
+    timestamp_to_str, truncate,
+};
+use MessageState::*;
+use MessageState::*;
+use num_traits::FromPrimitive;
+use super::*;
+use crate::chat::{
+        self, add_contact_to_chat, marknoticed_chat, send_text_msg, ChatItem, ProtectionStatus,
+    };
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::reaction::send_reaction;
+use crate::receive_imf::receive_imf;
+use crate::test_utils as test;
+use crate::test_utils::{TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) async fn update_msg_state(
+    context: &Context,
+    msg_id: MsgId,
+    state: MessageState,
+) -> Result<()> {
+    ensure!(state != MessageState::OutFailed, "use set_msg_failed()!");
+    let error_subst = match state >= MessageState::OutPending {
+        true => ", error=''",
+        false => "",
+    };
+    context
+        .sql
+        .execute(
+            &format!("UPDATE msgs SET state=?1 {error_subst} WHERE id=?2 AND (?1!=?3 OR state<?3)"),
+            (state, msg_id, MessageState::OutDelivered),
+        )
+        .await?;
+    Ok(())
+}
+</function>
+<translated function>
+ ```rust
+pub(crate) async fn update_msg_state(
+    context: &Context,
+    msg_id: MsgId,
+    state: MessageState,
+) -> Result<()> {
+    let query = "UPDATE msgs SET state=? WHERE id=? AND (?=? OR state<?)";
+    let params = [
+        state as i32,
+        msg_id as i32,
+        state as i32,
+        DC_STATE_OUT_DELIVERED as i32,
+        DC_STATE_OUT_DELIVERED as i32,
+    ];
+
+    context.inner.sql.execute(query, &params).await?;
+    Ok(())
+}
+```</translated function> ```rust
+pub(crate) async fn update_msg_state(
+    context: &Context,
+    msg_id: MsgId,
+    state: MessageState,
+) -> Result<()> {
+    let query = "UPDATE msgs SET state=? WHERE id=? AND (?=? OR state<?)";
+    let params = [
+        state as i32,
+        msg_id as i32,
+        state as i32,
+        DC_STATE_OUT_DELIVERED as i32,
+        DC_STATE_OUT_DELIVERED as i32,
+    ];
+
+    context.inner.sql.execute(query, &params).await?;
+    Ok(())
+}
+```

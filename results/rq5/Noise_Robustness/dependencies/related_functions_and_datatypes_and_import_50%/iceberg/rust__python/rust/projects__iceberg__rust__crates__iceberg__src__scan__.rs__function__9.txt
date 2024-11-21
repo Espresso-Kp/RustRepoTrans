@@ -1,0 +1,113 @@
+pub fn content_type(&self) -> DataContentType {
+        self.content
+    }
+pub fn file_size_in_bytes(&self) -> u64 {
+        self.file_size_in_bytes
+    }
+pub fn file_path(&self) -> &str {
+        &self.file_path
+    }
+pub fn filter(mut self, predicate: Predicate) -> Self {
+        self.predicates = Some(predicate);
+        self
+    }
+pub fn data_file(&self) -> &DataFile {
+        &self.data_file
+    }
+pub(crate) fn eval(&self, data_file: &DataFile) -> Result<bool> {
+        let mut visitor = ExpressionEvaluatorVisitor::new(self, data_file.partition());
+
+        visit(&mut visitor, &self.partition_filter)
+    }
+fn new(
+        schema: SchemaRef,
+        snapshot: SnapshotRef,
+        table_metadata: TableMetadataRef,
+        file_io: FileIO,
+        filter: Option<Arc<Predicate>>,
+        case_sensitive: bool,
+    ) -> Result<Self> {
+        let bound_filter = match filter {
+            Some(ref filter) => Some(filter.bind(schema.clone(), case_sensitive)?),
+            None => None,
+        };
+
+        Ok(Self {
+            schema,
+            snapshot,
+            table_metadata,
+            file_io,
+            bound_filter,
+            case_sensitive,
+        })
+    }
+fn new() -> Self {
+        Self(HashMap::new())
+    }
+fn new() -> Self {
+        Self(HashMap::new())
+    }
+fn content_type_is_data(entry: &ManifestFile) -> bool {
+        if let ManifestContentType::Data = entry.content {
+            return true;
+        }
+        false
+    }
+pub(crate) fn eval(
+        filter: &'a BoundPredicate,
+        data_file: &'a DataFile,
+        include_empty_files: bool,
+    ) -> crate::Result<bool> {
+        if !include_empty_files && data_file.record_count == 0 {
+            return ROWS_CANNOT_MATCH;
+        }
+
+        let mut evaluator = Self::new(data_file);
+        visit(&mut evaluator, filter)
+    }
+struct PartitionFilterCache(HashMap<i32, BoundPredicate>);
+------
+
+
+use crate::arrow::ArrowReaderBuilder;
+use crate::expr::visitors::expression_evaluator::ExpressionEvaluator;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::visitors::inclusive_projection::InclusiveProjection;
+use crate::expr::visitors::manifest_evaluator::ManifestEvaluator;
+use crate::expr::{Bind, BoundPredicate, Predicate};
+use crate::io::FileIO;
+use crate::spec::{
+    DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef,
+    TableMetadataRef,
+};
+use crate::table::Table;
+use crate::{Error, ErrorKind, Result};
+use arrow_array::RecordBatch;
+use async_stream::try_stream;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+use crate::expr::Reference;
+use crate::io::{FileIO, OutputFile};
+use crate::spec::{
+        DataContentType, DataFileBuilder, DataFileFormat, Datum, FormatVersion, Literal, Manifest,
+        ManifestContentType, ManifestEntry, ManifestListWriter, ManifestMetadata, ManifestStatus,
+        ManifestWriter, Struct, TableMetadata, EMPTY_SNAPSHOT_ID,
+    };
+use crate::table::Table;
+use crate::TableIdent;
+use arrow_array::{ArrayRef, Int64Array, RecordBatch};
+use futures::TryStreamExt;
+use parquet::arrow::{ArrowWriter, PARQUET_FIELD_ID_META_KEY};
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
+use std::collections::HashMap;
+use std::fs;
+use std::fs::File;
+use std::sync::Arc;
+use tempfile::TempDir;
+use tera::{Context, Tera};
+use uuid::Uuid;

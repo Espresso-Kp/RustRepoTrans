@@ -1,0 +1,336 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+*   be unexpected as (1) deleting a normal chat also does not prevent new mails
+ *   from arriving, (2) leaving a group requires sending a message to
+ *   all group members - especially for groups not used for a longer time, this is
+ *   really unexpected when deletion results in contacting all members again,
+ *   (3) only leaving groups is also a valid usecase.
+ *
+ * To leave a chat explicitly, use dc_remove_contact_from_chat() with
+ * chat_id=DC_CONTACT_ID_SELF)
+ *
+ * @memberof dc_context_t
+ * @param context The context object as returned from dc_context_new().
+ * @param chat_id The ID of the chat to delete.
+ * @return None.
+ */
+void dc_delete_chat(dc_context_t* context, uint32_t chat_id)
+{
+	/* Up to 2017-11-02 deleting a group also implied leaving it, see above why we have changed this. */
+	int        pending_transaction = 0;
+	dc_chat_t* obj = dc_chat_new(context);
+	char*      q3 = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || chat_id<=DC_CHAT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+	if (!dc_chat_load_from_db(obj, chat_id)) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_begin_transaction(context->sql);
+	pending_transaction = 1;
+
+		q3 = sqlite3_mprintf("DELETE FROM msgs_mdns WHERE msg_id IN (SELECT id FROM msgs WHERE chat_id=%i);", chat_id);
+		if (!dc_sqlite3_execute(context->sql, q3)) {
+			goto cleanup;
+		}
+		sqlite3_free(q3);
+		q3 = NULL;
+
+		q3 = sqlite3_mprintf("DELETE FROM msgs WHERE chat_id=%i;", chat_id);
+		if (!dc_sqlite3_execute(context->sql, q3)) {
+			goto cleanup;
+		}
+		sqlite3_free(q3);
+		q3 = NULL;
+
+		q3 = sqlite3_mprintf("DELETE FROM chats_contacts WHERE chat_id=%i;", chat_id);
+		if (!dc_sqlite3_execute(context->sql, q3)) {
+			goto cleanup;
+		}
+		sqlite3_free(q3);
+		q3 = NULL;
+
+		q3 = sqlite3_mprintf("DELETE FROM chats WHERE id=%i;", chat_id);
+		if (!dc_sqlite3_execute(context->sql, q3)) {
+			goto cleanup;
+		}
+		sqlite3_free(q3);
+		q3 = NULL;
+
+	dc_sqlite3_commit(context->sql);
+	pending_transaction = 0;
+
+	context->cb(context, DC_EVENT_MSGS_CHANGED, 0, 0);
+
+	dc_job_kill_action(context, DC_JOB_HOUSEKEEPING);
+	dc_job_add(context, DC_JOB_HOUSEKEEPING, 0, NULL, DC_HOUSEKEEPING_DELAY_SEC);
+
+cleanup:
+	if (pending_transaction) { dc_sqlite3_rollback(context->sql); }
+	dc_chat_unref(obj);
+	sqlite3_free(q3);
+}
+</c function>
+<rust function signature>
+pub async fn delete(self, context: &Context) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) async fn set_config_internal(&self, key: Config, value: Option<&str>) -> Result<()> {
+        self.set_config_ex(Sync, key, value).await
+    }
+
+pub async fn add_device_msg(
+    context: &Context,
+    label: Option<&str>,
+    msg: Option<&mut Message>,
+) -> Result<MsgId> {
+    add_device_msg_with_importance(context, label, msg, false).await
+}
+
+pub fn is_self_talk(&self) -> bool {
+        self.param.exists(Param::Selftalk)
+    }
+
+pub fn emit_msgs_changed_without_ids(&self) {
+        self.emit_event(EventType::MsgsChanged {
+            chat_id: ChatId::new(0),
+            msg_id: MsgId::new(0),
+        });
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct ChatId(u32);
+
+
+pub fn is_device_talk(&self) -> bool {
+        self.param.exists(Param::Devicetalk)
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn delete(self, context: &Context) -> Result<()> {
+        ensure!(
+            !self.is_special(),
+            "bad chat_id, can not be a special chat: {}",
+            self
+        );
+
+        let chat = Chat::load_from_db(context, self).await?;
+        context
+            .sql
+            .execute(
+                "DELETE FROM msgs_mdns WHERE msg_id IN (SELECT id FROM msgs WHERE chat_id=?);",
+                (self,),
+            )
+            .await?;
+
+        context
+            .sql
+            .execute("DELETE FROM msgs WHERE chat_id=?;", (self,))
+            .await?;
+
+        context
+            .sql
+            .execute("DELETE FROM chats_contacts WHERE chat_id=?;", (self,))
+            .await?;
+
+        context
+            .sql
+            .execute("DELETE FROM chats WHERE id=?;", (self,))
+            .await?;
+
+        context.emit_msgs_changed_without_ids();
+        chatlist_events::emit_chatlist_changed(context);
+
+        context
+            .set_config_internal(Config::LastHousekeeping, None)
+            .await?;
+        context.scheduler.interrupt_inbox().await;
+
+        if chat.is_self_talk() {
+            let mut msg = Message::new(Viewtype::Text);
+            msg.text = stock_str::self_deleted_msg_body(context).await;
+            add_device_msg(context, None, Some(&mut msg)).await?;
+        }
+        chatlist_events::emit_chatlist_changed(context);
+
+        Ok(())
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function and Rust dependencies:
+
+```rust
+pub async fn delete(self, context: &Context) -> Result<()> {
+    let chat_id = self.id;
+    if chat_id <= DC_CHAT_ID_LAST_SPECIAL {
+        return Ok(());
+    }
+
+    let mut transaction = context.sql.transaction().await?;
+
+    // Delete message delivery notifications
+    transaction
+        .execute(
+            "DELETE FROM msgs_mdns WHERE msg_id IN (SELECT id FROM msgs WHERE chat_id=?)",
+            params![chat_id],
+        )
+        .await?;
+
+    // Delete messages
+    transaction
+        .execute("DELETE FROM msgs WHERE chat_id=?", params![chat_id])
+        .await?;
+
+    // Delete chat contacts
+    transaction
+        .execute("DELETE FROM chats_contacts WHERE chat_id=?", params![chat_id])
+        .await?;
+
+    // Delete chat
+    transaction
+        .execute("DELETE FROM chats WHERE id=?", params![chat_id])
+        .await?;
+
+    transaction.commit().await?;
+
+    context.emit_msgs_changed_without_ids();
+
+    // Schedule housekeeping job
+    context
+        .inner
+        .scheduler
+        .add_job(Job::Housekeeping, Some(Duration::from_secs(DC_HOUSEKEEPING_DELAY_SEC)))
+        .await?;
+
+    Ok(())
+}
+```
+
+This Rust function closely follows the logic of the original C function, with some adaptations to Rust's async/await syntax and error handling. It uses the provided `Context` struct and its methods, as well as other dependencies like `emit_msgs_changed_without_ids()`. The function also uses Rust's `Result` type for error handling.
+
+Note that some details might need to be adjusted based on the exact implementation of the `Context` struct and other dependencies in your Rust codebase. The `DC_HOUSEKEEPING_DELAY_SEC` constant should be defined elsewhere in your code.</translated function>Here's the translated Rust function based on the provided C function and Rust dependencies:
+
+```rust
+pub async fn delete(self, context: &Context) -> Result<()> {
+    let chat_id = self.id;
+    if chat_id <= DC_CHAT_ID_LAST_SPECIAL {
+        return Ok(());
+    }
+
+    let mut transaction = context.sql.transaction().await?;
+
+    // Delete message delivery notifications
+    transaction
+        .execute(
+            "DELETE FROM msgs_mdns WHERE msg_id IN (SELECT id FROM msgs WHERE chat_id=?)",
+            params![chat_id],
+        )
+        .await?;
+
+    // Delete messages
+    transaction
+        .execute("DELETE FROM msgs WHERE chat_id=?", params![chat_id])
+        .await?;
+
+    // Delete chat contacts
+    transaction
+        .execute("DELETE FROM chats_contacts WHERE chat_id=?", params![chat_id])
+        .await?;
+
+    // Delete chat
+    transaction
+        .execute("DELETE FROM chats WHERE id=?", params![chat_id])
+        .await?;
+
+    transaction.commit().await?;
+
+    context.emit_msgs_changed_without_ids();
+
+    // Schedule housekeeping job
+    context
+        .inner
+        .scheduler
+        .add_job(Job::Housekeeping, Some(Duration::from_secs(DC_HOUSEKEEPING_DELAY_SEC)))
+        .await?;
+
+    Ok(())
+}
+```
+
+This Rust function closely follows the logic of the original C function, with some adaptations to Rust's async/await syntax and error handling. It uses the provided `Context` struct and its methods, as well as other dependencies like `emit_msgs_changed_without_ids()`. The function also uses Rust's `Result` type for error handling.
+
+Note that some details might need to be adjusted based on the exact implementation of the `Context` struct and other dependencies in your Rust codebase. The `DC_HOUSEKEEPING_DELAY_SEC` constant should be defined elsewhere in your code.

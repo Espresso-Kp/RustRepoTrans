@@ -1,0 +1,294 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static byte[] KDF2(int sha,byte[] Z,byte[] P,int olen)
+	{
+/* NOTE: the parameter olen is the length of the output k in bytes */
+		int hlen=sha;
+		byte[] K=new byte[olen];
+		byte[] B;
+		int counter,cthreshold,k=0;
+    
+		for (int i=0;i<K.length;i++) K[i]=0;
+
+		cthreshold=olen/hlen; if (olen%hlen!=0) cthreshold++;
+
+		for (counter=1;counter<=cthreshold;counter++)
+		{
+			B=hashit(sha,Z,counter,P,0);
+			if (k+hlen>olen) for (int i=0;i<olen%hlen;i++) K[k++]=B[i];
+			else for (int i=0;i<hlen;i++) K[k++]=B[i];
+		}
+
+		return K;
+	}
+</java function>
+<rust function signature>
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn hashit(sha: usize, a: &[u8], n: usize, b: Option<&[u8]>, pad: usize, w: &mut [u8]) {
+    let mut r: [u8; 64] = [0; 64];
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+
+    if pad == 0 {
+        for i in 0..sha {
+            w[i] = r[i]
+        }
+    } else {
+        if pad <= sha {
+            for i in 0..pad {
+                w[i] = r[i]
+            }
+        } else {
+            for i in 0..sha {
+                w[i + pad - sha] = r[i]
+            }
+            for i in 0..(pad - sha) {
+                w[i] = 0
+            }
+        }
+    }
+}
+
+
+fn hashit(sha: usize, n: usize, id: &[u8], w: &mut [u8]) -> bool {
+    let mut r: [u8; 64] = [0; 64];
+    let mut didit = false;
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if !didit {
+        return false;
+    }
+
+    let rm = big::MODBYTES as usize;
+
+    if sha > rm {
+        for i in 0..rm {
+            w[i] = r[i]
+        }
+    } else {
+        for i in 0..sha {
+            w[i + rm - sha] = r[i]
+        }
+        for i in 0..(rm - sha) {
+            w[i] = 0
+        }
+    }
+
+    return true;
+}
+pub struct DBig {
+    pub w: [Chunk; big::DNLEN],
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    // NOTE: the parameter olen is the length of the output K in bytes
+    let hlen = sha;
+    let mut lk = 0;
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+
+    for counter in 1..=cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, z, counter, p, 0, &mut b);
+        if lk + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[lk] = b[i];
+                lk += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[lk] = b[i];
+                lk += 1
+            }
+        }
+    }
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+    let mut b = vec![0u8; sha];
+    let mut counter = 1;
+    let cthreshold = (olen + hlen - 1) / hlen;
+    let mut k_index = 0;
+
+    for _ in 0..k.len() {
+        k[_] = 0;
+    }
+
+    while counter <= cthreshold {
+        hashit(sha, z, counter, p, 0, &mut b);
+        let remaining = olen - k_index;
+        if remaining < hlen {
+            for i in 0..remaining {
+                k[k_index] = b[i];
+                k_index += 1;
+            }
+        } else {
+            for i in 0..hlen {
+                k[k_index] = b[i];
+                k_index += 1;
+            }
+        }
+        counter += 1;
+    }
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries specified. Here are some key points about the translation:
+
+1. The function now takes a mutable slice `k` as an output parameter instead of returning a new array.
+2. `Option<&[u8]>` is used for the `p` parameter to match the Rust function signature.
+3. The `hashit` function is called with the appropriate parameters, matching the provided Rust dependency.
+4. Instead of creating a new array `B` in each iteration, we reuse a single `b` vector.
+5. The logic for filling the `k` slice is similar to the Java version, but adapted to Rust's syntax and idioms.
+6. The cthreshold calculation is simplified to avoid the separate if statement.
+
+This translation should maintain the functionality of the original Java function while adhering to Rust's conventions and the provided function signature.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+    let mut b = vec![0u8; sha];
+    let mut counter = 1;
+    let cthreshold = (olen + hlen - 1) / hlen;
+    let mut k_index = 0;
+
+    for _ in 0..k.len() {
+        k[_] = 0;
+    }
+
+    while counter <= cthreshold {
+        hashit(sha, z, counter, p, 0, &mut b);
+        let remaining = olen - k_index;
+        if remaining < hlen {
+            for i in 0..remaining {
+                k[k_index] = b[i];
+                k_index += 1;
+            }
+        } else {
+            for i in 0..hlen {
+                k[k_index] = b[i];
+                k_index += 1;
+            }
+        }
+        counter += 1;
+    }
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries specified. Here are some key points about the translation:
+
+1. The function now takes a mutable slice `k` as an output parameter instead of returning a new array.
+2. `Option<&[u8]>` is used for the `p` parameter to match the Rust function signature.
+3. The `hashit` function is called with the appropriate parameters, matching the provided Rust dependency.
+4. Instead of creating a new array `B` in each iteration, we reuse a single `b` vector.
+5. The logic for filling the `k` slice is similar to the Java version, but adapted to Rust's syntax and idioms.
+6. The cthreshold calculation is simplified to avoid the separate if statement.
+
+This translation should maintain the functionality of the original Java function while adhering to Rust's conventions and the provided function signature.

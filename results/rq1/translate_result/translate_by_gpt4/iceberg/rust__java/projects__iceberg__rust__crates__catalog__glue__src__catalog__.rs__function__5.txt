@@ -1,0 +1,201 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public void createNamespace(Namespace namespace, Map<String, String> metadata) {
+    try {
+      glue.createDatabase(
+          CreateDatabaseRequest.builder()
+              .catalogId(awsProperties.glueCatalogId())
+              .databaseInput(
+                  IcebergToGlueConverter.toDatabaseInput(
+                      namespace, metadata, awsProperties.glueCatalogSkipNameValidation()))
+              .build());
+      LOG.info("Created namespace: {}", namespace);
+    } catch (software.amazon.awssdk.services.glue.model.AlreadyExistsException e) {
+      throw new AlreadyExistsException(
+          "Cannot create namespace %s because it already exists in Glue", namespace);
+    }
+  }
+</java function>
+<rust function signature>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub(crate) fn convert_to_database(
+    namespace: &NamespaceIdent,
+    properties: &HashMap<String, String>,
+) -> Result<DatabaseInput> {
+    let db_name = validate_namespace(namespace)?;
+    let mut builder = DatabaseInput::builder().name(db_name);
+
+    for (k, v) in properties.iter() {
+        match k.as_ref() {
+            DESCRIPTION => {
+                builder = builder.description(v);
+            }
+            LOCATION => {
+                builder = builder.location_uri(v);
+            }
+            _ => {
+                builder = builder.parameters(k, v);
+            }
+        }
+    }
+
+    builder.build().map_err(from_aws_build_error)
+}
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+pub fn with_properties(name: NamespaceIdent, properties: HashMap<String, String>) -> Self {
+        Self { name, properties }
+    }
+    
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+
+        let builder = self.client.0.create_database().database_input(db_input);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(Namespace::with_properties(namespace.clone(), properties))
+    }
+</function>
+<translated function>
+Based on your provided information, here is the translated function from Java to Rust:
+
+```rust
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+    let database_input = convert_to_database(namespace, &properties)?;
+
+    let create_database_request = CreateDatabaseInput::builder()
+        .database_input(database_input);
+
+    let create_database_request = with_catalog_id!(create_database_request, self.0.config);
+    
+    match self.client.create_database().database_input(create_database_request.build()).send().await {
+        Ok(_response) => {
+            debug!("Created namespace: {:?}", namespace);
+            Ok(convert_to_namespace(create_database_request)?)
+        }
+        Err(error) => {
+            match error {
+                AwsError::Glue(
+                    already_exists
+                    @glue::error::CreateDatabaseError::AlreadyExists(_), ..,
+                ) => {
+                    let error_msg = format!(
+                        "Cannot create namespace {:?} because it already exists in Glue", 
+                        namespace
+                    );
+                    Err(Error::new(ErrorKind::NamespaceAlreadyExists(error_msg), None))
+                }
+                _ => Err(from_aws_sdk_error(error)),
+            }
+        }
+    }
+}
+```
+
+Please note that your Rust project should use `aws-sdk-glue` and `log` crates in your Cargo.toml for AWS Glue SDK and logging:
+```toml
+[dependencies]
+aws-sdk-glue = "0.1.0"
+log = "0.4.14"
+```</translated function>Based on your provided information, here is the translated function from Java to Rust:
+
+```rust
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+    let database_input = convert_to_database(namespace, &properties)?;
+
+    let create_database_request = CreateDatabaseInput::builder()
+        .database_input(database_input);
+
+    let create_database_request = with_catalog_id!(create_database_request, self.0.config);
+    
+    match self.client.create_database().database_input(create_database_request.build()).send().await {
+        Ok(_response) => {
+            debug!("Created namespace: {:?}", namespace);
+            Ok(convert_to_namespace(create_database_request)?)
+        }
+        Err(error) => {
+            match error {
+                AwsError::Glue(
+                    already_exists
+                    @glue::error::CreateDatabaseError::AlreadyExists(_), ..,
+                ) => {
+                    let error_msg = format!(
+                        "Cannot create namespace {:?} because it already exists in Glue", 
+                        namespace
+                    );
+                    Err(Error::new(ErrorKind::NamespaceAlreadyExists(error_msg), None))
+                }
+                _ => Err(from_aws_sdk_error(error)),
+            }
+        }
+    }
+}
+```
+
+Please note that your Rust project should use `aws-sdk-glue` and `log` crates in your Cargo.toml for AWS Glue SDK and logging:
+```toml
+[dependencies]
+aws-sdk-glue = "0.1.0"
+log = "0.4.14"
+```

@@ -1,0 +1,198 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static byte[] PBKDF2(int sha,byte[] Pass,byte[] Salt,int rep,int olen)
+	{
+		int i,j,k,len,d,opt;
+		d=olen/sha; if (olen%sha!=0) d++;
+		byte[] F=new byte[sha];
+		byte[] U=new byte[sha];
+		byte[] S=new byte[Salt.length+4];
+
+		byte[] K=new byte[d*sha];
+		opt=0;
+
+		for (i=1;i<=d;i++)
+		{
+			for (j=0;j<Salt.length;j++) S[j]=Salt[j];
+			byte[] N=inttoBytes(i,4);
+			for (j=0;j<4;j++) S[Salt.length+j]=N[j];
+
+			HMAC(sha,S,Pass,F);
+
+			for (j=0;j<sha;j++) U[j]=F[j];
+			for (j=2;j<=rep;j++)
+			{
+				HMAC(sha,U,Pass,U);
+				for (k=0;k<sha;k++) F[k]^=U[k];
+			}
+			for (j=0;j<sha;j++) K[opt++]=F[j];
+		}
+		byte[] key=new byte[olen];
+		for (i=0;i<olen;i++) key[i]=K[i];
+		return key;
+	}
+</java function>
+<rust function signature>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut d = olen / sha;
+    if olen % sha != 0 {
+        d += 1
+    }
+    let mut f: [u8; 64] = [0; 64];
+    let mut u: [u8; 64] = [0; 64];
+    let mut ku: [u8; 64] = [0; 64];
+    let mut s: [u8; 36] = [0; 36]; // Maximum salt of 32 bytes + 4
+    let mut n: [u8; 4] = [0; 4];
+
+    let sl = salt.len();
+    let mut kp = 0;
+    for i in 0..d {
+        for j in 0..sl {
+            s[j] = salt[j]
+        }
+        intto_bytes(i + 1, &mut n);
+        for j in 0..4 {
+            s[sl + j] = n[j]
+        }
+
+        hmac(sha, &s[0..sl + 4], pass, sha, &mut f);
+
+        for j in 0..sha {
+            u[j] = f[j]
+        }
+        for _ in 1..rep {
+            hmac(sha, &u, pass, sha, &mut ku);
+            for k in 0..sha {
+                u[k] = ku[k];
+                f[k] ^= u[k]
+            }
+        }
+        for j in 0..EFS {
+            if kp < olen && kp < f.len() {
+                k[kp] = f[j]
+            }
+            kp += 1
+        }
+    }
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut d = olen / sha;
+    if olen % sha != 0 {
+        d += 1;
+    }
+    let mut f = vec![0u8; sha];
+    let mut u = vec![0u8; sha];
+    let mut s = vec![0u8; salt.len() + 4];
+
+    let mut opt = 0;
+
+    for i in 1..=d {
+        s[..salt.len()].copy_from_slice(salt);
+        let n = i.to_be_bytes();
+        s[salt.len()..].copy_from_slice(&n[4..]);
+
+        hmac(sha, &s, pass, &mut f);
+
+        u.copy_from_slice(&f);
+        for _ in 2..=rep {
+            hmac(sha, &u, pass, &mut u);
+            for k in 0..sha {
+                f[k] ^= u[k];
+            }
+        }
+        k[opt..opt + sha].copy_from_slice(&f);
+        opt += sha;
+    }
+}
+```
+
+Note that this translation assumes the existence of an `hmac` function with a signature similar to:
+
+```rust
+fn hmac(sha: usize, message: &[u8], key: &[u8], output: &mut [u8])
+```
+
+Also, the `inttoBytes` function from the Java version is replaced with Rust's `to_be_bytes()` method on integers.
+
+The function now writes directly to the provided `k` slice instead of creating a new array and returning it, as per the Rust function signature.
+
+Please note that this translation might need further adjustments depending on the exact implementation of the `hmac` function and any other utility functions that might be required in your Rust codebase.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut d = olen / sha;
+    if olen % sha != 0 {
+        d += 1;
+    }
+    let mut f = vec![0u8; sha];
+    let mut u = vec![0u8; sha];
+    let mut s = vec![0u8; salt.len() + 4];
+
+    let mut opt = 0;
+
+    for i in 1..=d {
+        s[..salt.len()].copy_from_slice(salt);
+        let n = i.to_be_bytes();
+        s[salt.len()..].copy_from_slice(&n[4..]);
+
+        hmac(sha, &s, pass, &mut f);
+
+        u.copy_from_slice(&f);
+        for _ in 2..=rep {
+            hmac(sha, &u, pass, &mut u);
+            for k in 0..sha {
+                f[k] ^= u[k];
+            }
+        }
+        k[opt..opt + sha].copy_from_slice(&f);
+        opt += sha;
+    }
+}
+```
+
+Note that this translation assumes the existence of an `hmac` function with a signature similar to:
+
+```rust
+fn hmac(sha: usize, message: &[u8], key: &[u8], output: &mut [u8])
+```
+
+Also, the `inttoBytes` function from the Java version is replaced with Rust's `to_be_bytes()` method on integers.
+
+The function now writes directly to the provided `k` slice instead of creating a new array and returning it, as per the Rust function signature.
+
+Please note that this translation might need further adjustments depending on the exact implementation of the `hmac` function and any other utility functions that might be required in your Rust codebase.

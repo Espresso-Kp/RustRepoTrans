@@ -1,0 +1,131 @@
+async fn rename_ex(
+    context: &Context,
+    mut sync: sync::Sync,
+    chat_id: ChatId,
+    new_name: &str,
+) -> Result<()> {
+    let new_name = improve_single_line_input(new_name);
+    /* the function only sets the names of group chats; normal chats get their names from the contacts */
+    let mut success = false;
+
+    ensure!(!new_name.is_empty(), "Invalid name");
+    ensure!(!chat_id.is_special(), "Invalid chat ID");
+
+    let chat = Chat::load_from_db(context, chat_id).await?;
+    let mut msg = Message::default();
+
+    if chat.typ == Chattype::Group
+        || chat.typ == Chattype::Mailinglist
+        || chat.typ == Chattype::Broadcast
+    {
+        if chat.name == new_name {
+            success = true;
+        } else if !chat.is_self_in_chat(context).await? {
+            context.emit_event(EventType::ErrorSelfNotInGroup(
+                "Cannot set chat name; self not in group".into(),
+            ));
+        } else {
+            context
+                .sql
+                .execute(
+                    "UPDATE chats SET name=? WHERE id=?;",
+                    (new_name.to_string(), chat_id),
+                )
+                .await?;
+            if chat.is_promoted()
+                && !chat.is_mailing_list()
+                && chat.typ != Chattype::Broadcast
+                && improve_single_line_input(&chat.name) != new_name
+            {
+                msg.viewtype = Viewtype::Text;
+                msg.text =
+                    stock_str::msg_grp_name(context, &chat.name, &new_name, ContactId::SELF).await;
+                msg.param.set_cmd(SystemMessage::GroupNameChanged);
+                if !chat.name.is_empty() {
+                    msg.param.set(Param::Arg, &chat.name);
+                }
+                msg.id = send_msg(context, chat_id, &mut msg).await?;
+                context.emit_msgs_changed(chat_id, msg.id);
+                sync = Nosync;
+            }
+            context.emit_event(EventType::ChatModified(chat_id));
+            chatlist_events::emit_chatlist_item_changed(context, chat_id);
+            success = true;
+        }
+    }
+
+    if !success {
+        bail!("Failed to set name");
+    }
+    if sync.into() && chat.name != new_name {
+        let sync_name = new_name.to_string();
+        chat.sync(context, SyncAction::Rename(sync_name))
+            .await
+            .log_err(context)
+            .ok();
+    }
+    Ok(())
+}
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+pub struct ChatId(u32);
+------
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;

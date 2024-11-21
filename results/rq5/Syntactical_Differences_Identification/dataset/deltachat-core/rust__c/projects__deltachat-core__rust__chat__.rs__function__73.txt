@@ -1,0 +1,86 @@
+<path>
+projects/deltachat-core/rust/chat.rs
+</path>
+<function>
+    pub async fn get_profile_image(&self, context: &Context) -> Result<Option<PathBuf>> {
+        if let Some(image_rel) = self.param.get(Param::ProfileImage) {
+            if !image_rel.is_empty() {
+                return Ok(Some(get_abs_path(context, Path::new(&image_rel))));
+            }
+        } else if self.id.is_archived_link() {
+            if let Ok(image_rel) = get_archive_icon(context).await {
+                return Ok(Some(get_abs_path(context, Path::new(&image_rel))));
+            }
+        } else if self.typ == Chattype::Single {
+            let contacts = get_chat_contacts(context, self.id).await?;
+            if let Some(contact_id) = contacts.first() {
+                if let Ok(contact) = Contact::get_by_id(context, *contact_id).await {
+                    return contact.get_profile_image(context).await;
+                }
+            }
+        } else if self.typ == Chattype::Broadcast {
+            if let Ok(image_rel) = get_broadcast_icon(context).await {
+                return Ok(Some(get_abs_path(context, Path::new(&image_rel))));
+            }
+        }
+        Ok(None)
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chat.c
+</path>
+<function>
+ * using dc_set_chat_profile_image().
+ * For normal chats, this is the image set by each remote user on their own
+ * using dc_set_config(context, "selfavatar", image).
+ *
+ * @memberof dc_chat_t
+ * @param chat The chat object.
+ * @return Path and file if the profile image, if any.
+ *     NULL otherwise.
+ *     Must be free()'d after usage.
+ */
+char* dc_chat_get_profile_image(const dc_chat_t* chat)
+{
+	char*         image_rel = NULL;
+	char*         image_abs = NULL;
+	dc_array_t*   contacts = NULL;
+	dc_contact_t* contact = NULL;
+
+	if (chat==NULL || chat->magic!=DC_CHAT_MAGIC) {
+		goto cleanup;
+	}
+
+	image_rel = dc_param_get(chat->param, DC_PARAM_PROFILE_IMAGE, NULL);
+	if (image_rel && image_rel[0]) {
+		image_abs = dc_get_abs_path(chat->context, image_rel);
+	}
+    else if (chat-id == DC_CHAT_ID_ARCHIVED_LINK) {
+        image_rel = dc_get_archive_icon(chat->context);
+        if (image_rel){
+            image_abs = dc_get_abs_path(chat->context, image_rel); 
+        }
+    }
+	else if(chat->type==DC_CHAT_TYPE_SINGLE) {
+		contacts = dc_get_chat_contacts(chat->context, chat->id);
+		if (contacts->count >= 1) {
+			contact = dc_get_contact(chat->context, contacts->array[0]);
+			image_abs = dc_contact_get_profile_image(contact);
+		}
+	}
+    else if(chat->type==DC_CHAT_TYPE_BROADCAST) {
+		image_rel = dc_get_broadcast_icon(chat->context);
+        if (image_rel){
+            image_abs = dc_get_abs_path(chat->context, image_rel); 
+        }
+	}
+
+cleanup:
+	free(image_rel);
+	dc_array_unref(contacts);
+	dc_contact_unref(contact);
+	return image_abs;
+}
+</function>

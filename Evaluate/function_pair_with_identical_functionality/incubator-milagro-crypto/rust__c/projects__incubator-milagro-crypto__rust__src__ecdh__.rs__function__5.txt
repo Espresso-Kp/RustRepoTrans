@@ -1,0 +1,85 @@
+<path>
+projects/incubator-milagro-crypto/rust/src/ecdh.rs
+</path>
+<function>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut d = olen / sha;
+    if olen % sha != 0 {
+        d += 1
+    }
+    let mut f: [u8; 64] = [0; 64];
+    let mut u: [u8; 64] = [0; 64];
+    let mut ku: [u8; 64] = [0; 64];
+    let mut s: [u8; 36] = [0; 36]; // Maximum salt of 32 bytes + 4
+    let mut n: [u8; 4] = [0; 4];
+
+    let sl = salt.len();
+    let mut kp = 0;
+    for i in 0..d {
+        for j in 0..sl {
+            s[j] = salt[j]
+        }
+        intto_bytes(i + 1, &mut n);
+        for j in 0..4 {
+            s[sl + j] = n[j]
+        }
+
+        hmac(sha, &s[0..sl + 4], pass, sha, &mut f);
+
+        for j in 0..sha {
+            u[j] = f[j]
+        }
+        for _ in 1..rep {
+            hmac(sha, &u, pass, sha, &mut ku);
+            for k in 0..sha {
+                u[k] = ku[k];
+                f[k] ^= u[k]
+            }
+        }
+        for j in 0..EFS {
+            if kp < olen && kp < f.len() {
+                k[kp] = f[j]
+            }
+            kp += 1
+        }
+    }
+}
+</function>
+------
+
+<path>
+projects/incubator-milagro-crypto/c/src/ecdh_support.c
+</path>
+<function>
+void PBKDF2(int sha,const octet *p,octet *s,int rep,int olen,octet *key)
+{
+    int len;
+    int d=ROUNDUP(olen,sha);
+    char f[64];
+    char u[64];
+    octet F= {0,sizeof(f),f};
+    octet U= {0,sizeof(u),u};
+    OCT_empty(key);
+
+    for (int i=1; i<=d; i++)
+    {
+        len=s->len;
+        OCT_jint(s,i,4);
+
+        HMAC(sha,s,p,sha,&F);
+
+        s->len=len;
+        OCT_copy(&U,&F);
+        for (int j=2; j<=rep; j++)
+        {
+            HMAC(sha,&U,p,sha,&U);
+            OCT_xor(&F,&U);
+        }
+
+        OCT_joctet(key,&F);
+    }
+
+    OCT_chop(key,NULL,olen);
+}
+</function>
+

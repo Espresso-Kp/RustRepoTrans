@@ -1,0 +1,71 @@
+pub fn content_type(&self) -> DataContentType {
+        self.content
+    }
+pub fn file_path(&self) -> &str {
+        &self.file_path
+    }
+pub fn data_file(&self) -> &DataFile {
+        &self.data_file
+    }
+fn new() -> Self {
+        Self(HashMap::new())
+    }
+pub(crate) fn eval(
+        filter: &'a BoundPredicate,
+        data_file: &'a DataFile,
+        include_empty_files: bool,
+    ) -> crate::Result<bool> {
+        if !include_empty_files && data_file.record_count == 0 {
+            return ROWS_CANNOT_MATCH;
+        }
+
+        let mut evaluator = Self::new(data_file);
+        visit(&mut evaluator, filter)
+    }
+struct PartitionFilterCache(HashMap<i32, BoundPredicate>);
+------
+
+
+
+use crate::arrow::ArrowReaderBuilder;
+use crate::expr::visitors::expression_evaluator::ExpressionEvaluator;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::visitors::inclusive_projection::InclusiveProjection;
+use crate::expr::visitors::manifest_evaluator::ManifestEvaluator;
+use crate::expr::{Bind, BoundPredicate, Predicate};
+use crate::io::FileIO;
+use crate::spec::{
+    DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef,
+    TableMetadataRef,
+};
+use crate::table::Table;
+use crate::{Error, ErrorKind, Result};
+use arrow_array::RecordBatch;
+use async_stream::try_stream;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+use crate::expr::Reference;
+use crate::io::{FileIO, OutputFile};
+use crate::spec::{
+        DataContentType, DataFileBuilder, DataFileFormat, Datum, FormatVersion, Literal, Manifest,
+        ManifestContentType, ManifestEntry, ManifestListWriter, ManifestMetadata, ManifestStatus,
+        ManifestWriter, Struct, TableMetadata, EMPTY_SNAPSHOT_ID,
+    };
+use crate::table::Table;
+use crate::TableIdent;
+use arrow_array::{ArrayRef, Int64Array, RecordBatch};
+use futures::TryStreamExt;
+use parquet::arrow::{ArrowWriter, PARQUET_FIELD_ID_META_KEY};
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
+use std::collections::HashMap;
+use std::fs;
+use std::fs::File;
+use std::sync::Arc;
+use tempfile::TempDir;
+use tera::{Context, Tera};
+use uuid::Uuid;

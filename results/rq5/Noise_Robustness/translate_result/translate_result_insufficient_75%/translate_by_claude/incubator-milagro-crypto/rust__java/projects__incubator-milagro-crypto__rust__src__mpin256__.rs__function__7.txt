@@ -1,0 +1,347 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int ENCODING(RAND rng,byte[] E)
+	{
+		int rn,m,su,sv;
+		byte[] T=new byte[EFS];
+
+		for (int i=0;i<EFS;i++) T[i]=E[i+1];
+		BIG u=BIG.fromBytes(T);
+		for (int i=0;i<EFS;i++) T[i]=E[i+EFS+1];
+		BIG v=BIG.fromBytes(T);
+		
+		ECP P=new ECP(u,v);
+		if (P.is_infinity()) return INVALID_POINT;
+
+		BIG p=new BIG(ROM.Modulus);
+		u=BIG.randomnum(p,rng);
+
+		su=rng.getByte(); /*if (su<0) su=-su;*/ su%=2;
+		
+		ECP W=map(u,su);
+		P.sub(W); //P.affine();
+		sv=P.getS();
+		rn=unmap(v,P);
+		m=rng.getByte(); /*if (m<0) m=-m;*/ m%=rn;
+		v.inc(m+1);
+		E[0]=(byte)(su+2*sv);
+		u.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+1]=T[i];
+		v.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+EFS+1]=T[i];		
+		
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn new_bigs(ix: &Big, iy: &Big) -> ECP {
+        let mut E = ECP::new();
+        E.x.bcopy(ix);
+        E.y.bcopy(iy);
+        E.z.one();
+        E.x.norm();
+        let rhs = ECP::rhs(&E.x);
+        if CURVETYPE == CurveType::Montgomery {
+            if rhs.jacobi() != 1 {
+                E.inf();
+            }
+        } else {
+            let mut y2 = E.y.clone();
+            y2.sqr();
+            if !y2.equals(&rhs) {
+                E.inf();
+            }
+        }
+        return E;
+    }
+fn emap(u: &Big, cb: isize) -> ECP {
+    let mut P: ECP;
+    let mut x = u.clone();
+    let mut p = Big::new_ints(&rom::MODULUS);
+    x.rmod(&mut p);
+    loop {
+        P = ECP::new_bigint(&x, cb);
+        if !P.is_infinity() {
+            break;
+        }
+        x.inc(1);
+        x.norm();
+    }
+    return P;
+}
+pub fn inc(&mut self, x: isize) {
+        self.norm();
+        self.w[0] += x as Chunk;
+    }
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+pub fn sub(&mut self, b: &FP) {
+        let mut n = b.clone();
+        n.neg();
+        self.add(&n);
+    }
+fn unmap(u: &mut Big, P: &mut ECP) -> isize {
+    let s = P.gets();
+    let mut R: ECP;
+    let mut r = 0;
+    let x = P.getx();
+    *u = x.clone();
+    loop {
+        u.dec(1);
+        u.norm();
+        r += 1;
+        R = ECP::new_bigint(u, s);
+        if !R.is_infinity() {
+            break;
+        }
+    }
+    return r as isize;
+}
+pub fn to_bytes(&self, b: &mut [u8], compress: bool) {
+        let mb = big::MODBYTES as usize;
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mut W = self.clone();
+
+        W.affine();
+        W.x.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 1] = t[i]
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            b[0] = 0x06;
+            return;
+        }
+
+        if compress {
+            b[0] = 0x02;
+            if W.y.redc().parity() == 1 {
+                b[0] = 0x03
+            }
+            return;
+        }
+
+        b[0] = 0x04;
+
+        W.y.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + mb + 1] = t[i]
+        }
+    }
+pub fn gets(&self) -> isize {
+        let y = self.gety();
+        return y.parity();
+    }
+pub fn is_infinity(&self) -> bool {
+        match CURVETYPE {
+            CurveType::Edwards => self.x.is_zilch() && self.y.equals(&self.z),
+            CurveType::Weierstrass => self.x.is_zilch() && self.z.is_zilch(),
+            CurveType::Montgomery => self.z.is_zilch(),
+        }
+    }
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+pub const EFS: usize = big::MODBYTES as usize;
+pub const MODULUS: [Chunk; NLEN] = [0x13, 0x13A7, 0x80000000086121, 0x40000001BA344D, 0x25236482];
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut t: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        t[i] = e[i + 1]
+    }
+    let mut u = Big::from_bytes(&t);
+    for i in 0..EFS {
+        t[i] = e[i + EFS + 1]
+    }
+    let mut v = Big::from_bytes(&t);
+
+    let mut P = ECP::new_bigs(&u, &v);
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let p = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&p, rng);
+
+    let mut su = rng.getbyte() as isize;
+    su %= 2;
+
+    let mut W = emap(&mut u, su);
+    P.sub(&mut W);
+    let sv = P.gets();
+    let rn = unmap(&mut v, &mut P);
+    let mut m = rng.getbyte() as isize;
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + 1] = t[i]
+    }
+    v.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + EFS + 1] = t[i]
+    }
+
+    return 0;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut rn: isize;
+    let mut m: isize;
+    let mut su: isize;
+    let mut sv: isize;
+    let mut t: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        t[i] = e[i + 1];
+    }
+    let mut u = Big::frombytes(&t);
+    for i in 0..EFS {
+        t[i] = e[i + EFS + 1];
+    }
+    let mut v = Big::frombytes(&t);
+
+    let mut p = ECP::new_bigs(&u, &v);
+    if p.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let modulus = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&modulus, rng);
+
+    su = rng.getbyte() as isize;
+    su %= 2;
+
+    let mut w = emap(&u, su);
+    p.sub(&w);
+    sv = p.gets();
+    rn = unmap(&mut v, &mut p);
+    m = rng.getbyte() as isize;
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + 1] = t[i];
+    }
+    v.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + EFS + 1] = t[i];
+    }
+
+    0
+}
+```
+
+This Rust function closely follows the structure and logic of the original Java function, utilizing the provided Rust dependencies and function calls. Note that some minor adjustments were made to accommodate Rust's syntax and conventions:
+
+1. The function now takes `e` as a mutable slice (`&mut [u8]`) instead of an array.
+2. The `INVALID_POINT` constant is assumed to be defined elsewhere in the codebase.
+3. The `rng.getByte()` calls are cast to `isize` to match the variable types.
+4. The `to_bytes` method is called without the `compress` parameter, as it's not present in the provided Rust method signature.
+
+Please ensure that all necessary constants, types, and dependencies are properly defined and imported in the Rust codebase for this function to work correctly.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut rn: isize;
+    let mut m: isize;
+    let mut su: isize;
+    let mut sv: isize;
+    let mut t: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        t[i] = e[i + 1];
+    }
+    let mut u = Big::frombytes(&t);
+    for i in 0..EFS {
+        t[i] = e[i + EFS + 1];
+    }
+    let mut v = Big::frombytes(&t);
+
+    let mut p = ECP::new_bigs(&u, &v);
+    if p.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let modulus = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&modulus, rng);
+
+    su = rng.getbyte() as isize;
+    su %= 2;
+
+    let mut w = emap(&u, su);
+    p.sub(&w);
+    sv = p.gets();
+    rn = unmap(&mut v, &mut p);
+    m = rng.getbyte() as isize;
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + 1] = t[i];
+    }
+    v.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + EFS + 1] = t[i];
+    }
+
+    0
+}
+```
+
+This Rust function closely follows the structure and logic of the original Java function, utilizing the provided Rust dependencies and function calls. Note that some minor adjustments were made to accommodate Rust's syntax and conventions:
+
+1. The function now takes `e` as a mutable slice (`&mut [u8]`) instead of an array.
+2. The `INVALID_POINT` constant is assumed to be defined elsewhere in the codebase.
+3. The `rng.getByte()` calls are cast to `isize` to match the variable types.
+4. The `to_bytes` method is called without the `compress` parameter, as it's not present in the provided Rust method signature.
+
+Please ensure that all necessary constants, types, and dependencies are properly defined and imported in the Rust codebase for this function to work correctly.

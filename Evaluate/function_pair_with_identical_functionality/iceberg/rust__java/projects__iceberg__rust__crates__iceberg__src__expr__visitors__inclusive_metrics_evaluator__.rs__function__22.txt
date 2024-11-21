@@ -1,0 +1,128 @@
+<path>
+projects/iceberg/rust/crates/iceberg/src/expr/visitors/inclusive_metrics_evaluator.rs
+</path>
+<function>
+    fn not_starts_with(
+        &mut self,
+        reference: &BoundReference,
+        datum: &Datum,
+        _predicate: &BoundPredicate,
+    ) -> crate::Result<bool> {
+        let field_id = reference.field().id;
+
+        if self.may_contain_null(field_id) {
+            return ROWS_MIGHT_MATCH;
+        }
+
+        // notStartsWith will match unless all values must start with the prefix.
+        // This happens when the lower and upper bounds both start with the prefix.
+
+        let PrimitiveLiteral::String(prefix) = datum.literal() else {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                "Cannot use StartsWith operator on non-string values",
+            ));
+        };
+
+        let Some(lower_bound) = self.lower_bound(field_id) else {
+            return ROWS_MIGHT_MATCH;
+        };
+
+        let PrimitiveLiteral::String(lower_bound_str) = lower_bound.literal() else {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                "Cannot use NotStartsWith operator on non-string lower_bound value",
+            ));
+        };
+
+        if lower_bound_str < prefix {
+            // if lower is shorter than the prefix then lower doesn't start with the prefix
+            return ROWS_MIGHT_MATCH;
+        }
+
+        let prefix_len = prefix.chars().count();
+
+        if lower_bound_str.chars().take(prefix_len).collect::<String>() == *prefix {
+            // lower bound matches the prefix
+
+            let Some(upper_bound) = self.upper_bound(field_id) else {
+                return ROWS_MIGHT_MATCH;
+            };
+
+            let PrimitiveLiteral::String(upper_bound) = upper_bound.literal() else {
+                return Err(Error::new(
+                    ErrorKind::Unexpected,
+                    "Cannot use NotStartsWith operator on non-string upper_bound value",
+                ));
+            };
+
+            // if upper is shorter than the prefix then upper can't start with the prefix
+            if upper_bound.chars().count() < prefix_len {
+                return ROWS_MIGHT_MATCH;
+            }
+
+            if upper_bound.chars().take(prefix_len).collect::<String>() == *prefix {
+                // both bounds match the prefix, so all rows must match the
+                // prefix and therefore do not satisfy the predicate
+                return ROWS_CANNOT_MATCH;
+            }
+        }
+
+        ROWS_MIGHT_MATCH
+    }
+</function>
+------
+
+<path>
+projects/iceberg/java/api/src/main/java/org/apache/iceberg/expressions/InclusiveMetricsEvaluator.java
+</path>
+<function>
+    public <T> Boolean notStartsWith(BoundReference<T> ref, Literal<T> lit) {
+      Integer id = ref.fieldId();
+
+      if (mayContainNull(id)) {
+        return ROWS_MIGHT_MATCH;
+      }
+
+      ByteBuffer prefixAsBytes = lit.toByteBuffer();
+
+      Comparator<ByteBuffer> comparator = Comparators.unsignedBytes();
+
+      // notStartsWith will match unless all values must start with the prefix. This happens when
+      // the lower and upper
+      // bounds both start with the prefix.
+      if (lowerBounds != null
+          && upperBounds != null
+          && lowerBounds.containsKey(id)
+          && upperBounds.containsKey(id)) {
+        ByteBuffer lower = lowerBounds.get(id);
+        // if lower is shorter than the prefix then lower doesn't start with the prefix
+        if (lower.remaining() < prefixAsBytes.remaining()) {
+          return ROWS_MIGHT_MATCH;
+        }
+
+        int cmp =
+            comparator.compare(
+                BinaryUtil.truncateBinary(lower, prefixAsBytes.remaining()), prefixAsBytes);
+        if (cmp == 0) {
+          ByteBuffer upper = upperBounds.get(id);
+          // if upper is shorter than the prefix then upper can't start with the prefix
+          if (upper.remaining() < prefixAsBytes.remaining()) {
+            return ROWS_MIGHT_MATCH;
+          }
+
+          cmp =
+              comparator.compare(
+                  BinaryUtil.truncateBinary(upper, prefixAsBytes.remaining()), prefixAsBytes);
+          if (cmp == 0) {
+            // both bounds match the prefix, so all rows must match the prefix and therefore do not
+            // satisfy
+            // the predicate
+            return ROWS_CANNOT_MATCH;
+          }
+        }
+      }
+
+      return ROWS_MIGHT_MATCH;
+    }
+</function>

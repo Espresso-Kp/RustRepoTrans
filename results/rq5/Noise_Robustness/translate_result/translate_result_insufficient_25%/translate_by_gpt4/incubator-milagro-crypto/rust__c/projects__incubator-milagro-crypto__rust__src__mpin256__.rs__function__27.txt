@@ -1,0 +1,230 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void HASH_ALL(int sha,const octet *HID,const octet *xID,const octet *xCID,const octet *SEC,const octet *Y,const octet *R,const octet *W,octet *H)
+{
+    char t[1284];   // assumes max modulus of 1024-bits
+    octet T= {0,sizeof(t),t};
+
+    OCT_joctet(&T,HID);
+    if (xCID!=NULL) OCT_joctet(&T,xCID);
+    else OCT_joctet(&T,xID);
+    OCT_joctet(&T,SEC);
+    OCT_joctet(&T,Y);
+    OCT_joctet(&T,R);
+    OCT_joctet(&T,W);
+
+    mhashit(sha,0,&T,H);
+}
+</c function>
+<rust function signature>
+pub fn hash_all(
+    sha: usize,
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sec: &[u8],
+    y: &[u8],
+    r: &[u8],
+    w: &[u8],
+    h: &mut [u8],
+) -> bool 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+fn hashit(sha: usize, n: usize, id: &[u8], w: &mut [u8]) -> bool {
+    let mut r: [u8; 64] = [0; 64];
+    let mut didit = false;
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if !didit {
+        return false;
+    }
+
+    let rm = big::MODBYTES as usize;
+
+    if sha > rm {
+        for i in 0..rm {
+            w[i] = r[i]
+        }
+    } else {
+        for i in 0..sha {
+            w[i + rm - sha] = r[i]
+        }
+        for i in 0..(rm - sha) {
+            w[i] = 0
+        }
+    }
+
+    return true;
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn hash_all(
+    sha: usize,
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sec: &[u8],
+    y: &[u8],
+    r: &[u8],
+    w: &[u8],
+    h: &mut [u8],
+) -> bool {
+    let mut tlen: usize = 0;
+    const RM: usize = big::MODBYTES as usize;
+    let mut t: [u8; 10 * RM + 4] = [0; 10 * RM + 4];
+
+    for i in 0..hid.len() {
+        t[i] = hid[i]
+    }
+    tlen += hid.len();
+
+    if let Some(rxcid) = xcid {
+        for i in 0..rxcid.len() {
+            t[i + tlen] = rxcid[i]
+        }
+        tlen += rxcid.len();
+    } else {
+        for i in 0..xid.len() {
+            t[i + tlen] = xid[i]
+        }
+        tlen += xid.len();
+    }
+
+    for i in 0..sec.len() {
+        t[i + tlen] = sec[i]
+    }
+    tlen += sec.len();
+    for i in 0..y.len() {
+        t[i + tlen] = y[i]
+    }
+    tlen += y.len();
+    for i in 0..r.len() {
+        t[i + tlen] = r[i]
+    }
+    tlen += r.len();
+    for i in 0..w.len() {
+        t[i + tlen] = w[i]
+    }
+    tlen += w.len();
+    if tlen != 10 * RM + 4 {
+        return false;
+    }
+
+    return hashit(sha, 0, &t, h);
+}
+</function>
+<translated function>
+pub fn hash_all(
+    sha: usize,
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sec: &[u8],
+    y: &[u8],
+    r: &[u8],
+    w: &[u8],
+    h: &mut [u8],
+) -> bool {
+    let mut t: Vec<u8> = Vec::with_capacity(1284);
+    
+    t.extend_from_slice(hid);
+    
+    match xcid {
+        Some(xcid) => t.extend_from_slice(xcid),
+        None => t.extend_from_slice(xid),
+    }
+    
+    t.extend_from_slice(sec);
+    t.extend_from_slice(y);
+    t.extend_from_slice(r);
+    t.extend_from_slice(w);
+
+    hashit(sha,0,&t,h)
+}</translated function>pub fn hash_all(
+    sha: usize,
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sec: &[u8],
+    y: &[u8],
+    r: &[u8],
+    w: &[u8],
+    h: &mut [u8],
+) -> bool {
+    let mut t: Vec<u8> = Vec::with_capacity(1284);
+    
+    t.extend_from_slice(hid);
+    
+    match xcid {
+        Some(xcid) => t.extend_from_slice(xcid),
+        None => t.extend_from_slice(xid),
+    }
+    
+    t.extend_from_slice(sec);
+    t.extend_from_slice(y);
+    t.extend_from_slice(r);
+    t.extend_from_slice(w);
+
+    hashit(sha,0,&t,h)
+}

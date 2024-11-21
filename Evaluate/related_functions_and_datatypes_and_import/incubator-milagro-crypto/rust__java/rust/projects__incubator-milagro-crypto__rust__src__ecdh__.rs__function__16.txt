@@ -1,0 +1,206 @@
+pub fn hmac(sha: usize, m: &[u8], k: &[u8], olen: usize, tag: &mut [u8]) -> bool {
+    // Input is from an octet m
+    // olen is requested output length in bytes. k is the key
+    // The output is the calculated tag
+    let mut b: [u8; 64] = [0; 64]; // Not good
+    let mut k0: [u8; 128] = [0; 128];
+
+    if olen < 4 {
+        return false;
+    }
+
+    let mut lb = 64;
+    if sha > 32 {
+        lb = 128
+    }
+
+    for i in 0..lb {
+        k0[i] = 0
+    }
+
+    if k.len() > lb {
+        hashit(sha, k, 0, None, 0, &mut b);
+        for i in 0..sha {
+            k0[i] = b[i]
+        }
+    } else {
+        for i in 0..k.len() {
+            k0[i] = k[i]
+        }
+    }
+
+    for i in 0..lb {
+        k0[i] ^= 0x36
+    }
+    hashit(sha, &k0[0..lb], 0, Some(m), 0, &mut b);
+
+    for i in 0..lb {
+        k0[i] ^= 0x6a
+    }
+    hashit(sha, &k0[0..lb], 0, Some(&b[0..sha]), olen, tag);
+
+    return true;
+}
+
+fn ncomp(t1: &[u8], t2: &[u8], n: usize) -> bool {
+    let mut res = 0;
+    for i in 0..n {
+        res |= (t1[i] ^ t2[i]) as isize;
+    }
+    if res == 0 {
+        return true;
+    }
+    false
+}
+
+fn intto_bytes(n: usize, b: &mut [u8]) {
+    let mut i = b.len();
+    let mut m = n;
+    while m > 0 && i > 0 {
+        i -= 1;
+        b[i] = (m & 0xff) as u8;
+        m /= 256;
+    }
+}
+
+pub fn ecpsvdp_dh(s: &[u8], wd: &[u8], z: &mut [u8]) -> isize {
+    let mut res = 0;
+    let mut t: [u8; EFS] = [0; EFS];
+
+    let mut sc = Big::from_bytes(&s);
+
+    let mut W = ECP::from_bytes(&wd);
+    if W.is_infinity() {
+        res = ERROR
+    }
+
+    if res == 0 {
+        let r = Big::new_ints(&rom::CURVE_ORDER);
+        sc.rmod(&r);
+        W = W.mul(&sc);
+        if W.is_infinity() {
+            res = ERROR;
+        } else {
+            W.getx().to_bytes(&mut t);
+            for i in 0..EFS {
+                z[i] = t[i]
+            }
+        }
+    }
+    res
+}
+
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    // NOTE: the parameter olen is the length of the output K in bytes
+    let hlen = sha;
+    let mut lk = 0;
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+
+    for counter in 1..=cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, z, counter, p, 0, &mut b);
+        if lk + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[lk] = b[i];
+                lk += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[lk] = b[i];
+                lk += 1
+            }
+        }
+    }
+}
+
+pub fn cbc_iv0_decrypt(k: &[u8], c: &[u8]) -> Option<Vec<u8>> {
+    // padding is removed
+    let mut a = AES::new();
+    let mut fin = false;
+    let mut m: Vec<u8> = Vec::new();
+
+    let mut buff: [u8; 16] = [0; 16];
+
+    a.init(aes::CBC, k.len(), k, None);
+
+    let mut ipt = 0;
+    let mut i;
+
+    if c.len() == 0 {
+        return None;
+    }
+    let mut ch = c[ipt];
+    ipt += 1;
+
+    loop {
+        i = 0;
+        while i < 16 {
+            buff[i] = ch;
+            if ipt >= c.len() {
+                fin = true;
+                break;
+            } else {
+                ch = c[ipt];
+                ipt += 1
+            }
+            i += 1;
+        }
+        a.decrypt(&mut buff);
+        if fin {
+            break;
+        }
+        for j in 0..16 {
+            m.push(buff[j]);
+        }
+    }
+
+    a.end();
+    let mut bad = false;
+    let padlen = buff[15] as usize;
+    if i != 15 || padlen < 1 || padlen > 16 {
+        bad = true
+    }
+    if padlen >= 2 && padlen <= 16 {
+        for j in 16 - padlen..16 {
+            if buff[j] != padlen as u8 {
+                bad = true
+            }
+        }
+    }
+
+    if !bad {
+        for i in 0..16 - padlen {
+            m.push(buff[i]);
+        }
+    }
+
+    if bad {
+        return None;
+    }
+    Some(m)
+}
+
+pub const EFS: usize = big::MODBYTES as usize;
+
+pub const AESKEY: usize = 16;
+
+pub const EGS: usize = big::MODBYTES as usize;
+------
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;

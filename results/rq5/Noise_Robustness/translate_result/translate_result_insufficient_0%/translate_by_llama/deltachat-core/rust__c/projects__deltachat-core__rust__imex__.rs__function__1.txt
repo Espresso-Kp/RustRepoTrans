@@ -1,0 +1,153 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void dc_imex(dc_context_t* context, int what, const char* param1, const char* param2)
+{
+	dc_param_t* param = dc_param_new();
+
+	dc_param_set_int(param, DC_PARAM_CMD,      what);
+	dc_param_set    (param, DC_PARAM_CMD_ARG,  param1);
+	dc_param_set    (param, DC_PARAM_CMD_ARG2, param2);
+
+	dc_job_kill_action(context, DC_JOB_IMEX_IMAP);
+	dc_job_add(context, DC_JOB_IMEX_IMAP, 0, param->packed, 0); // results in a call to dc_job_do_DC_JOB_IMEX_IMAP()
+
+	dc_param_unref(param);
+}
+</c function>
+<rust function signature>
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> {
+    let cancel = context.alloc_ongoing().await?;
+
+    let res = {
+        let _guard = context.scheduler.pause(context.clone()).await?;
+        imex_inner(context, what, path, passphrase)
+            .race(async {
+                cancel.recv().await.ok();
+                Err(format_err!("canceled"))
+            })
+            .await
+    };
+    context.free_ongoing().await;
+
+    if let Err(err) = res.as_ref() {
+        // We are using Anyhow's .context() and to show the inner error, too, we need the {:#}:
+        error!(context, "IMEX failed to complete: {:#}", err);
+        context.emit_event(EventType::ImexProgress(0));
+    } else {
+        info!(context, "IMEX successfully completed");
+        context.emit_event(EventType::ImexProgress(1000));
+    }
+
+    res
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> {
+    let param = Param::new();
+
+    param.set_int(DC_PARAM_CMD, what);
+    param.set(DC_PARAM_CMD_ARG, path);
+    param.set(DC_PARAM_CMD_ARG2, passphrase.as_deref());
+
+    context.kill_job(DC_JOB_IMEX_IMAP);
+    context.add_job(DC_JOB_IMEX_IMAP, 0, param.packed(), 0).await?;
+
+    param.drop();
+    Ok(())
+}
+```
+Note that I've assumed that `DC_PARAM_CMD`, `DC_PARAM_CMD_ARG`, and `DC_PARAM_CMD_ARG2` are constants defined elsewhere in the codebase, and that `DC_JOB_IMEX_IMAP` is a constant or enum value representing the job type. I've also assumed that `Param` has methods `new`, `set_int`, `set`, `packed`, and `drop` that match the C code. If these assumptions are incorrect, please let me know and I'll adjust the translation accordingly.</translated function>Here is the translated Rust function:
+```rust
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> {
+    let param = Param::new();
+
+    param.set_int(DC_PARAM_CMD, what);
+    param.set(DC_PARAM_CMD_ARG, path);
+    param.set(DC_PARAM_CMD_ARG2, passphrase.as_deref());
+
+    context.kill_job(DC_JOB_IMEX_IMAP);
+    context.add_job(DC_JOB_IMEX_IMAP, 0, param.packed(), 0).await?;
+
+    param.drop();
+    Ok(())
+}
+```
+Note that I've assumed that `DC_PARAM_CMD`, `DC_PARAM_CMD_ARG`, and `DC_PARAM_CMD_ARG2` are constants defined elsewhere in the codebase, and that `DC_JOB_IMEX_IMAP` is a constant or enum value representing the job type. I've also assumed that `Param` has methods `new`, `set_int`, `set`, `packed`, and `drop` that match the C code. If these assumptions are incorrect, please let me know and I'll adjust the translation accordingly.

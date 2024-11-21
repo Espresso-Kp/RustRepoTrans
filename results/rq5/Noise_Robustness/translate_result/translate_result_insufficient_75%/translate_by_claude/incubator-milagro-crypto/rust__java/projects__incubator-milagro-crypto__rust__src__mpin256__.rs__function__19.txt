@@ -1,0 +1,233 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int GET_CLIENT_PERMIT(int sha,int date,byte[] S,byte[] CID,byte[] CTT)
+	{
+		byte[] h=hashit(sha,date,CID,EFS);
+		ECP P=ECP.mapit(h);
+
+		BIG s=BIG.fromBytes(S);
+		ECP OP=PAIR256.G1mul(P,s);
+
+		OP.toBytes(CTT,false);
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn get_client_permit(sha: usize, date: usize, s: &[u8], cid: &[u8], ctt: &mut [u8]) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn hashit(sha: usize, n: usize, id: &[u8], w: &mut [u8]) -> bool {
+    let mut r: [u8; 64] = [0; 64];
+    let mut didit = false;
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if !didit {
+        return false;
+    }
+
+    let rm = big::MODBYTES as usize;
+
+    if sha > rm {
+        for i in 0..rm {
+            w[i] = r[i]
+        }
+    } else {
+        for i in 0..sha {
+            w[i + rm - sha] = r[i]
+        }
+        for i in 0..(rm - sha) {
+            w[i] = 0
+        }
+    }
+
+    return true;
+}
+pub fn mapit(h: &[u8]) -> ECP {
+        let q = Big::new_ints(&rom::MODULUS);
+        let mut x = Big::from_bytes(h);
+        x.rmod(&q);
+        let mut P: ECP;
+
+        loop {
+            loop {
+                if CURVETYPE != CurveType::Montgomery {
+                    P = ECP::new_bigint(&x, 0);
+                } else {
+                    P = ECP::new_big(&x);
+                }
+                x.inc(1);
+                x.norm();
+                if !P.is_infinity() {
+                    break;
+                }
+            }
+            P.cfp();
+            if !P.is_infinity() {
+                break;
+            }
+        }
+
+        return P;
+    }
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+pub const MODBYTES: usize = 32;
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn get_client_permit(sha: usize, date: usize, s: &[u8], cid: &[u8], ctt: &mut [u8]) -> isize {
+    const RM: usize = big::MODBYTES as usize;
+    let mut h: [u8; RM] = [0; RM];
+    hashit(sha, date, cid, &mut h);
+    let mut P = ECP::mapit(&h);
+
+    let mut sc = Big::from_bytes(s);
+    pair256::g1mul(&mut P, &mut sc).to_bytes(ctt, false);
+    return 0;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn get_client_permit(sha: usize, date: usize, s: &[u8], cid: &[u8], ctt: &mut [u8]) -> isize {
+    let mut h = [0u8; big::MODBYTES];
+    hashit(sha, date, cid, &mut h);
+    let p = ecp::ECP::mapit(&h);
+
+    let s_big = Big::from_bytes(s);
+    let op = pair256::g1mul(&p, &s_big);
+
+    op.to_bytes(ctt, false);
+    0
+}
+```
+
+This translation maintains the core functionality of the Java function while adapting it to Rust syntax and the provided dependencies. Here are the key changes and considerations:
+
+1. The function signature matches the provided Rust signature.
+2. We use the `hashit` function as provided in the dependencies.
+3. We use `ecp::ECP::mapit` instead of `ECP.mapit` to match the Rust style.
+4. `Big::from_bytes` is used to convert the byte array `s` to a `Big` number.
+5. We use `pair256::g1mul` instead of `PAIR256.G1mul` to perform the multiplication.
+6. The `to_bytes` method is called on the `op` ECP point.
+7. The function returns 0 as an `isize` to match the Java function's return type.
+
+Note that this translation assumes that the `ECP` type has a `to_bytes` method that takes a mutable byte slice and a boolean parameter. If this is not the case, you may need to adjust that line accordingly.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn get_client_permit(sha: usize, date: usize, s: &[u8], cid: &[u8], ctt: &mut [u8]) -> isize {
+    let mut h = [0u8; big::MODBYTES];
+    hashit(sha, date, cid, &mut h);
+    let p = ecp::ECP::mapit(&h);
+
+    let s_big = Big::from_bytes(s);
+    let op = pair256::g1mul(&p, &s_big);
+
+    op.to_bytes(ctt, false);
+    0
+}
+```
+
+This translation maintains the core functionality of the Java function while adapting it to Rust syntax and the provided dependencies. Here are the key changes and considerations:
+
+1. The function signature matches the provided Rust signature.
+2. We use the `hashit` function as provided in the dependencies.
+3. We use `ecp::ECP::mapit` instead of `ECP.mapit` to match the Rust style.
+4. `Big::from_bytes` is used to convert the byte array `s` to a `Big` number.
+5. We use `pair256::g1mul` instead of `PAIR256.G1mul` to perform the multiplication.
+6. The `to_bytes` method is called on the `op` ECP point.
+7. The function returns 0 as an `isize` to match the Java function's return type.
+
+Note that this translation assumes that the `ECP` type has a `to_bytes` method that takes a mutable byte slice and a boolean parameter. If this is not the case, you may need to adjust that line accordingly.

@@ -1,0 +1,256 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int OAEP_ENCODE(int sha,const octet *m,csprng *RNG,const octet *p,octet *f)
+{
+    int slen;
+    int olen=f->max-1;
+    int mlen=m->len;
+    int hlen;
+    int seedlen;
+    char dbmask[MAX_RSA_BYTES];
+    char seed[64];
+    octet DBMASK= {0,sizeof(dbmask),dbmask};
+    octet SEED= {0,sizeof(seed),seed};
+
+    hlen=seedlen=sha;
+    if (mlen>olen-hlen-seedlen-1) return 1;
+    if (m==f) return 1;  /* must be distinct octets */
+
+    hashit(sha,p,-1,f);
+
+    slen=olen-mlen-hlen-seedlen-1;
+
+    OCT_jbyte(f,0,slen);
+    OCT_jbyte(f,0x1,1);
+    OCT_joctet(f,m);
+
+    OCT_rand(&SEED,RNG,seedlen);
+
+    MGF1(sha,&SEED,olen-seedlen,&DBMASK);
+
+    OCT_xor(&DBMASK,f);
+    MGF1(sha,&DBMASK,seedlen,f);
+
+    OCT_xor(f,&SEED);
+
+    OCT_joctet(f,&DBMASK);
+
+    OCT_pad(f,f->max);
+    OCT_clear(&SEED);
+    OCT_clear(&DBMASK);
+
+    return 0;
+}
+</c function>
+<rust function signature>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = RFS - 1;
+    let mlen = m.len();
+
+    let hlen = sha;
+
+    let mut seed: [u8; 64] = [0; 64];
+
+    let seedlen = hlen;
+    if mlen > olen - hlen - seedlen - 1 {
+        return false;
+    }
+
+    let mut dbmask: [u8; RFS] = [0; RFS];
+
+    hashit(sha, p, -1, f);
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    for i in 0..slen {
+        f[hlen + i] = 0
+    }
+    f[hlen + slen] = 1;
+    for i in 0..mlen {
+        f[hlen + slen + 1 + i] = m[i]
+    }
+
+    for i in 0..seedlen {
+        seed[i] = rng.getbyte()
+    }
+
+    mgf1(sha, &seed, olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i]
+    }
+
+    mgf1(sha, &dbmask[0..olen - seedlen], seedlen, f);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i]
+    }
+
+    for i in 0..olen - seedlen {
+        f[i + seedlen] = dbmask[i]
+    }
+
+    /* pad to length RFS */
+    let d = 1;
+    for i in (d..RFS).rev() {
+        f[i] = f[i - d];
+    }
+    for i in (0..d).rev() {
+        f[i] = 0;
+    }
+    return true;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = f.len() - 1;
+    let mlen = m.len();
+    let hlen = sha;
+    let seedlen = sha;
+
+    if mlen > olen - hlen - seedlen - 1 {
+        return true;
+    }
+
+    let mut dbmask = vec![0u8; RFS];
+    let mut seed = vec![0u8; 64];
+
+    match p {
+        Some(p_slice) => hashit(sha, p_slice, -1, f),
+        None => hashit(sha, &[], -1, f),
+    }
+
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    f[hlen..hlen + slen].fill(0);
+    f[hlen + slen] = 0x01;
+    f[hlen + slen + 1..hlen + slen + 1 + mlen].copy_from_slice(m);
+
+    rng.get_bytes(&mut seed[..seedlen]);
+
+    mgf1(sha, &seed[..seedlen], olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        f[hlen + i] ^= dbmask[i];
+    }
+
+    mgf1(sha, &f[hlen..olen], seedlen, &mut f[..seedlen]);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i];
+    }
+
+    f[seedlen..olen].copy_from_slice(&f[hlen..olen]);
+
+    for i in olen..f.len() {
+        f[i] = 0;
+    }
+
+    false
+}
+```
+
+Note that this translation makes some assumptions and adaptations:
+
+1. The `hashit`, `mgf1`, and other utility functions are assumed to be available in the current scope or imported from the provided libraries.
+2. The `OCT_` functions are replaced with Rust slice operations.
+3. The `OAEP_ENCODE` function returns an `int` in C, which is translated to a `bool` in Rust as per the provided function signature.
+4. The `csprng` type is replaced with `RAND` as per the provided Rust dependencies.
+5. The `octet` type is replaced with slices (`&[u8]` and `&mut [u8]`).
+6. Some variable names are adjusted to follow Rust naming conventions.
+
+Please note that this translation might need further adjustments depending on the exact implementations of the utility functions and the surrounding Rust code structure.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+    let olen = f.len() - 1;
+    let mlen = m.len();
+    let hlen = sha;
+    let seedlen = sha;
+
+    if mlen > olen - hlen - seedlen - 1 {
+        return true;
+    }
+
+    let mut dbmask = vec![0u8; RFS];
+    let mut seed = vec![0u8; 64];
+
+    match p {
+        Some(p_slice) => hashit(sha, p_slice, -1, f),
+        None => hashit(sha, &[], -1, f),
+    }
+
+    let slen = olen - mlen - hlen - seedlen - 1;
+
+    f[hlen..hlen + slen].fill(0);
+    f[hlen + slen] = 0x01;
+    f[hlen + slen + 1..hlen + slen + 1 + mlen].copy_from_slice(m);
+
+    rng.get_bytes(&mut seed[..seedlen]);
+
+    mgf1(sha, &seed[..seedlen], olen - seedlen, &mut dbmask);
+
+    for i in 0..olen - seedlen {
+        f[hlen + i] ^= dbmask[i];
+    }
+
+    mgf1(sha, &f[hlen..olen], seedlen, &mut f[..seedlen]);
+
+    for i in 0..seedlen {
+        f[i] ^= seed[i];
+    }
+
+    f[seedlen..olen].copy_from_slice(&f[hlen..olen]);
+
+    for i in olen..f.len() {
+        f[i] = 0;
+    }
+
+    false
+}
+```
+
+Note that this translation makes some assumptions and adaptations:
+
+1. The `hashit`, `mgf1`, and other utility functions are assumed to be available in the current scope or imported from the provided libraries.
+2. The `OCT_` functions are replaced with Rust slice operations.
+3. The `OAEP_ENCODE` function returns an `int` in C, which is translated to a `bool` in Rust as per the provided function signature.
+4. The `csprng` type is replaced with `RAND` as per the provided Rust dependencies.
+5. The `octet` type is replaced with slices (`&[u8]` and `&mut [u8]`).
+6. Some variable names are adjusted to follow Rust naming conventions.
+
+Please note that this translation might need further adjustments depending on the exact implementations of the utility functions and the surrounding Rust code structure.

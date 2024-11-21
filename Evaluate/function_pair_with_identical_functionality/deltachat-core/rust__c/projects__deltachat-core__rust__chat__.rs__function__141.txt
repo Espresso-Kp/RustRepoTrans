@@ -1,0 +1,45 @@
+<path>
+projects/deltachat-core/rust/chat.rs
+</path>
+<function>
+pub(crate) async fn get_chat_cnt(context: &Context) -> Result<usize> {
+    if context.sql.is_open().await {
+        // no database, no chats - this is no error (needed eg. for information)
+        let count = context
+            .sql
+            .count("SELECT COUNT(*) FROM chats WHERE id>9 AND blocked=0;", ())
+            .await?;
+        Ok(count)
+    } else {
+        Ok(0)
+    }
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chat.c
+</path>
+<function>
+size_t dc_get_chat_cnt(dc_context_t* context)
+{
+	size_t        ret = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || context->sql->cobj==NULL) {
+		goto cleanup; /* no database, no chats - this is no error (needed eg. for information) */
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM chats WHERE id>" DC_STRINGIFY(DC_CHAT_ID_LAST_SPECIAL) " AND blocked=0;");
+	if (sqlite3_step(stmt)!=SQLITE_ROW) {
+		goto cleanup;
+	}
+
+	ret = sqlite3_column_int(stmt, 0);
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</function>

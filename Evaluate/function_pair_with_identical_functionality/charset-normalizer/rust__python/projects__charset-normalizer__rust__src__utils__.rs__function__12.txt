@@ -1,0 +1,59 @@
+<path>
+projects/charset-normalizer/rust/src/utils.rs
+</path>
+<function>
+pub(crate) fn any_specified_encoding(sequence: &[u8], search_zone: usize) -> Option<String> {
+    encoding::all::ASCII
+        .decode(
+            &sequence[0..search_zone.min(sequence.len())],
+            DecoderTrap::Ignore,
+        )
+        .ok()
+        .and_then(|test_string| {
+            RE_POSSIBLE_ENCODING_INDICATION
+                .captures_iter(&test_string)
+                .map(|c| c.extract())
+                .find_map(|(_, [specified_encoding])| iana_name(specified_encoding))
+                .map(|found_iana| found_iana.to_string())
+        })
+}
+</function>
+------
+
+<path>
+projects/charset-normalizer/python/utils.py
+</path>
+<function>
+def any_specified_encoding(sequence: bytes, search_zone: int = 8192) -> Optional[str]:
+    """
+    Extract using ASCII-only decoder any specified encoding in the first n-bytes.
+    """
+    if not isinstance(sequence, bytes):
+        raise TypeError
+
+    seq_len: int = len(sequence)
+
+    results: List[str] = findall(
+        RE_POSSIBLE_ENCODING_INDICATION,
+        sequence[: min(seq_len, search_zone)].decode("ascii", errors="ignore"),
+    )
+
+    if len(results) == 0:
+        return None
+
+    for specified_encoding in results:
+        specified_encoding = specified_encoding.lower()
+
+        encoding_alias: str
+        encoding_iana: str
+
+        for encoding_alias, encoding_iana in aliases.items():
+            if encoding_alias == specified_encoding:
+                return encoding_iana
+            if encoding_iana == specified_encoding:
+                return encoding_iana
+
+    return None
+
+
+</function>

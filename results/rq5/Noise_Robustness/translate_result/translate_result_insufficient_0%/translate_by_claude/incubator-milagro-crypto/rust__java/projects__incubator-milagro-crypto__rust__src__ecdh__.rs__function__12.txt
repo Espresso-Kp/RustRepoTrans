@@ -1,0 +1,362 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int SP_DSA(int sha,RAND RNG,byte[] S,byte[] F,byte[] C,byte[] D)
+	{
+		byte[] T=new byte[EFS];
+		BIG r,s,f,c,d,u,vx,w;
+		ECP G,V;
+		byte[] B=hashit(sha,F,0,null,BIG.MODBYTES);
+
+		G=ECP.generator();
+		r=new BIG(ROM.CURVE_Order);
+
+		s=BIG.fromBytes(S);
+		f=BIG.fromBytes(B);
+
+		c=new BIG(0);
+		d=new BIG(0);
+		V=new ECP();
+
+		do {
+			u=BIG.randomnum(r,RNG);
+			w=BIG.randomnum(r,RNG); /* side channel masking */
+			//if (ROM.AES_S>0)
+			//{
+			//	u.mod2m(2*ROM.AES_S);
+			//}			
+			V.copy(G);
+			V=V.mul(u);   		
+			vx=V.getX();
+			c.copy(vx);
+			c.mod(r);
+			if (c.iszilch()) continue;
+
+			u.copy(BIG.modmul(u,w,r));
+
+			u.invmodp(r);
+			d.copy(BIG.modmul(s,c,r));
+			d.add(f);
+
+			d.copy(BIG.modmul(d,w,r));
+
+			d.copy(BIG.modmul(u,d,r));
+		} while (d.iszilch());
+       
+		c.toBytes(T);
+		for (int i=0;i<EFS;i++) C[i]=T[i];
+		d.toBytes(T);
+		for (int i=0;i<EFS;i++) D[i]=T[i];
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize {
+    let mut t: [u8; EFS] = [0; EFS];
+    let mut b: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+
+    hashit(sha, f, 0, None, big::MODBYTES as usize, &mut b);
+
+    let G = ECP::generator();
+
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let sc = Big::from_bytes(s); // s or &s?
+    let fb = Big::from_bytes(&b);
+
+    let mut cb = Big::new();
+    let mut db = Big::new();
+
+    while db.is_zilch() {
+        let mut u = Big::randomnum(&r, rng);
+        let w = Big::randomnum(&r, rng); // side channel masking
+
+        let mut V = G.clone();
+        V = V.mul(&u);
+        let vx = V.getx();
+        cb = vx.clone();
+        cb.rmod(&r);
+        if cb.is_zilch() {
+            continue;
+        }
+
+        let mut tb = Big::modmul(&u, &w, &r);
+        u = tb.clone();
+
+        u.invmodp(&r);
+        db = Big::modmul(&sc, &cb, &r);
+        db.add(&fb);
+
+        tb = Big::modmul(&db, &w, &r);
+        db = tb.clone();
+
+        tb = Big::modmul(&u, &db, &r);
+        db = tb.clone();
+    }
+
+    cb.to_bytes(&mut t);
+    for i in 0..EFS {
+        c[i] = t[i]
+    }
+    db.to_bytes(&mut t);
+    for i in 0..EFS {
+        d[i] = t[i]
+    }
+    0
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize {
+    let efs = big::MODBYTES;
+    let mut t = vec![0u8; efs];
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+    let g = ECP::generator();
+
+    let s_big = Big::from_bytes(s);
+    let b = hash_it(sha, f, 0, &[], big::MODBYTES);
+    let f_big = Big::from_bytes(&b);
+
+    let mut c_big = Big::new();
+    let mut d_big = Big::new();
+    let mut v = ECP::new();
+
+    loop {
+        let u = Big::random_num(&r, rng);
+        let w = Big::random_num(&r, rng);
+
+        v.copy(&g);
+        v = v.mul(&u);
+        let vx = v.getx();
+        c_big.copy(&vx);
+        c_big.rmod(&r);
+        if c_big.iszilch() {
+            continue;
+        }
+
+        let mut u_temp = Big::modmul(&u, &w, &r);
+        u_temp.invmodp(&r);
+        d_big.copy(&Big::modmul(&s_big, &c_big, &r));
+        d_big.add(&f_big);
+        d_big = Big::modmul(&d_big, &w, &r);
+        d_big = Big::modmul(&u_temp, &d_big, &r);
+
+        if !d_big.iszilch() {
+            break;
+        }
+    }
+
+    c_big.to_bytes(&mut t);
+    c.copy_from_slice(&t[..efs]);
+    d_big.to_bytes(&mut t);
+    d.copy_from_slice(&t[..efs]);
+
+    0
+}
+
+fn hash_it(sha: usize, f: &[u8], pos: usize, c: &[u8], n: usize) -> Vec<u8> {
+    let mut b = vec![0u8; n];
+    match sha {
+        hash256::HASH_TYPE => {
+            let mut sh = HASH256::new();
+            for i in 0..f.len() {
+                sh.process(f[i]);
+            }
+            if !c.is_empty() {
+                for i in 0..pos {
+                    sh.process(c[i]);
+                }
+            }
+            let h = sh.hash();
+            b.copy_from_slice(&h[0..n]);
+        }
+        hash384::HASH_TYPE => {
+            let mut sh = HASH384::new();
+            for i in 0..f.len() {
+                sh.process(f[i]);
+            }
+            if !c.is_empty() {
+                for i in 0..pos {
+                    sh.process(c[i]);
+                }
+            }
+            let h = sh.hash();
+            b.copy_from_slice(&h[0..n]);
+        }
+        hash512::HASH_TYPE => {
+            let mut sh = HASH512::new();
+            for i in 0..f.len() {
+                sh.process(f[i]);
+            }
+            if !c.is_empty() {
+                for i in 0..pos {
+                    sh.process(c[i]);
+                }
+            }
+            let h = sh.hash();
+            b.copy_from_slice(&h[0..n]);
+        }
+        _ => {}
+    }
+    b
+}
+```
+
+This translation maintains the overall structure and logic of the original Java function while adapting it to Rust syntax and conventions. The `hash_it` function is included as a helper function to handle the hashing operation, which was originally</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize {
+    let efs = big::MODBYTES;
+    let mut t = vec![0u8; efs];
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+    let g = ECP::generator();
+
+    let s_big = Big::from_bytes(s);
+    let b = hash_it(sha, f, 0, &[], big::MODBYTES);
+    let f_big = Big::from_bytes(&b);
+
+    let mut c_big = Big::new();
+    let mut d_big = Big::new();
+    let mut v = ECP::new();
+
+    loop {
+        let u = Big::random_num(&r, rng);
+        let w = Big::random_num(&r, rng);
+
+        v.copy(&g);
+        v = v.mul(&u);
+        let vx = v.getx();
+        c_big.copy(&vx);
+        c_big.rmod(&r);
+        if c_big.iszilch() {
+            continue;
+        }
+
+        let mut u_temp = Big::modmul(&u, &w, &r);
+        u_temp.invmodp(&r);
+        d_big.copy(&Big::modmul(&s_big, &c_big, &r));
+        d_big.add(&f_big);
+        d_big = Big::modmul(&d_big, &w, &r);
+        d_big = Big::modmul(&u_temp, &d_big, &r);
+
+        if !d_big.iszilch() {
+            break;
+        }
+    }
+
+    c_big.to_bytes(&mut t);
+    c.copy_from_slice(&t[..efs]);
+    d_big.to_bytes(&mut t);
+    d.copy_from_slice(&t[..efs]);
+
+    0
+}
+
+fn hash_it(sha: usize, f: &[u8], pos: usize, c: &[u8], n: usize) -> Vec<u8> {
+    let mut b = vec![0u8; n];
+    match sha {
+        hash256::HASH_TYPE => {
+            let mut sh = HASH256::new();
+            for i in 0..f.len() {
+                sh.process(f[i]);
+            }
+            if !c.is_empty() {
+                for i in 0..pos {
+                    sh.process(c[i]);
+                }
+            }
+            let h = sh.hash();
+            b.copy_from_slice(&h[0..n]);
+        }
+        hash384::HASH_TYPE => {
+            let mut sh = HASH384::new();
+            for i in 0..f.len() {
+                sh.process(f[i]);
+            }
+            if !c.is_empty() {
+                for i in 0..pos {
+                    sh.process(c[i]);
+                }
+            }
+            let h = sh.hash();
+            b.copy_from_slice(&h[0..n]);
+        }
+        hash512::HASH_TYPE => {
+            let mut sh = HASH512::new();
+            for i in 0..f.len() {
+                sh.process(f[i]);
+            }
+            if !c.is_empty() {
+                for i in 0..pos {
+                    sh.process(c[i]);
+                }
+            }
+            let h = sh.hash();
+            b.copy_from_slice(&h[0..n]);
+        }
+        _ => {}
+    }
+    b
+}
+```
+
+This translation maintains the overall structure and logic of the original Java function while adapting it to Rust syntax and conventions. The `hash_it` function is included as a helper function to handle the hashing operation, which was originally

@@ -1,0 +1,242 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def drop_namespace(self, namespace: Union[str, Identifier]) -> None:
+        """Drop a namespace.
+
+        A Glue namespace can only be dropped if it is empty.
+
+        Args:
+            namespace: Namespace identifier.
+
+        Raises:
+            NoSuchNamespaceError: If a namespace with the given name does not exist, or the identifier is invalid.
+            NamespaceNotEmptyError: If the namespace is not empty.
+        """
+        database_name = self.identifier_to_database(namespace, NoSuchNamespaceError)
+        try:
+            table_list = self.list_tables(namespace=database_name)
+        except NoSuchNamespaceError as e:
+            raise NoSuchNamespaceError(f"Database does not exist: {database_name}") from e
+
+        if len(table_list) > 0:
+            raise NamespaceNotEmptyError(f"Database {database_name} is not empty")
+
+        self.glue.delete_database(Name=database_name)
+</python function>
+<rust function signature>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let db_name = validate_namespace(namespace)?;
+
+        let mut table_list: Vec<TableIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self
+                    .client
+                    .0
+                    .get_tables()
+                    .database_name(&db_name)
+                    .next_token(token),
+                None => self.client.0.get_tables().database_name(&db_name),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let tables: Vec<_> = resp
+                .table_list()
+                .iter()
+                .map(|tbl| TableIdent::new(namespace.clone(), tbl.name().to_string()))
+                .collect();
+
+            table_list.extend(tables);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(table_list)
+    }
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+        let db_name = validate_namespace(namespace)?;
+        let table_list = self.list_tables(namespace).await?;
+
+        if !table_list.is_empty() {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} is not empty", &db_name),
+            ));
+        }
+
+        let builder = self.client.0.delete_database().name(db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+#[async_trait]
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    let database_name = validate_namespace(namespace)?;
+    
+    let table_list = self.list_tables(namespace).await?;
+    if !table_list.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Database {} is not empty",
+                database_name
+            ),
+        ));
+    }
+
+    let mut db_delete_req = self.client.0.delete_database_request().name(&database_name);
+    db_delete_req = with_catalog_id!(db_delete_req, self.config);
+    db_delete_req.send().await.map_err(from_aws_sdk_error).map(|_| ())
+}
+```
+
+This is a rough translation and may not work correctly without adjustments. Ensure to correct it to suit the actual context if necessary. In this translation:
+
+- `validate_namespace` is used to validate namespace and get database name
+- `list_tables` is used to get the list of tables in a namespace
+- The function returns an error if the database is not empty
+- `delete_database_request` is used to delete a database
+- `with_catalog_id` is used to add catalog id to the delete request
+- The function uses `map_err` to transform AWS SDK error to iceberg error
+- The function uses `map` to transform the successful deletion result to unit, because the original Python function doesn't return a value (None in Python corresponds to unit in Rust)</translated function>Here is the translated Rust function:
+
+```rust
+#[async_trait]
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    let database_name = validate_namespace(namespace)?;
+    
+    let table_list = self.list_tables(namespace).await?;
+    if !table_list.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Database {} is not empty",
+                database_name
+            ),
+        ));
+    }
+
+    let mut db_delete_req = self.client.0.delete_database_request().name(&database_name);
+    db_delete_req = with_catalog_id!(db_delete_req, self.config);
+    db_delete_req.send().await.map_err(from_aws_sdk_error).map(|_| ())
+}
+```
+
+This is a rough translation and may not work correctly without adjustments. Ensure to correct it to suit the actual context if necessary. In this translation:
+
+- `validate_namespace` is used to validate namespace and get database name
+- `list_tables` is used to get the list of tables in a namespace
+- The function returns an error if the database is not empty
+- `delete_database_request` is used to delete a database
+- `with_catalog_id` is used to add catalog id to the delete request
+- The function uses `map_err` to transform AWS SDK error to iceberg error
+- The function uses `map` to transform the successful deletion result to unit, because the original Python function doesn't return a value (None in Python corresponds to unit in Rust)

@@ -1,0 +1,189 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def __init__(
+        self,
+        payload: bytes,
+        guessed_encoding: str,
+        mean_mess_ratio: float,
+        has_sig_or_bom: bool,
+        languages: "CoherenceMatches",
+        decoded_payload: Optional[str] = None,
+    ):
+        self._payload: bytes = payload
+
+        self._encoding: str = guessed_encoding
+        self._mean_mess_ratio: float = mean_mess_ratio
+        self._languages: CoherenceMatches = languages
+        self._has_sig_or_bom: bool = has_sig_or_bom
+        self._unicode_ranges: Optional[List[str]] = None
+
+        self._leaves: List[CharsetMatch] = []
+
+        if decoded_payload is not None:
+            self._string: Optional[str] = decoded_payload
+        else:
+            try:
+                # Attempt to decode the payload with the guessed encoding
+                decoded_string = payload.decode(guessed_encoding, errors='strict')
+                # Remove BOM if it exists at the beginning of the decoded string
+                if decoded_string.startswith('\ufeff'):
+                    decoded_string = decoded_string[1:]
+                self._string = decoded_string
+            except (UnicodeDecodeError, LookupError):
+                # If decoding fails, _string will be None
+                self._string = None
+</python function>
+<rust function signature>
+pub fn new(
+        payload: &[u8],
+        encoding: &str,
+        mean_mess_ratio: f32,
+        has_sig_or_bom: bool,
+        coherence_matches: &CoherenceMatches,
+        decoded_payload: Option<&str>,
+    ) -> Self 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub struct CharsetMatch {
+    payload: Vec<u8>,
+    encoding: String,
+
+    mean_mess_ratio: f32,
+    coherence_matches: CoherenceMatches,
+
+    has_sig_or_bom: bool,
+
+    submatch: Vec<CharsetMatch>,
+    decoded_payload: Option<String>,
+}
+pub struct CharsetMatches {
+    items: Vec<CharsetMatch>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use crate::cd::{encoding_languages, mb_encoding_languages};
+use crate::consts::{IANA_SUPPORTED_ALIASES, TOO_BIG_SEQUENCE};
+use crate::utils::{decode, iana_name, is_multi_byte_encoding, range_scan};
+use clap::Parser;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use serde::Serialize;
+use std::cmp::Ordering;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::Hash;
+use std::ops::Index;
+use std::path::PathBuf;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn new(
+        payload: &[u8],
+        encoding: &str,
+        mean_mess_ratio: f32,
+        has_sig_or_bom: bool,
+        coherence_matches: &CoherenceMatches,
+        decoded_payload: Option<&str>,
+    ) -> Self {
+        CharsetMatch {
+            payload: Vec::from(payload),
+            encoding: String::from(encoding),
+            mean_mess_ratio,
+            coherence_matches: coherence_matches.clone(),
+            has_sig_or_bom,
+            submatch: vec![],
+            decoded_payload: decoded_payload.map(String::from).or_else(|| {
+                decode(payload, encoding, DecoderTrap::Strict, false, true)
+                    .ok()
+                    .map(|res| res.strip_prefix('\u{feff}').unwrap_or(&res).to_string())
+            }),
+        }
+    }
+</function>
+<translated function>
+ ```rust
+pub fn new(
+    payload: &[u8],
+    encoding: &str,
+    mean_mess_ratio: f32,
+    has_sig_or_bom: bool,
+    coherence_matches: &CoherenceMatches,
+    decoded_payload: Option<&str>,
+) -> Self {
+    let mut instance = Self {
+        _payload: payload.to_vec(),
+        _encoding: encoding.to_string(),
+        _mean_mess_ratio: mean_mess_ratio,
+        _has_sig_or_bom: has_sig_or_bom,
+        _languages: coherence_matches.clone(),
+        _unicode_ranges: None,
+        _leaves: Vec::new(),
+        _string: decoded_payload.map(|s| s.to_string()),
+    };
+
+    if let Some(decoded_payload) = decoded_payload {
+        instance._string = Some(decoded_payload.to_string());
+    } else {
+        match std::str::from_utf8(payload) {
+            Ok(decoded_string) => {
+                if decoded_string.starts_with('\u{feff}') {
+                    instance._string = Some(decoded_string[1..].to_string());
+                } else {
+                    instance._string = Some(decoded_string.to_string());
+                }
+            }
+            Err(_) => {
+                instance._string = None;
+            }
+        }
+    }
+
+    instance
+}
+```</translated function> ```rust
+pub fn new(
+    payload: &[u8],
+    encoding: &str,
+    mean_mess_ratio: f32,
+    has_sig_or_bom: bool,
+    coherence_matches: &CoherenceMatches,
+    decoded_payload: Option<&str>,
+) -> Self {
+    let mut instance = Self {
+        _payload: payload.to_vec(),
+        _encoding: encoding.to_string(),
+        _mean_mess_ratio: mean_mess_ratio,
+        _has_sig_or_bom: has_sig_or_bom,
+        _languages: coherence_matches.clone(),
+        _unicode_ranges: None,
+        _leaves: Vec::new(),
+        _string: decoded_payload.map(|s| s.to_string()),
+    };
+
+    if let Some(decoded_payload) = decoded_payload {
+        instance._string = Some(decoded_payload.to_string());
+    } else {
+        match std::str::from_utf8(payload) {
+            Ok(decoded_string) => {
+                if decoded_string.starts_with('\u{feff}') {
+                    instance._string = Some(decoded_string[1..].to_string());
+                } else {
+                    instance._string = Some(decoded_string.to_string());
+                }
+            }
+            Err(_) => {
+                instance._string = None;
+            }
+        }
+    }
+
+    instance
+}
+```

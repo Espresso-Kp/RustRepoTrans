@@ -1,0 +1,75 @@
+<path>
+projects/deltachat-core/rust/location.rs
+</path>
+<function>
+    pub fn parse(to_parse: &[u8]) -> Result<Self> {
+        ensure!(to_parse.len() <= 1024 * 1024, "kml-file is too large");
+
+        let mut reader = quick_xml::Reader::from_reader(to_parse);
+        reader.trim_text(true);
+
+        let mut kml = Kml::new();
+        kml.locations = Vec::with_capacity(100);
+
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf).with_context(|| {
+                format!(
+                    "location parsing error at position {}",
+                    reader.buffer_position()
+                )
+            })? {
+                quick_xml::events::Event::Start(ref e) => kml.starttag_cb(e, &reader),
+                quick_xml::events::Event::End(ref e) => kml.endtag_cb(e),
+                quick_xml::events::Event::Text(ref e) => kml.text_cb(e),
+                quick_xml::events::Event::Eof => break,
+                _ => (),
+            }
+            buf.clear();
+        }
+
+        Ok(kml)
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_location.c
+</path>
+<function>
+dc_kml_t* dc_kml_parse(dc_context_t* context,
+                       const char* content, size_t content_bytes)
+{
+	dc_kml_t*      kml = calloc(1, sizeof(dc_kml_t));
+	char*          content_nullterminated = NULL;
+	dc_saxparser_t saxparser;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	if (content_bytes > 1*1024*1024) {
+		dc_log_warning(context, 0,
+			"A kml-files with %i bytes is larger than reasonably expected.",
+			content_bytes);
+		goto cleanup;
+	}
+
+	content_nullterminated = dc_null_terminate(content, content_bytes);
+	if (content_nullterminated==NULL) {
+		goto cleanup;
+	}
+
+	kml->locations = dc_array_new_typed(context, DC_ARRAY_LOCATIONS, 100);
+
+	dc_saxparser_init            (&saxparser, kml);
+	dc_saxparser_set_tag_handler (&saxparser, kml_starttag_cb, kml_endtag_cb);
+	dc_saxparser_set_text_handler(&saxparser, kml_text_cb);
+	dc_saxparser_parse           (&saxparser, content_nullterminated);
+
+cleanup:
+	free(content_nullterminated);
+	return kml;
+}
+</function>

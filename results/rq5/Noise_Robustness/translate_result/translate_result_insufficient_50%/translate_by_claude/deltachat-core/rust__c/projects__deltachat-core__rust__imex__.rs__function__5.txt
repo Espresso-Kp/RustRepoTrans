@@ -1,0 +1,194 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+char* dc_create_setup_code(dc_context_t* context)
+{
+	#define         CODE_ELEMS 9
+	uint16_t        random_val = 0;
+	int             i = 0;
+	dc_strbuilder_t ret;
+	dc_strbuilder_init(&ret, 0);
+
+	for (i = 0; i < CODE_ELEMS; i++)
+	{
+		do
+		{
+			if (!RAND_bytes((unsigned char*)&random_val, sizeof(uint16_t))) {
+				dc_log_warning(context, 0, "Falling back to pseudo-number generation for the setup code.");
+				RAND_pseudo_bytes((unsigned char*)&random_val, sizeof(uint16_t));
+			}
+		}
+		while (random_val > 60000); /* make sure the modulo below does not reduce entropy (range is 0..65535, a module 10000 would make appearing values <=535 one time more often than other values) */
+
+		random_val = random_val % 10000; /* force all blocks into the range 0..9999 */
+
+		dc_strbuilder_catf(&ret, "%s%04i", i?"-":"", (int)random_val);
+	}
+
+	return ret.buf;
+}
+</c function>
+<rust function signature>
+pub fn create_setup_code(_context: &Context) -> String 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn create_setup_code(_context: &Context) -> String {
+    let mut random_val: u16;
+    let mut rng = thread_rng();
+    let mut ret = String::new();
+
+    for i in 0..9 {
+        loop {
+            random_val = rng.gen();
+            if random_val as usize <= 60000 {
+                break;
+            }
+        }
+        random_val = (random_val as usize % 10000) as u16;
+        ret += &format!(
+            "{}{:04}",
+            if 0 != i { "-" } else { "" },
+            random_val as usize
+        );
+    }
+
+    ret
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn create_setup_code(_context: &Context) -> String {
+    const CODE_ELEMS: usize = 9;
+    let mut ret = String::new();
+
+    for i in 0..CODE_ELEMS {
+        let random_val = loop {
+            let val: u16 = thread_rng().gen();
+            if val <= 60000 {
+                break val;
+            }
+        };
+
+        let random_val = random_val % 10000; // Force all blocks into the range 0..9999
+
+        if i > 0 {
+            ret.push('-');
+        }
+        ret.push_str(&format!("{:04}", random_val));
+    }
+
+    ret
+}
+```
+
+This Rust function follows the provided signature and uses the available dependencies and libraries. Here are the key changes and considerations:
+
+1. We use `thread_rng()` from the `rand` crate to generate random numbers, which is more idiomatic in Rust than using `RAND_bytes` or `RAND_pseudo_bytes`.
+
+2. Instead of using a `dc_strbuilder_t`, we use Rust's `String` type, which is more appropriate for building strings in Rust.
+
+3. The function now returns a `String` directly, as specified in the function signature.
+
+4. We use a `loop` to generate random numbers until we get one that's less than or equal to 60000, ensuring the same distribution as the original C function.
+
+5. The `_context` parameter is not used in this function, so it's prefixed with an underscore to avoid unused variable warnings.
+
+6. We use Rust's string formatting with `format!` to create the formatted string for each block.
+
+This translation maintains the functionality of the original C function while using Rust-specific constructs and the provided dependencies.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn create_setup_code(_context: &Context) -> String {
+    const CODE_ELEMS: usize = 9;
+    let mut ret = String::new();
+
+    for i in 0..CODE_ELEMS {
+        let random_val = loop {
+            let val: u16 = thread_rng().gen();
+            if val <= 60000 {
+                break val;
+            }
+        };
+
+        let random_val = random_val % 10000; // Force all blocks into the range 0..9999
+
+        if i > 0 {
+            ret.push('-');
+        }
+        ret.push_str(&format!("{:04}", random_val));
+    }
+
+    ret
+}
+```
+
+This Rust function follows the provided signature and uses the available dependencies and libraries. Here are the key changes and considerations:
+
+1. We use `thread_rng()` from the `rand` crate to generate random numbers, which is more idiomatic in Rust than using `RAND_bytes` or `RAND_pseudo_bytes`.
+
+2. Instead of using a `dc_strbuilder_t`, we use Rust's `String` type, which is more appropriate for building strings in Rust.
+
+3. The function now returns a `String` directly, as specified in the function signature.
+
+4. We use a `loop` to generate random numbers until we get one that's less than or equal to 60000, ensuring the same distribution as the original C function.
+
+5. The `_context` parameter is not used in this function, so it's prefixed with an underscore to avoid unused variable warnings.
+
+6. We use Rust's string formatting with `format!` to create the formatted string for each block.
+
+This translation maintains the functionality of the original C function while using Rust-specific constructs and the provided dependencies.

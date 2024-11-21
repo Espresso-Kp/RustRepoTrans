@@ -1,0 +1,52 @@
+pub(crate) fn get_client(socks5_config: Option<Socks5Config>) -> Result<reqwest::Client> {
+    let builder = reqwest::ClientBuilder::new()
+        .timeout(HTTP_TIMEOUT)
+        .add_root_certificate(LETSENCRYPT_ROOT.clone());
+
+    let builder = if let Some(socks5_config) = socks5_config {
+        let proxy = reqwest::Proxy::all(socks5_config.to_url())?;
+        builder.proxy(proxy)
+    } else {
+        // Disable usage of "system" proxy configured via environment variables.
+        // It is enabled by default in `reqwest`, see
+        // <https://docs.rs/reqwest/0.11.14/reqwest/struct.ClientBuilder.html#method.no_proxy>
+        // for documentation.
+        builder.no_proxy()
+    };
+    Ok(builder.build()?)
+}
+async fn is_expired(context: &Context) -> Result<bool> {
+    let expire_timestamp = context
+        .sql
+        .get_raw_config_int64("oauth2_timestamp_expires")
+        .await?
+        .unwrap_or_default();
+
+    if expire_timestamp <= 0 {
+        return Ok(false);
+    }
+    if expire_timestamp > time() {
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+------
+
+
+
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;

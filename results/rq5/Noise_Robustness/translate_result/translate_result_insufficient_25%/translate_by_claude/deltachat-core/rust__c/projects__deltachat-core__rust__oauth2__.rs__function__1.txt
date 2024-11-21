@@ -1,0 +1,249 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+char* dc_get_oauth2_url(dc_context_t* context, const char* addr,
+                        const char* redirect_uri)
+{
+	#define CLIENT_ID     "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com"
+	oauth2_t*   oauth2 = NULL;
+	char*       oauth2_url = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || redirect_uri==NULL || redirect_uri[0]==0) {
+		goto cleanup;
+	}
+
+	oauth2 = get_info(addr);
+	if (oauth2==NULL) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_set_config(context->sql, "oauth2_pending_redirect_uri", redirect_uri);
+
+	oauth2_url = dc_strdup(oauth2->get_code);
+	replace_in_uri(&oauth2_url, "$CLIENT_ID", oauth2->client_id);
+	replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+cleanup:
+	free(oauth2);
+	return oauth2_url;
+}
+</c function>
+<rust function signature>
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn replace_in_uri(uri: &str, key: &str, value: &str) -> String {
+    let value_urlencoded = utf8_percent_encode(value, NON_ALPHANUMERIC).to_string();
+    uri.replace(key, &value_urlencoded)
+}
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    let socks5_enabled = context.get_config_bool(Config::Socks5Enabled).await?;
+    if let Some(oauth2) = Oauth2::from_address(context, addr, socks5_enabled).await {
+        context
+            .sql
+            .set_raw_config("oauth2_pending_redirect_uri", Some(redirect_uri))
+            .await?;
+        let oauth2_url = replace_in_uri(oauth2.get_code, "$CLIENT_ID", oauth2.client_id);
+        let oauth2_url = replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+        Ok(Some(oauth2_url))
+    } else {
+        Ok(None)
+    }
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    const CLIENT_ID: &str = "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com";
+
+    if redirect_uri.is_empty() {
+        return Ok(None);
+    }
+
+    let oauth2 = provider::get_provider(addr)?;
+    
+    context.sql.set_config("oauth2_pending_redirect_uri", redirect_uri).await?;
+
+    let mut oauth2_url = oauth2.get_authorization_url().to_string();
+    oauth2_url = replace_in_uri(&oauth2_url, "$CLIENT_ID", &oauth2.client_id);
+    oauth2_url = replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+    Ok(Some(oauth2_url))
+}
+```
+
+This Rust translation incorporates the following changes and considerations:
+
+1. The function now returns a `Result<Option<String>>` to handle potential errors and the case where no URL is generated.
+
+2. We use the `provider::get_provider` function (assumed to be equivalent to `get_info` in the C version) to get the OAuth2 information.
+
+3. The `context.sql.set_config` method is used instead of `dc_sqlite3_set_config`, assuming it's an async method.
+
+4. We use the `replace_in_uri` function as provided in the dependencies.
+
+5. Error handling is done using the `?` operator, which propagates errors up the call stack.
+
+6. The `CLIENT_ID` is defined as a constant at the beginning of the function.
+
+7. We don't need to explicitly free memory as Rust handles this automatically.
+
+8. The function is marked as `async` to allow for asynchronous operations.
+
+Note that this translation assumes the existence of certain methods and types (like `provider::get_provider` and `oauth2.get_authorization_url()`). You may need to adjust these if the actual implementations differ in your Rust codebase.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn get_oauth2_url(
+    context: &Context,
+    addr: &str,
+    redirect_uri: &str,
+) -> Result<Option<String>> {
+    const CLIENT_ID: &str = "959970109878-4mvtgf6feshskf7695nfln6002mom908.apps.googleusercontent.com";
+
+    if redirect_uri.is_empty() {
+        return Ok(None);
+    }
+
+    let oauth2 = provider::get_provider(addr)?;
+    
+    context.sql.set_config("oauth2_pending_redirect_uri", redirect_uri).await?;
+
+    let mut oauth2_url = oauth2.get_authorization_url().to_string();
+    oauth2_url = replace_in_uri(&oauth2_url, "$CLIENT_ID", &oauth2.client_id);
+    oauth2_url = replace_in_uri(&oauth2_url, "$REDIRECT_URI", redirect_uri);
+
+    Ok(Some(oauth2_url))
+}
+```
+
+This Rust translation incorporates the following changes and considerations:
+
+1. The function now returns a `Result<Option<String>>` to handle potential errors and the case where no URL is generated.
+
+2. We use the `provider::get_provider` function (assumed to be equivalent to `get_info` in the C version) to get the OAuth2 information.
+
+3. The `context.sql.set_config` method is used instead of `dc_sqlite3_set_config`, assuming it's an async method.
+
+4. We use the `replace_in_uri` function as provided in the dependencies.
+
+5. Error handling is done using the `?` operator, which propagates errors up the call stack.
+
+6. The `CLIENT_ID` is defined as a constant at the beginning of the function.
+
+7. We don't need to explicitly free memory as Rust handles this automatically.
+
+8. The function is marked as `async` to allow for asynchronous operations.
+
+Note that this translation assumes the existence of certain methods and types (like `provider::get_provider` and `oauth2.get_authorization_url()`). You may need to adjust these if the actual implementations differ in your Rust codebase.

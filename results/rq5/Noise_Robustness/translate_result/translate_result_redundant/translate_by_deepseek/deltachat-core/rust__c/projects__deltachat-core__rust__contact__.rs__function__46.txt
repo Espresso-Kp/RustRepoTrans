@@ -1,0 +1,287 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+* Same as dc_contact_is_verified() but allows speeding up things
+ * by adding the peerstate belonging to the contact.
+ * If you do not have the peerstate available, it is loaded automatically.
+ *
+ * @private @memberof dc_context_t
+ */
+int dc_contact_is_verified_ex(dc_contact_t* contact, const dc_apeerstate_t* peerstate)
+{
+	int              contact_verified = DC_NOT_VERIFIED;
+	dc_apeerstate_t* peerstate_to_delete = NULL;
+
+	if (contact==NULL || contact->magic!=DC_CONTACT_MAGIC) {
+		goto cleanup;
+	}
+
+	if (contact->id==DC_CONTACT_ID_SELF) {
+		contact_verified = DC_BIDIRECT_VERIFIED;
+		goto cleanup; // we're always sort of secured-verified as we could verify the key on this device any time with the key on this device
+	}
+
+	if (peerstate==NULL) {
+		peerstate_to_delete = dc_apeerstate_new(contact->context);
+		if (!dc_apeerstate_load_by_addr(peerstate_to_delete, contact->context->sql, contact->addr)) {
+			goto cleanup;
+		}
+		peerstate = peerstate_to_delete;
+	}
+
+	contact_verified = peerstate->verified_key? DC_BIDIRECT_VERIFIED : 0;
+
+cleanup:
+	dc_apeerstate_unref(peerstate_to_delete);
+	return contact_verified;
+}
+</c function>
+<rust function signature>
+pub async fn is_verified(&self, context: &Context) -> Result<bool> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) async fn is_backward_verified(&self, context: &Context) -> Result<bool> {
+        let Some(backward_verified_key_id) = self.backward_verified_key_id else {
+            return Ok(false);
+        };
+
+        let self_key_id = context.get_config_i64(Config::KeyId).await?;
+
+        let backward_verified = backward_verified_key_id == self_key_id;
+        Ok(backward_verified)
+    }
+
+pub(crate) fn is_using_verified_key(&self) -> bool {
+        let verified = self.peek_key_fingerprint(true);
+
+        verified.is_some() && verified == self.peek_key_fingerprint(false)
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub async fn from_addr(context: &Context, addr: &str) -> Result<Option<Peerstate>> {
+        if context.is_self_addr(addr).await? {
+            return Ok(None);
+        }
+        let query = "SELECT addr, last_seen, last_seen_autocrypt, prefer_encrypted, public_key, \
+                     gossip_timestamp, gossip_key, public_key_fingerprint, gossip_key_fingerprint, \
+                     verified_key, verified_key_fingerprint, \
+                     verifier, \
+                     secondary_verified_key, secondary_verified_key_fingerprint, \
+                     secondary_verifier, \
+                     backward_verified_key_id \
+                     FROM acpeerstates \
+                     WHERE addr=? COLLATE NOCASE LIMIT 1;";
+        Self::from_stmt(context, query, (addr,)).await
+    }
+    
+pub struct Contact {
+    /// The contact ID.
+    pub id: ContactId,
+
+    /// Contact name. It is recommended to use `Contact::get_name`,
+    /// `Contact::get_display_name` or `Contact::get_name_n_addr` to access this field.
+    /// May be empty, initially set to `authname`.
+    name: String,
+
+    /// Name authorized by the contact himself. Only this name may be spread to others,
+    /// e.g. in To:-lists. May be empty. It is recommended to use `Contact::get_authname`,
+    /// to access this field.
+    authname: String,
+
+    /// E-Mail-Address of the contact. It is recommended to use `Contact::get_addr` to access this field.
+    addr: String,
+
+    /// Blocked state. Use contact_is_blocked to access this field.
+    pub blocked: bool,
+
+    /// Time when the contact was seen last time, Unix time in seconds.
+    last_seen: i64,
+
+    /// The origin/source of the contact.
+    pub origin: Origin,
+
+    /// Parameters as Param::ProfileImage
+    pub param: Params,
+
+    /// Last seen message signature for this contact, to be displayed in the profile.
+    status: String,
+
+    /// If the contact is a bot.
+    is_bot: bool,
+}
+
+pub struct ContactId(u32);
+
+impl ContactId {
+    /// Undefined contact. Used as a placeholder for trashed messages.
+    pub const UNDEFINED: ContactId = ContactId::new(0);
+
+    /// The owner of the account.
+    ///
+    /// The email-address is set by `set_config` using "addr".
+    pub const SELF: ContactId = ContactId::new(1);
+
+    /// ID of the contact for info messages.
+    pub const INFO: ContactId = ContactId::new(2);
+
+    /// ID of the contact for device messages.
+    pub const DEVICE: ContactId = ContactId::new(5);
+    pub(crate) const LAST_SPECIAL: ContactId = ContactId::new(9);
+
+    /// Address to go with [`ContactId::DEVICE`].
+    ///
+    /// This is used by APIs which need to return an email address for this contact.
+    pub const DEVICE_ADDR: &'static str = "device@localhost";
+}
+
+pub async fn from_verified_fingerprint_or_addr(
+        context: &Context,
+        fingerprint: &Fingerprint,
+        addr: &str,
+    ) -> Result<Option<Peerstate>> {
+        if context.is_self_addr(addr).await? {
+            return Ok(None);
+        }
+        let query = "SELECT addr, last_seen, last_seen_autocrypt, prefer_encrypted, public_key, \
+                     gossip_timestamp, gossip_key, public_key_fingerprint, gossip_key_fingerprint, \
+                     verified_key, verified_key_fingerprint, \
+                     verifier, \
+                     secondary_verified_key, secondary_verified_key_fingerprint, \
+                     secondary_verifier, \
+                     backward_verified_key_id \
+                     FROM acpeerstates  \
+                     WHERE verified_key_fingerprint=? \
+                     OR addr=? COLLATE NOCASE \
+                     ORDER BY verified_key_fingerprint=? DESC, addr=? COLLATE NOCASE DESC, \
+                     last_seen DESC LIMIT 1;";
+        let fp = fingerprint.hex();
+        Self::from_stmt(context, query, (&fp, addr, &fp, addr)).await
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::cmp::{min, Reverse};
+use std::collections::BinaryHeap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use base64::Engine as _;
+use deltachat_contact_tools::may_be_valid_addr;
+use deltachat_contact_tools::{
+    self as contact_tools, addr_cmp, addr_normalize, sanitize_name_and_addr, strip_rtlo_characters,
+    ContactAddress, VcardContact,
+};
+use deltachat_derive::{FromSql, ToSql};
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use tokio::task;
+use tokio::time::{timeout, Duration};
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::blob::BlobObject;
+use crate::chat::{ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{Blocked, Chattype, DC_GCL_ADD_SELF, DC_GCL_VERIFIED_ONLY};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{load_self_public_key, DcKey, SignedPublicKey};
+use crate::log::LogExt;
+use crate::login_param::LoginParam;
+use crate::message::MessageState;
+use crate::mimeparser::AvatarAction;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::sql::{self, params_iter};
+use crate::sync::{self, Sync::*};
+use crate::tools::{
+    duration_to_str, get_abs_path, improve_single_line_input, smeared_time, time, SystemTime,
+};
+use crate::{chat, chatlist_events, stock_str};
+use deltachat_contact_tools::{may_be_valid_addr, normalize_name};
+use super::*;
+use crate::chat::{get_chat_contacts, send_text_msg, Chat};
+use crate::chatlist::Chatlist;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{self, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn is_verified(&self, context: &Context) -> Result<bool> {
+        // We're always sort of secured-verified as we could verify the key on this device any time with the key
+        // on this device
+        if self.id == ContactId::SELF {
+            return Ok(true);
+        }
+
+        let Some(peerstate) = Peerstate::from_addr(context, &self.addr).await? else {
+            return Ok(false);
+        };
+
+        let forward_verified = peerstate.is_using_verified_key();
+        let backward_verified = peerstate.is_backward_verified(context).await?;
+        Ok(forward_verified && backward_verified)
+    }
+</function>
+<translated function>
+ ```rust
+pub async fn is_verified(&self, context: &Context) -> Result<bool> {
+    let contact_verified = DC_NOT_VERIFIED;
+    let peerstate_to_delete: Option<Peerstate> = None;
+
+    if self.id == ContactId::SELF {
+        return Ok(true);
+    }
+
+    let peerstate = if let Some(peerstate) = self.peerstate.as_ref() {
+        peerstate
+    } else {
+        let peerstate = Peerstate::from_addr(context, &self.addr).await?;
+        self.peerstate = Some(peerstate.clone());
+        peerstate
+    };
+
+    let contact_verified = if peerstate.verified_key.is_some() {
+        DC_BIDIRECT_VERIFIED
+    } else {
+        0
+    };
+
+    Ok(contact_verified != 0)
+}
+```</translated function> ```rust
+pub async fn is_verified(&self, context: &Context) -> Result<bool> {
+    let contact_verified = DC_NOT_VERIFIED;
+    let peerstate_to_delete: Option<Peerstate> = None;
+
+    if self.id == ContactId::SELF {
+        return Ok(true);
+    }
+
+    let peerstate = if let Some(peerstate) = self.peerstate.as_ref() {
+        peerstate
+    } else {
+        let peerstate = Peerstate::from_addr(context, &self.addr).await?;
+        self.peerstate = Some(peerstate.clone());
+        peerstate
+    };
+
+    let contact_verified = if peerstate.verified_key.is_some() {
+        DC_BIDIRECT_VERIFIED
+    } else {
+        0
+    };
+
+    Ok(contact_verified != 0)
+}
+```

@@ -1,0 +1,174 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def create_namespace(self, namespace: Union[str, Identifier], properties: Properties = EMPTY_DICT) -> None:
+        """Create a namespace in the catalog.
+
+        Args:
+            namespace: Namespace identifier.
+            properties: A string dictionary of properties for the given namespace.
+
+        Raises:
+            ValueError: If the identifier is invalid.
+            AlreadyExistsError: If a namespace with the given name already exists.
+        """
+        database_name = self.identifier_to_database(namespace)
+        try:
+            self.glue.create_database(DatabaseInput=_construct_database_input(database_name, properties))
+        except self.glue.exceptions.AlreadyExistsException as e:
+            raise NamespaceAlreadyExistsError(f"Database {database_name} already exists") from e
+</python function>
+<rust function signature>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) fn convert_to_database(
+    namespace: &NamespaceIdent,
+    properties: &HashMap<String, String>,
+) -> Result<DatabaseInput> {
+    let db_name = validate_namespace(namespace)?;
+    let mut builder = DatabaseInput::builder().name(db_name);
+
+    for (k, v) in properties.iter() {
+        match k.as_ref() {
+            DESCRIPTION => {
+                builder = builder.description(v);
+            }
+            LOCATION => {
+                builder = builder.location_uri(v);
+            }
+            _ => {
+                builder = builder.parameters(k, v);
+            }
+        }
+    }
+
+    builder.build().map_err(from_aws_build_error)
+}
+
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+pub fn with_properties(name: NamespaceIdent, properties: HashMap<String, String>) -> Self {
+        Self { name, properties }
+    }
+    
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+
+        let builder = self.client.0.create_database().database_input(db_input);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(Namespace::with_properties(namespace.clone(), properties))
+    }
+</function>
+<translated function>
+Here is your desired Rust function that is translated from the Python function you provided. 
+
+```rust
+#[async_trait]
+impl Catalog for GlueCatalog {
+    // ...other functions
+
+    async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+        let builder_with_catalog = with_catalog_id!(
+            CreateDatabaseInput::builder().database_input(db_input),
+            self.config
+        );
+        let create_db_input = builder_with_catalog.build().map_err(from_aws_build_error)?;
+        self.client.create_database().input(create_db_input).send().await?;
+        Ok(convert_to_namespace(namespace))
+    }
+
+    // ...other functions
+}
+```
+
+Please note that this function belongs to the `GlueCatalog` struct that implements the `Catalog` trait as the Python function was a method in a class.
+
+Moreover, the GlueCatalogConfig is assumed to be a struct that contains a catalog id. If this assumption is incorrect, this line of code should be changed accordingly. Also, please replace the content inside "create_database.." builder function with what's exactly required in your case. It's just an example. 
+
+The error handling mechanism might be slightly different in Rust compared to Python, so we just return the error if any occurs. The error is wrapped in a Result in Rust, which needs to be unwrapped in order to use the underlying functionality, thus creating an additional error check mechanism.</translated function>Here is your desired Rust function that is translated from the Python function you provided. 
+
+```rust
+#[async_trait]
+impl Catalog for GlueCatalog {
+    // ...other functions
+
+    async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+        let builder_with_catalog = with_catalog_id!(
+            CreateDatabaseInput::builder().database_input(db_input),
+            self.config
+        );
+        let create_db_input = builder_with_catalog.build().map_err(from_aws_build_error)?;
+        self.client.create_database().input(create_db_input).send().await?;
+        Ok(convert_to_namespace(namespace))
+    }
+
+    // ...other functions
+}
+```
+
+Please note that this function belongs to the `GlueCatalog` struct that implements the `Catalog` trait as the Python function was a method in a class.
+
+Moreover, the GlueCatalogConfig is assumed to be a struct that contains a catalog id. If this assumption is incorrect, this line of code should be changed accordingly. Also, please replace the content inside "create_database.." builder function with what's exactly required in your case. It's just an example. 
+
+The error handling mechanism might be slightly different in Rust compared to Python, so we just return the error if any occurs. The error is wrapped in a Result in Rust, which needs to be unwrapped in order to use the underlying functionality, thus creating an additional error check mechanism.

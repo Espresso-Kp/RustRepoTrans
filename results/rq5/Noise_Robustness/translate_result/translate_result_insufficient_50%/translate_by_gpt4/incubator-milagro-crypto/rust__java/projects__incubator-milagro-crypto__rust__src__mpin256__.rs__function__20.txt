@@ -1,0 +1,467 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_1(int sha,int date,byte[] CLIENT_ID,RAND rng,byte[] X,int pin,byte[] TOKEN,byte[] SEC,byte[] xID,byte[] xCID,byte[] PERMIT)
+	{
+		BIG r=new BIG(ROM.CURVE_Order);
+		BIG x;
+		if (rng!=null)
+		{
+			x=BIG.randomnum(r,rng);
+			//if (ROM.AES_S>0)
+			//{
+			//	x.mod2m(2*ROM.AES_S);
+			//}
+			x.toBytes(X);
+		}
+		else
+		{
+			x=BIG.fromBytes(X);
+		}
+		ECP P,T,W;
+		BIG px;
+//		byte[] t=new byte[EFS];
+
+		byte[] h=hashit(sha,0,CLIENT_ID,EFS);
+		P=ECP.mapit(h);
+	
+		T=ECP.fromBytes(TOKEN);
+		if (T.is_infinity()) return INVALID_POINT;
+
+		pin%=MAXPIN;
+		W=P.pinmul(pin,PBLEN);
+		T.add(W);
+		if (date!=0)
+		{
+			W=ECP.fromBytes(PERMIT);
+			if (W.is_infinity()) return INVALID_POINT;
+			T.add(W);
+			h=hashit(sha,date,h,EFS);
+			W=ECP.mapit(h);
+			if (xID!=null)
+			{
+				P=PAIR256.G1mul(P,x);
+				P.toBytes(xID,false);
+				W=PAIR256.G1mul(W,x);
+				P.add(W); //P.affine();
+			}
+			else
+			{
+				P.add(W); //P.affine();
+				P=PAIR256.G1mul(P,x);
+			}
+			if (xCID!=null) P.toBytes(xCID,false);
+		}
+		else
+		{
+			if (xID!=null)
+			{
+				P=PAIR256.G1mul(P,x);
+				P.toBytes(xID,false);
+			}
+		}
+
+		//T.affine();
+		T.toBytes(SEC,false);
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn pinmul(&self, e: i32, bts: i32) -> ECP {
+        if CURVETYPE == CurveType::Montgomery {
+            return self.mul(&mut Big::new_int(e as isize));
+        } else {
+            let mut R0 = ECP::new();
+            let mut R1 = self.clone();
+
+            for i in (0..bts).rev() {
+                let b = ((e >> i) & 1) as isize;
+                let mut P = R1.clone();
+                P.add(&R0);
+                R0.cswap(&mut R1, b);
+                R1 = P.clone();
+                R0.dbl();
+                R0.cswap(&mut R1, b);
+            }
+            let mut P = R0.clone();
+            P.affine();
+            P
+        }
+    }
+pub fn to_bytes(&self, b: &mut [u8]) {
+        self.to_byte_array(b, 0)
+    }
+pub fn to_bytes(&self, b: &mut [u8], compress: bool) {
+        let mb = big::MODBYTES as usize;
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mut W = self.clone();
+
+        W.affine();
+        W.x.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 1] = t[i]
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            b[0] = 0x06;
+            return;
+        }
+
+        if compress {
+            b[0] = 0x02;
+            if W.y.redc().parity() == 1 {
+                b[0] = 0x03
+            }
+            return;
+        }
+
+        b[0] = 0x04;
+
+        W.y.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + mb + 1] = t[i]
+        }
+    }
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+pub const INVALID_POINT: isize = -14;
+pub const MAXPIN: i32 = 10000;
+pub const PBLEN: i32 = 14;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let mut sx: Big;
+
+    if let Some(rd) = rng {
+        sx = Big::randomnum(&r, rd);
+        sx.to_bytes(x);
+    } else {
+        sx = Big::from_bytes(x);
+    }
+
+    const RM: usize = big::MODBYTES as usize;
+    let mut h: [u8; RM] = [0; RM];
+
+    hashit(sha, 0, &client_id, &mut h);
+    let mut P = ECP::mapit(&h);
+
+    let mut T = ECP::from_bytes(&token);
+    if T.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut W = P.pinmul((pin as i32) % MAXPIN, PBLEN);
+    T.add(&mut W);
+    if date != 0 {
+        if let Some(rpermit) = permit {
+            W = ECP::from_bytes(&rpermit);
+        }
+        if W.is_infinity() {
+            return INVALID_POINT;
+        }
+        T.add(&mut W);
+        let mut h2: [u8; RM] = [0; RM];
+        hashit(sha, date, &h, &mut h2);
+        W = ECP::mapit(&h2);
+        if let Some(mut rxid) = xid {
+            P = pair256::g1mul(&mut P, &mut sx);
+            P.to_bytes(&mut rxid, false);
+            W = pair256::g1mul(&mut W, &mut sx);
+            P.add(&mut W);
+        } else {
+            P.add(&mut W);
+            P = pair256::g1mul(&mut P, &mut sx);
+        }
+        if let Some(mut rxcid) = xcid {
+            P.to_bytes(&mut rxcid, false)
+        }
+    } else {
+        if let Some(mut rxid) = xid {
+            P = pair256::g1mul(&mut P, &mut sx);
+            P.to_bytes(&mut rxid, false);
+        }
+    }
+
+    T.to_bytes(sec, false);
+    return 0;
+}
+</function>
+<translated function>
+Based on your supplied Java function, Rust function signature, related variables, functions, data type declarations, and dependencies, here's a corresponding Rust function:
+
+```rust
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+    let mut x_big;
+    match rng {
+        Some(rng) => {
+            x_big = Big::randomnum(&r, rng);
+            x_big.to_byte_array(x, 0);
+        }
+        None => {
+            x_big = Big::from_byte_array(x, 0);
+        }
+    }
+    let client_hash = hash256::hashit(sha, 0, client_id, None);
+    let mut p = ECP::mapit(&client_hash);
+    let mut t = ECP::frombytes(&token);
+    
+    if t.is_infinity() {
+        return INVALID_POINT;
+    }
+    
+    let pin_new = (pin % MAXPIN) as i32;
+    let mut w = p.pinmul(pin_new, PBLEN);
+    t.add(&w);
+    
+    if date != 0 {
+        match permit {
+            Some(permit) => {
+                w = ECP::frombytes(&permit);
+                if w.is_infinity() {
+                    return INVALID_POINT;
+                }
+                t.add(&w);
+                let permit_hash = hash256::hashit(sha, date, &client_hash, None);
+                w = ECP::mapit(&permit_hash);
+                if let Some(xid) = xid {
+                    p = pair256::g1mul(&p, &x_big);
+                    p.to_byte_array(xid, false);
+                    w = pair256::g1mul(&w, &x_big);
+                    p.add(&w);
+                } else {
+                    p.add(&w);
+                    p = pair256::g1mul(&p, &x_big);
+                }
+                if let Some(xcid) = xcid {
+                    p.to_byte_array(xcid, false);
+                }
+            }
+            None => {}
+        }
+    } else {
+        if let Some(xid) = xid {
+            p = pair256::g1mul(&p, &x_big);
+            p.to_byte_array(xid, false);
+        }
+    }
+    t.to_byte_array(sec, false);
+    return 0;
+}
+```
+Please note that since the Java version uses a function `hashit`, I replaced it with `hash256::hashit` from `hash256` crate in Rust version presuming `hash256` create contains the same functions. This function should have the same behavior as Java's but you might need to update it based on your specific environment and needs. If such a function does not exist in your Rust environment, you will need to define it. Check for similar transformations throughout the code.
+</translated function>Based on your supplied Java function, Rust function signature, related variables, functions, data type declarations, and dependencies, here's a corresponding Rust function:
+
+```rust
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+    let mut x_big;
+    match rng {
+        Some(rng) => {
+            x_big = Big::randomnum(&r, rng);
+            x_big.to_byte_array(x, 0);
+        }
+        None => {
+            x_big = Big::from_byte_array(x, 0);
+        }
+    }
+    let client_hash = hash256::hashit(sha, 0, client_id, None);
+    let mut p = ECP::mapit(&client_hash);
+    let mut t = ECP::frombytes(&token);
+    
+    if t.is_infinity() {
+        return INVALID_POINT;
+    }
+    
+    let pin_new = (pin % MAXPIN) as i32;
+    let mut w = p.pinmul(pin_new, PBLEN);
+    t.add(&w);
+    
+    if date != 0 {
+        match permit {
+            Some(permit) => {
+                w = ECP::frombytes(&permit);
+                if w.is_infinity() {
+                    return INVALID_POINT;
+                }
+                t.add(&w);
+                let permit_hash = hash256::hashit(sha, date, &client_hash, None);
+                w = ECP::mapit(&permit_hash);
+                if let Some(xid) = xid {
+                    p = pair256::g1mul(&p, &x_big);
+                    p.to_byte_array(xid, false);
+                    w = pair256::g1mul(&w, &x_big);
+                    p.add(&w);
+                } else {
+                    p.add(&w);
+                    p = pair256::g1mul(&p, &x_big);
+                }
+                if let Some(xcid) = xcid {
+                    p.to_byte_array(xcid, false);
+                }
+            }
+            None => {}
+        }
+    } else {
+        if let Some(xid) = xid {
+            p = pair256::g1mul(&p, &x_big);
+            p.to_byte_array(xid, false);
+        }
+    }
+    t.to_byte_array(sec, false);
+    return 0;
+}
+```
+Please note that since the Java version uses a function `hashit`, I replaced it with `hash256::hashit` from `hash256` crate in Rust version presuming `hash256` create contains the same functions. This function should have the same behavior as Java's but you might need to update it based on your specific environment and needs. If such a function does not exist in your Rust environment, you will need to define it. Check for similar transformations throughout the code.

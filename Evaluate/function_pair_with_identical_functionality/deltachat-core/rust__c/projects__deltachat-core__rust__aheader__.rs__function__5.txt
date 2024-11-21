@@ -1,0 +1,127 @@
+<path>
+projects/deltachat-core/rust/aheader.rs
+</path>
+<function>
+    fn from_str(s: &str) -> Result<Self> {
+        let mut attributes: BTreeMap<String, String> = s
+            .split(';')
+            .filter_map(|a| {
+                let attribute: Vec<&str> = a.trim().splitn(2, '=').collect();
+                match &attribute[..] {
+                    [key, value] => Some((key.trim().to_string(), value.trim().to_string())),
+                    _ => None,
+                }
+            })
+            .collect();
+
+        let addr = match attributes.remove("addr") {
+            Some(addr) => addr,
+            None => bail!("Autocrypt header has no addr"),
+        };
+        let public_key: SignedPublicKey = attributes
+            .remove("keydata")
+            .context("keydata attribute is not found")
+            .and_then(|raw| {
+                SignedPublicKey::from_base64(&raw).context("autocrypt key cannot be decoded")
+            })
+            .and_then(|key| {
+                key.verify()
+                    .and(Ok(key))
+                    .context("autocrypt key cannot be verified")
+            })?;
+
+        let prefer_encrypt = attributes
+            .remove("prefer-encrypt")
+            .and_then(|raw| raw.parse().ok())
+            .unwrap_or_default();
+
+        // Autocrypt-Level0: unknown attributes starting with an underscore can be safely ignored
+        // Autocrypt-Level0: unknown attribute, treat the header as invalid
+        if attributes.keys().any(|k| !k.starts_with('_')) {
+            bail!("Unknown Autocrypt attribute found");
+        }
+
+        Ok(Aheader {
+            addr,
+            public_key,
+            prefer_encrypt,
+        })
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_aheader.c
+</path>
+<function>
+int dc_aheader_set_from_string(dc_aheader_t* aheader, const char* header_str__)
+{
+	/* according to RFC 5322 (Internet Message Format), the given string may contain `\r\n` before any whitespace.
+	we can ignore this issue as
+	(a) no key or value is expected to contain spaces,
+	(b) for the key, non-base64-characters are ignored and
+	(c) for parsing, we ignore `\r\n` as well as tabs for spaces */
+	#define AHEADER_WS "\t\r\n "
+	char*   header_str = NULL;
+	char*   p = NULL;
+	char*   beg_attr_name = NULL;
+	char*   after_attr_name = NULL;
+	char*   beg_attr_value = NULL;
+	int     success = 0;
+
+	dc_aheader_empty(aheader);
+
+	if (aheader==NULL || header_str__==NULL) {
+		goto cleanup;
+	}
+
+	aheader->prefer_encrypt = DC_PE_NOPREFERENCE; /* value to use if the prefer-encrypted header is missing */
+
+	header_str = dc_strdup(header_str__);
+	p = header_str;
+	while (*p)
+	{
+		p += strspn(p, AHEADER_WS "=;"); /* forward to first attribute name beginning */
+		beg_attr_name = p;
+		beg_attr_value = NULL;
+		p += strcspn(p, AHEADER_WS "=;"); /* get end of attribute name (an attribute may have no value) */
+		if (p!=beg_attr_name)
+		{
+			/* attribute found */
+			after_attr_name = p;
+			p += strspn(p, AHEADER_WS); /* skip whitespace between attribute name and possible `=` */
+			if (*p=='=')
+			{
+				p += strspn(p, AHEADER_WS "="); /* skip spaces and equal signs */
+
+				/* read unquoted attribute value until the first semicolon */
+				beg_attr_value = p;
+				p += strcspn(p, ";");
+				if (*p!='\0') {
+					*p = '\0';
+					p++;
+				}
+				dc_trim(beg_attr_value);
+			}
+			else
+			{
+				p += strspn(p, AHEADER_WS ";");
+			}
+			*after_attr_name = '\0';
+			if (!add_attribute(aheader, beg_attr_name, beg_attr_value)) {
+				goto cleanup; /* a bad attribute makes the whole header invalid */
+			}
+		}
+	}
+
+	/* all needed data found? */
+	if (aheader->addr && aheader->public_key->binary) {
+		success = 1;
+	}
+
+cleanup:
+	free(header_str);
+	if (!success) { dc_aheader_empty(aheader); }
+	return success;
+}
+</function>

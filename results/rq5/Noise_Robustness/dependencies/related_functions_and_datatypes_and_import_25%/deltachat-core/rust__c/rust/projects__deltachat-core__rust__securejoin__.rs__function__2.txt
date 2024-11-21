@@ -1,0 +1,136 @@
+pub async fn lookup(
+    context: &Context,
+    namespace: Namespace,
+    chat: Option<ChatId>,
+) -> Result<Option<String>> {
+    let token = match chat {
+        Some(chat_id) => {
+            context
+                .sql
+                .query_get_value(
+                    "SELECT token FROM tokens WHERE namespc=? AND foreign_id=? ORDER BY timestamp DESC LIMIT 1;",
+                    (namespace, chat_id),
+                )
+                .await?
+        }
+        // foreign_id is declared as `INTEGER DEFAULT 0` in the schema.
+        None => {
+            context
+                .sql
+                .query_get_value(
+                    "SELECT token FROM tokens WHERE namespc=? AND foreign_id=0 ORDER BY timestamp DESC LIMIT 1;",
+                    (namespace,),
+                )
+                .await?
+        }
+    };
+    Ok(token)
+}
+pub async fn get_config(&self, key: Config) -> Result<Option<String>> {
+        let env_key = format!("DELTACHAT_{}", key.as_ref().to_uppercase());
+        if let Ok(value) = env::var(env_key) {
+            return Ok(Some(value));
+        }
+
+        let value = match key {
+            Config::Selfavatar => {
+                let rel_path = self.sql.get_raw_config(key.as_ref()).await?;
+                rel_path.map(|p| {
+                    get_abs_path(self, Path::new(&p))
+                        .to_string_lossy()
+                        .into_owned()
+                })
+            }
+            Config::SysVersion => Some((*DC_VERSION_STR).clone()),
+            Config::SysMsgsizeMaxRecommended => Some(format!("{RECOMMENDED_FILE_SIZE}")),
+            Config::SysConfigKeys => Some(get_config_keys_string()),
+            _ => self.sql.get_raw_config(key.as_ref()).await?,
+        };
+
+        if value.is_some() {
+            return Ok(value);
+        }
+
+        // Default values
+        match key {
+            Config::ConfiguredInboxFolder => Ok(Some("INBOX".to_owned())),
+            _ => Ok(key.get_str("default").map(|s| s.to_string())),
+        }
+    }
+pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+pub(crate) async fn sync_qr_code_tokens(&self, chat_id: Option<ChatId>) -> Result<()> {
+        if !self.get_config_bool(Config::SyncMsgs).await? {
+            return Ok(());
+        }
+
+        if let (Some(invitenumber), Some(auth)) = (
+            token::lookup(self, Namespace::InviteNumber, chat_id).await?,
+            token::lookup(self, Namespace::Auth, chat_id).await?,
+        ) {
+            let grpid = if let Some(chat_id) = chat_id {
+                let chat = Chat::load_from_db(self, chat_id).await?;
+                if !chat.is_promoted() {
+                    info!(
+                        self,
+                        "group '{}' not yet promoted, do not sync tokens yet.", chat.grpid
+                    );
+                    return Ok(());
+                }
+                Some(chat.grpid)
+            } else {
+                None
+            };
+            self.add_sync_item(SyncData::AddQrToken(QrTokenData {
+                invitenumber,
+                auth,
+                grpid,
+            }))
+            .await?;
+        }
+        Ok(())
+    }
+------
+
+
+
+use anyhow::{bail, Context as _, Error, Result};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use crate::aheader::EncryptPreference;
+use crate::chat::{self, Chat, ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::e2ee::ensure_secret_key_exists;
+use crate::events::EventType;
+use crate::headerdef::HeaderDef;
+use crate::key::{load_self_public_key, DcKey, Fingerprint};
+use crate::message::{Message, Viewtype};
+use crate::mimeparser::{MimeMessage, SystemMessage};
+use crate::param::Param;
+use crate::peerstate::Peerstate;
+use crate::qr::check_qr;
+use crate::securejoin::bob::JoinerProgress;
+use crate::stock_str;
+use crate::sync::Sync::*;
+use crate::token;
+use crate::tools::time;
+use bobstate::BobState;
+use qrinvite::QrInvite;
+use crate::token::Namespace;
+use deltachat_contact_tools::{ContactAddress, EmailAddress};
+use super::*;
+use crate::chat::{remove_contact_from_chat, CantSendReason};
+use crate::chatlist::Chatlist;
+use crate::constants::{self, Chattype};
+use crate::imex::{imex, ImexMode};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::{self, chat_protection_enabled};
+use crate::test_utils::get_chat_msg;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+use std::collections::HashSet;
+use std::time::Duration;

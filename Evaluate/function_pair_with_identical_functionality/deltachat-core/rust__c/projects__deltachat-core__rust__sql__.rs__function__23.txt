@@ -1,0 +1,61 @@
+<path>
+projects/deltachat-core/rust/sql.rs
+</path>
+<function>
+    pub async fn table_exists(&self, name: &str) -> Result<bool> {
+        self.call(move |conn| {
+            let mut exists = false;
+            conn.pragma(None, "table_info", name.to_string(), |_row| {
+                // will only be executed if the info was found
+                exists = true;
+                Ok(())
+            })?;
+
+            Ok(exists)
+        })
+        .await
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_sqlite3.c
+</path>
+<function>
+int dc_sqlite3_table_exists(dc_sqlite3_t* sql, const char* name)
+{
+	int           ret = 0;
+	char*         querystr = NULL;
+	sqlite3_stmt* stmt = NULL;
+	int           sqlState = 0;
+
+	if ((querystr=sqlite3_mprintf("PRAGMA table_info(%s)", name))==NULL) { /* this statement cannot be used with binded variables */
+		dc_log_error(sql->context, 0, "dc_sqlite3_table_exists_(): Out of memory.");
+		goto cleanup;
+	}
+
+	if ((stmt=dc_sqlite3_prepare(sql, querystr))==NULL) {
+		goto cleanup;
+	}
+
+	sqlState = sqlite3_step(stmt);
+	if (sqlState==SQLITE_ROW) {
+		ret = 1; /* the table exists. Other states are SQLITE_DONE or SQLITE_ERROR in both cases we return 0. */
+	}
+
+	/* success - fall through to free allocated objects */
+	;
+
+	/* error/cleanup */
+cleanup:
+	if (stmt) {
+		sqlite3_finalize(stmt);
+	}
+
+	if (querystr) {
+		sqlite3_free(querystr);
+	}
+
+	return ret;
+}
+</function>

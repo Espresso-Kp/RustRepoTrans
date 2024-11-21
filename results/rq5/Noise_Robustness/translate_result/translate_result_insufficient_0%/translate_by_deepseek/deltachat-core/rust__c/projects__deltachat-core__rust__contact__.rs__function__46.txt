@@ -1,0 +1,167 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+* Same as dc_contact_is_verified() but allows speeding up things
+ * by adding the peerstate belonging to the contact.
+ * If you do not have the peerstate available, it is loaded automatically.
+ *
+ * @private @memberof dc_context_t
+ */
+int dc_contact_is_verified_ex(dc_contact_t* contact, const dc_apeerstate_t* peerstate)
+{
+	int              contact_verified = DC_NOT_VERIFIED;
+	dc_apeerstate_t* peerstate_to_delete = NULL;
+
+	if (contact==NULL || contact->magic!=DC_CONTACT_MAGIC) {
+		goto cleanup;
+	}
+
+	if (contact->id==DC_CONTACT_ID_SELF) {
+		contact_verified = DC_BIDIRECT_VERIFIED;
+		goto cleanup; // we're always sort of secured-verified as we could verify the key on this device any time with the key on this device
+	}
+
+	if (peerstate==NULL) {
+		peerstate_to_delete = dc_apeerstate_new(contact->context);
+		if (!dc_apeerstate_load_by_addr(peerstate_to_delete, contact->context->sql, contact->addr)) {
+			goto cleanup;
+		}
+		peerstate = peerstate_to_delete;
+	}
+
+	contact_verified = peerstate->verified_key? DC_BIDIRECT_VERIFIED : 0;
+
+cleanup:
+	dc_apeerstate_unref(peerstate_to_delete);
+	return contact_verified;
+}
+</c function>
+<rust function signature>
+pub async fn is_verified(&self, context: &Context) -> Result<bool> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp::{min, Reverse};
+use std::collections::BinaryHeap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use base64::Engine as _;
+use deltachat_contact_tools::may_be_valid_addr;
+use deltachat_contact_tools::{
+    self as contact_tools, addr_cmp, addr_normalize, sanitize_name_and_addr, strip_rtlo_characters,
+    ContactAddress, VcardContact,
+};
+use deltachat_derive::{FromSql, ToSql};
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use tokio::task;
+use tokio::time::{timeout, Duration};
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::blob::BlobObject;
+use crate::chat::{ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{Blocked, Chattype, DC_GCL_ADD_SELF, DC_GCL_VERIFIED_ONLY};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{load_self_public_key, DcKey, SignedPublicKey};
+use crate::log::LogExt;
+use crate::login_param::LoginParam;
+use crate::message::MessageState;
+use crate::mimeparser::AvatarAction;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::sql::{self, params_iter};
+use crate::sync::{self, Sync::*};
+use crate::tools::{
+    duration_to_str, get_abs_path, improve_single_line_input, smeared_time, time, SystemTime,
+};
+use crate::{chat, chatlist_events, stock_str};
+use deltachat_contact_tools::{may_be_valid_addr, normalize_name};
+use super::*;
+use crate::chat::{get_chat_contacts, send_text_msg, Chat};
+use crate::chatlist::Chatlist;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{self, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn is_verified(&self, context: &Context) -> Result<bool> {
+        // We're always sort of secured-verified as we could verify the key on this device any time with the key
+        // on this device
+        if self.id == ContactId::SELF {
+            return Ok(true);
+        }
+
+        let Some(peerstate) = Peerstate::from_addr(context, &self.addr).await? else {
+            return Ok(false);
+        };
+
+        let forward_verified = peerstate.is_using_verified_key();
+        let backward_verified = peerstate.is_backward_verified(context).await?;
+        Ok(forward_verified && backward_verified)
+    }
+</function>
+<translated function>
+ ```rust
+pub async fn is_verified(&self, context: &Context) -> Result<bool> {
+    let contact_verified = DC_NOT_VERIFIED;
+    let peerstate_to_delete: Option<dc_apeerstate_t> = None;
+
+    if contact.is_null() || contact.magic() != DC_CONTACT_MAGIC {
+        return Ok(false);
+    }
+
+    if contact.id() == DC_CONTACT_ID_SELF {
+        return Ok(true);
+    }
+
+    let peerstate = if peerstate.is_null() {
+        let peerstate_to_delete_inner = dc_apeerstate_new(contact.context()).await?;
+        if !dc_apeerstate_load_by_addr(peerstate_to_delete_inner, contact.context().sql(), contact.addr()).await? {
+            return Ok(false);
+        }
+        peerstate_to_delete_inner
+    } else {
+        peerstate
+    };
+
+    Ok(peerstate.verified_key())
+}
+```</translated function> ```rust
+pub async fn is_verified(&self, context: &Context) -> Result<bool> {
+    let contact_verified = DC_NOT_VERIFIED;
+    let peerstate_to_delete: Option<dc_apeerstate_t> = None;
+
+    if contact.is_null() || contact.magic() != DC_CONTACT_MAGIC {
+        return Ok(false);
+    }
+
+    if contact.id() == DC_CONTACT_ID_SELF {
+        return Ok(true);
+    }
+
+    let peerstate = if peerstate.is_null() {
+        let peerstate_to_delete_inner = dc_apeerstate_new(contact.context()).await?;
+        if !dc_apeerstate_load_by_addr(peerstate_to_delete_inner, contact.context().sql(), contact.addr()).await? {
+            return Ok(false);
+        }
+        peerstate_to_delete_inner
+    } else {
+        peerstate
+    };
+
+    Ok(peerstate.verified_key())
+}
+```

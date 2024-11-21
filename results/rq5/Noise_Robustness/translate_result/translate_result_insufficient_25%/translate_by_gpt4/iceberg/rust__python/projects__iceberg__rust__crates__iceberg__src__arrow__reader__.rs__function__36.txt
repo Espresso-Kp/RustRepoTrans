@@ -1,0 +1,179 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def __new__(cls, left: BooleanExpression, right: BooleanExpression) -> BooleanExpression:  # type: ignore
+
+        if left is AlwaysTrue() or right is AlwaysTrue():
+            return AlwaysTrue()
+        elif left is AlwaysFalse():
+            return right
+        elif right is AlwaysFalse():
+            return left
+        else:
+            obj = super().__new__(cls)
+            obj.left = left
+            obj.right = right
+            return obj
+</python function>
+<rust function signature>
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+type PredicateResult =
+    dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, ArrowError> + Send + 'static;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use crate::error::Result;
+use arrow_arith::boolean::{and, is_not_null, is_null, not, or};
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
+use arrow_ord::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
+use arrow_schema::{ArrowError, DataType, SchemaRef as ArrowSchemaRef};
+use async_stream::try_stream;
+use bytes::Bytes;
+use fnv::FnvHashSet;
+use futures::future::BoxFuture;
+use futures::stream::StreamExt;
+use futures::{try_join, TryFutureExt};
+use parquet::arrow::arrow_reader::{ArrowPredicateFn, RowFilter};
+use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, PARQUET_FIELD_ID_META_KEY};
+use parquet::file::metadata::ParquetMetaData;
+use parquet::schema::types::{SchemaDescriptor, Type as ParquetType};
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::str::FromStr;
+use std::sync::Arc;
+use crate::arrow::{arrow_schema_to_schema, get_arrow_datum};
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::io::{FileIO, FileMetadata, FileRead};
+use crate::scan::{ArrowRecordBatchStream, FileScanTaskStream};
+use crate::spec::{Datum, SchemaRef};
+use crate::{Error, ErrorKind};
+use crate::arrow::reader::CollectFieldIdVisitor;
+use crate::expr::visitors::bound_predicate_visitor::visit;
+use crate::expr::{Bind, Reference};
+use crate::spec::{NestedField, PrimitiveType, Schema, SchemaRef, Type};
+use std::collections::HashSet;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> {
+        Ok(Box::new(move |batch| {
+            let left = lhs(batch.clone())?;
+            let right = rhs(batch)?;
+            or(&left, &right)
+        }))
+    }
+</function>
+<translated function>
+There is no direct equivalent in Rust for the `__new__` method in Python, but for the logic you have presented, here is a possible Rust equivalent method:
+
+<translated Rust function>
+```rust
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> {
+    if lhs() == true || rhs() == true {
+        return Ok(Box::new(|| Ok(BooleanArray::from(vec![true]))));
+    }
+    if lhs() == false {
+        let right_result = match rhs() {
+            Ok(_) => rhs,
+            Err(err) => return Err(ArrowError::from(err)),
+        };
+        return Ok(right_result);
+    }
+    if rhs() == false {
+        let left_result = match lhs() {
+            Ok(_) => lhs,
+            Err(err) => return Err(ArrowError::from(err)),
+        };
+        return Ok(left_result);
+    }
+    
+    match (lhs(), rhs()) {
+        (Ok(left), Ok(right)) => {
+            let result = Box::new(move || {
+                let result = match (left.next(), right.next()) {
+                    (Some(left_batch), Some(right_batch)) => ok_or(left_batch?, right_batch?),
+                    _ => Ok(BooleanArray::from(vec![false])),
+                };
+                result
+            });
+
+            Ok(result)
+        }
+        _ => Err(ArrowError::ComputeError(String::from("Error computing 'or' function"))),
+    }
+}
+```
+</translated Rust function>
+
+Note: This translation assumes that the `AlwaysTrue` function in Python corresponds to a `BooleanArray` filled with true in Rust and that the `AlwaysFalse` function corresponds to a `BooleanArray` filled with false. Also please note that Rust does not have a direct equivalent for Python's `is` keyword, this is why we have to call the functions inside the `if` conditions. Also this translation assumes that `ok_or` is a function equivalent to the or operation which expects two `RecordBatch`.
+
+Please modify as per your needs as the translation might not be 100% accurate due to lack of some context.</translated function>There is no direct equivalent in Rust for the `__new__` method in Python, but for the logic you have presented, here is a possible Rust equivalent method:
+
+<translated Rust function>
+```rust
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> {
+    if lhs() == true || rhs() == true {
+        return Ok(Box::new(|| Ok(BooleanArray::from(vec![true]))));
+    }
+    if lhs() == false {
+        let right_result = match rhs() {
+            Ok(_) => rhs,
+            Err(err) => return Err(ArrowError::from(err)),
+        };
+        return Ok(right_result);
+    }
+    if rhs() == false {
+        let left_result = match lhs() {
+            Ok(_) => lhs,
+            Err(err) => return Err(ArrowError::from(err)),
+        };
+        return Ok(left_result);
+    }
+    
+    match (lhs(), rhs()) {
+        (Ok(left), Ok(right)) => {
+            let result = Box::new(move || {
+                let result = match (left.next(), right.next()) {
+                    (Some(left_batch), Some(right_batch)) => ok_or(left_batch?, right_batch?),
+                    _ => Ok(BooleanArray::from(vec![false])),
+                };
+                result
+            });
+
+            Ok(result)
+        }
+        _ => Err(ArrowError::ComputeError(String::from("Error computing 'or' function"))),
+    }
+}
+```
+</translated Rust function>
+
+Note: This translation assumes that the `AlwaysTrue` function in Python corresponds to a `BooleanArray` filled with true in Rust and that the `AlwaysFalse` function corresponds to a `BooleanArray` filled with false. Also please note that Rust does not have a direct equivalent for Python's `is` keyword, this is why we have to call the functions inside the `if` conditions. Also this translation assumes that `ok_or` is a function equivalent to the or operation which expects two `RecordBatch`.
+
+Please modify as per your needs as the translation might not be 100% accurate due to lack of some context.

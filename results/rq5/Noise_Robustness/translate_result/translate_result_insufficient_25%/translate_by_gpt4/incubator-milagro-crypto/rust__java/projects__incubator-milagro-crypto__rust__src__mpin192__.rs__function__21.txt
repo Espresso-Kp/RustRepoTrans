@@ -1,0 +1,182 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static void SERVER_1(int sha,int date,byte[] CID,byte[] HID,byte[] HTID)
+	{
+		byte[] h=hashit(sha,0,CID,EFS);
+		ECP R,P=ECP.mapit(h);
+
+		P.toBytes(HID,false);   // new
+		if (date!=0)
+		{
+	//		if (HID!=null) P.toBytes(HID,false);
+			h=hashit(sha,date,h,EFS);
+			R=ECP.mapit(h);
+			P.add(R); //P.affine();
+			P.toBytes(HTID,false);
+		}
+	//	else P.toBytes(HID,false);
+	}
+</java function>
+<rust function signature>
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn to_bytes(&self, b: &mut [u8], compress: bool) {
+        let mb = big::MODBYTES as usize;
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mut W = self.clone();
+
+        W.affine();
+        W.x.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 1] = t[i]
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            b[0] = 0x06;
+            return;
+        }
+
+        if compress {
+            b[0] = 0x02;
+            if W.y.redc().parity() == 1 {
+                b[0] = 0x03
+            }
+            return;
+        }
+
+        b[0] = 0x04;
+
+        W.y.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + mb + 1] = t[i]
+        }
+    }
+pub const MODBYTES: usize = 32;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    const RM: usize = big::MODBYTES as usize;
+    let mut h: [u8; RM] = [0; RM];
+
+    hashit(sha, 0, cid, &mut h);
+
+    let mut P = ECP::mapit(&h);
+
+    P.to_bytes(hid, false);
+    if date != 0 {
+        let mut h2: [u8; RM] = [0; RM];
+        hashit(sha, date, &h, &mut h2);
+        let mut R = ECP::mapit(&h2);
+        P.add(&mut R);
+        if let Some(rhtid) = htid {
+            P.to_bytes(rhtid, false);
+        }
+    }
+}
+</function>
+<translated function>
+Here is the corresponding Rust function for your provided Java function. Please note the liberal use of `unwrap()` which is okay for demonstration, but for production code error handling needs to be done appropriately:
+
+```Rust
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    let efs = cid.len();
+    let mut h = hashit(sha, 0, cid, efs).unwrap();
+    
+    let mut p = ECP::mapit(&h);
+    
+    let mut r: ECP;
+    p.to_bytes(hid, false);
+
+    if date != 0 {
+        h = hashit(sha, date, &h, efs).unwrap();
+        r = ECP::mapit(&h);
+        p.add(&r);
+        if let Some(htid_ref) = htid {
+            p.to_bytes(htid_ref, false);
+        }
+    }
+}
+
+fn hashit(sha: usize, a: usize, b: &[u8], efs: usize) -> Option<Vec<u8>> {
+    let mut r = [0u8; big::MODBYTES];
+    
+    match sha {
+        32 => {
+            let mut sh = HASH256::new();
+            sh.process_array(b);
+            if a > 0 {sh.process_num(a as i32);}
+            sh.hash(&mut r);
+        }
+        _ => return None,
+    }
+    
+    Some(r.to_vec())
+}
+```
+The `hashit()` function is defined as it seems to be a custom function within your code base. Also, `EFS` is undefined in your code snippet; I assumed it's the length of `cid`. Please modify accordingly as per your needs.</translated function>Here is the corresponding Rust function for your provided Java function. Please note the liberal use of `unwrap()` which is okay for demonstration, but for production code error handling needs to be done appropriately:
+
+```Rust
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    let efs = cid.len();
+    let mut h = hashit(sha, 0, cid, efs).unwrap();
+    
+    let mut p = ECP::mapit(&h);
+    
+    let mut r: ECP;
+    p.to_bytes(hid, false);
+
+    if date != 0 {
+        h = hashit(sha, date, &h, efs).unwrap();
+        r = ECP::mapit(&h);
+        p.add(&r);
+        if let Some(htid_ref) = htid {
+            p.to_bytes(htid_ref, false);
+        }
+    }
+}
+
+fn hashit(sha: usize, a: usize, b: &[u8], efs: usize) -> Option<Vec<u8>> {
+    let mut r = [0u8; big::MODBYTES];
+    
+    match sha {
+        32 => {
+            let mut sh = HASH256::new();
+            sh.process_array(b);
+            if a > 0 {sh.process_num(a as i32);}
+            sh.hash(&mut r);
+        }
+        _ => return None,
+    }
+    
+    Some(r.to_vec())
+}
+```
+The `hashit()` function is defined as it seems to be a custom function within your code base. Also, `EFS` is undefined in your code snippet; I assumed it's the length of `cid`. Please modify accordingly as per your needs.

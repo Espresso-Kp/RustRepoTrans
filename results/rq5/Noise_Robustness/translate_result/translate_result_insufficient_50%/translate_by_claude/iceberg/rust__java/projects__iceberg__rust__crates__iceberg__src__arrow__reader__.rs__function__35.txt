@@ -1,0 +1,169 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static Expression and(Expression left, Expression right) {
+    Preconditions.checkNotNull(left, "Left expression cannot be null.");
+    Preconditions.checkNotNull(right, "Right expression cannot be null.");
+    if (left == alwaysFalse() || right == alwaysFalse()) {
+      return alwaysFalse();
+    } else if (left == alwaysTrue()) {
+      return right;
+    } else if (right == alwaysTrue()) {
+      return left;
+    }
+    return new And(left, right);
+  }
+</java function>
+<rust function signature>
+fn and(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+struct PredicateConverter<'a> {
+    /// The Parquet schema descriptor.
+    pub parquet_schema: &'a SchemaDescriptor,
+    /// The map between field id and leaf column index in Parquet schema.
+    pub column_map: &'a HashMap<i32, usize>,
+    /// The required column indices in Parquet schema for the predicates.
+    pub column_indices: &'a Vec<usize>,
+}
+type PredicateResult =
+    dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, ArrowError> + Send + 'static;
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use crate::error::Result;
+use arrow_arith::boolean::{and, is_not_null, is_null, not, or};
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
+use arrow_ord::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
+use arrow_schema::{ArrowError, DataType, SchemaRef as ArrowSchemaRef};
+use async_stream::try_stream;
+use bytes::Bytes;
+use fnv::FnvHashSet;
+use futures::future::BoxFuture;
+use futures::stream::StreamExt;
+use futures::{try_join, TryFutureExt};
+use parquet::arrow::arrow_reader::{ArrowPredicateFn, RowFilter};
+use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, PARQUET_FIELD_ID_META_KEY};
+use parquet::file::metadata::ParquetMetaData;
+use parquet::schema::types::{SchemaDescriptor, Type as ParquetType};
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::str::FromStr;
+use std::sync::Arc;
+use crate::arrow::{arrow_schema_to_schema, get_arrow_datum};
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::io::{FileIO, FileMetadata, FileRead};
+use crate::scan::{ArrowRecordBatchStream, FileScanTaskStream};
+use crate::spec::{Datum, SchemaRef};
+use crate::{Error, ErrorKind};
+use crate::arrow::reader::CollectFieldIdVisitor;
+use crate::expr::visitors::bound_predicate_visitor::visit;
+use crate::expr::{Bind, Reference};
+use crate::spec::{NestedField, PrimitiveType, Schema, SchemaRef, Type};
+use std::collections::HashSet;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn and(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> {
+        Ok(Box::new(move |batch| {
+            let left = lhs(batch.clone())?;
+            let right = rhs(batch)?;
+            and(&left, &right)
+        }))
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+fn and(
+    &mut self,
+    mut lhs: Box<PredicateResult>,
+    mut rhs: Box<PredicateResult>,
+) -> Result<Box<PredicateResult>> {
+    // Rust doesn't have a direct equivalent to Preconditions.checkNotNull,
+    // but we can use assert! for similar functionality
+    assert!(lhs.is_some(), "Left expression cannot be null.");
+    assert!(rhs.is_some(), "Right expression cannot be null.");
+
+    // Define a closure for always_false
+    let always_false: Box<PredicateResult> = Box::new(|_| {
+        Ok(BooleanArray::from(vec![false]))
+    });
+
+    // Define a closure for always_true
+    let always_true: Box<PredicateResult> = Box::new(|_| {
+        Ok(BooleanArray::from(vec![true]))
+    });
+
+    if std::ptr::eq(&*lhs, &*always_false) || std::ptr::eq(&*rhs, &*always_false) {
+        Ok(always_false)
+    } else if std::ptr::eq(&*lhs, &*always_true) {
+        Ok(rhs)
+    } else if std::ptr::eq(&*rhs, &*always_true) {
+        Ok(lhs)
+    } else {
+        Ok(Box::new(move |batch: RecordBatch| {
+            let lhs_result = lhs(batch.clone())?;
+            let rhs_result = rhs(batch)?;
+            and(&lhs_result, &rhs_result)
+        }))
+    }
+}
+```
+
+This Rust implementation follows the provided function signature and attempts to match the logic of the Java function as closely as possible, while adhering to Rust idioms and using the provided dependencies. Note that some adjustments were made due to the differences between Java and Rust, such as handling null checks and implementing the `And` logic using a closure.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+fn and(
+    &mut self,
+    mut lhs: Box<PredicateResult>,
+    mut rhs: Box<PredicateResult>,
+) -> Result<Box<PredicateResult>> {
+    // Rust doesn't have a direct equivalent to Preconditions.checkNotNull,
+    // but we can use assert! for similar functionality
+    assert!(lhs.is_some(), "Left expression cannot be null.");
+    assert!(rhs.is_some(), "Right expression cannot be null.");
+
+    // Define a closure for always_false
+    let always_false: Box<PredicateResult> = Box::new(|_| {
+        Ok(BooleanArray::from(vec![false]))
+    });
+
+    // Define a closure for always_true
+    let always_true: Box<PredicateResult> = Box::new(|_| {
+        Ok(BooleanArray::from(vec![true]))
+    });
+
+    if std::ptr::eq(&*lhs, &*always_false) || std::ptr::eq(&*rhs, &*always_false) {
+        Ok(always_false)
+    } else if std::ptr::eq(&*lhs, &*always_true) {
+        Ok(rhs)
+    } else if std::ptr::eq(&*rhs, &*always_true) {
+        Ok(lhs)
+    } else {
+        Ok(Box::new(move |batch: RecordBatch| {
+            let lhs_result = lhs(batch.clone())?;
+            let rhs_result = rhs(batch)?;
+            and(&lhs_result, &rhs_result)
+        }))
+    }
+}
+```
+
+This Rust implementation follows the provided function signature and attempts to match the logic of the Java function as closely as possible, while adhering to Rust idioms and using the provided dependencies. Note that some adjustments were made due to the differences between Java and Rust, such as handling null checks and implementing the `And` logic using a closure.

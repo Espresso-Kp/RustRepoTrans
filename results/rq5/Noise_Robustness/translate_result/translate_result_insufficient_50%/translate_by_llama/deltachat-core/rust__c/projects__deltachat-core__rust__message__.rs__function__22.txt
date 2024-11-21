@@ -1,0 +1,284 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_msg_get_filemime(const dc_msg_t* msg)
+{
+	char* ret = NULL;
+	char* file = NULL;
+
+	if (msg==NULL || msg->magic!=DC_MSG_MAGIC) {
+		goto cleanup;
+	}
+
+	ret = dc_param_get(msg->param, DC_PARAM_MIMETYPE, NULL);
+	if (ret==NULL) {
+		file = dc_param_get(msg->param, DC_PARAM_FILE, NULL);
+		if (file==NULL) {
+			goto cleanup;
+		}
+		dc_msg_guess_msgtype_from_suffix(file, NULL, &ret);
+
+		if (ret==NULL) {
+			ret = dc_strdup("application/octet-stream");
+		}
+	}
+
+cleanup:
+	free(file);
+	return ret? ret : dc_strdup(NULL);
+}
+</c function>
+<rust function signature>
+pub fn get_filemime(&self) -> Option<String> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) fn guess_msgtype_from_suffix(path: &Path) -> Option<(Viewtype, &str)> {
+    let extension: &str = &path.extension()?.to_str()?.to_lowercase();
+    let info = match extension {
+        // before using viewtype other than Viewtype::File,
+        // make sure, all target UIs support that type in the context of the used viewer/player.
+        // if in doubt, it is better to default to Viewtype::File that passes handing to an external app.
+        // (cmp. <https://developer.android.com/guide/topics/media/media-formats>)
+        "3gp" => (Viewtype::Video, "video/3gpp"),
+        "aac" => (Viewtype::Audio, "audio/aac"),
+        "avi" => (Viewtype::Video, "video/x-msvideo"),
+        "avif" => (Viewtype::File, "image/avif"), // supported since Android 12 / iOS 16
+        "doc" => (Viewtype::File, "application/msword"),
+        "docx" => (
+            Viewtype::File,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+        "epub" => (Viewtype::File, "application/epub+zip"),
+        "flac" => (Viewtype::Audio, "audio/flac"),
+        "gif" => (Viewtype::Gif, "image/gif"),
+        "heic" => (Viewtype::File, "image/heic"), // supported since Android 10 / iOS 11
+        "heif" => (Viewtype::File, "image/heif"), // supported since Android 10 / iOS 11
+        "html" => (Viewtype::File, "text/html"),
+        "htm" => (Viewtype::File, "text/html"),
+        "ico" => (Viewtype::File, "image/vnd.microsoft.icon"),
+        "jar" => (Viewtype::File, "application/java-archive"),
+        "jpeg" => (Viewtype::Image, "image/jpeg"),
+        "jpe" => (Viewtype::Image, "image/jpeg"),
+        "jpg" => (Viewtype::Image, "image/jpeg"),
+        "json" => (Viewtype::File, "application/json"),
+        "mov" => (Viewtype::Video, "video/quicktime"),
+        "m4a" => (Viewtype::Audio, "audio/m4a"),
+        "mp3" => (Viewtype::Audio, "audio/mpeg"),
+        "mp4" => (Viewtype::Video, "video/mp4"),
+        "odp" => (
+            Viewtype::File,
+            "application/vnd.oasis.opendocument.presentation",
+        ),
+        "ods" => (
+            Viewtype::File,
+            "application/vnd.oasis.opendocument.spreadsheet",
+        ),
+        "odt" => (Viewtype::File, "application/vnd.oasis.opendocument.text"),
+        "oga" => (Viewtype::Audio, "audio/ogg"),
+        "ogg" => (Viewtype::Audio, "audio/ogg"),
+        "ogv" => (Viewtype::File, "video/ogg"),
+        "opus" => (Viewtype::File, "audio/ogg"), // supported since Android 10
+        "otf" => (Viewtype::File, "font/otf"),
+        "pdf" => (Viewtype::File, "application/pdf"),
+        "png" => (Viewtype::Image, "image/png"),
+        "ppt" => (Viewtype::File, "application/vnd.ms-powerpoint"),
+        "pptx" => (
+            Viewtype::File,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+        "rar" => (Viewtype::File, "application/vnd.rar"),
+        "rtf" => (Viewtype::File, "application/rtf"),
+        "spx" => (Viewtype::File, "audio/ogg"), // Ogg Speex Profile
+        "svg" => (Viewtype::File, "image/svg+xml"),
+        "tgs" => (Viewtype::Sticker, "application/x-tgsticker"),
+        "tiff" => (Viewtype::File, "image/tiff"),
+        "tif" => (Viewtype::File, "image/tiff"),
+        "ttf" => (Viewtype::File, "font/ttf"),
+        "txt" => (Viewtype::File, "text/plain"),
+        "vcard" => (Viewtype::Vcard, "text/vcard"),
+        "vcf" => (Viewtype::Vcard, "text/vcard"),
+        "wav" => (Viewtype::Audio, "audio/wav"),
+        "weba" => (Viewtype::File, "audio/webm"),
+        "webm" => (Viewtype::Video, "video/webm"),
+        "webp" => (Viewtype::Image, "image/webp"), // iOS via SDWebImage, Android since 4.0
+        "wmv" => (Viewtype::Video, "video/x-ms-wmv"),
+        "xdc" => (Viewtype::Webxdc, "application/webxdc+zip"),
+        "xhtml" => (Viewtype::File, "application/xhtml+xml"),
+        "xls" => (Viewtype::File, "application/vnd.ms-excel"),
+        "xlsx" => (
+            Viewtype::File,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        "xml" => (Viewtype::File, "application/xml"),
+        "zip" => (Viewtype::File, "application/zip"),
+        _ => {
+            return None;
+        }
+    };
+    Some(info)
+}
+pub struct Message {
+    /// Message ID.
+    pub(crate) id: MsgId,
+
+    /// `From:` contact ID.
+    pub(crate) from_id: ContactId,
+
+    /// ID of the first contact in the `To:` header.
+    pub(crate) to_id: ContactId,
+
+    /// ID of the chat message belongs to.
+    pub(crate) chat_id: ChatId,
+
+    /// Type of the message.
+    pub(crate) viewtype: Viewtype,
+
+    /// State of the message.
+    pub(crate) state: MessageState,
+    pub(crate) download_state: DownloadState,
+
+    /// Whether the message is hidden.
+    pub(crate) hidden: bool,
+    pub(crate) timestamp_sort: i64,
+    pub(crate) timestamp_sent: i64,
+    pub(crate) timestamp_rcvd: i64,
+    pub(crate) ephemeral_timer: EphemeralTimer,
+    pub(crate) ephemeral_timestamp: i64,
+    pub(crate) text: String,
+
+    /// Message subject.
+    ///
+    /// If empty, a default subject will be generated when sending.
+    pub(crate) subject: String,
+
+    /// `Message-ID` header value.
+    pub(crate) rfc724_mid: String,
+
+    /// `In-Reply-To` header value.
+    pub(crate) in_reply_to: Option<String>,
+    pub(crate) is_dc_message: MessengerMessage,
+    pub(crate) mime_modified: bool,
+    pub(crate) chat_blocked: Blocked,
+    pub(crate) location_id: u32,
+    pub(crate) error: Option<String>,
+    pub(crate) param: Params,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use anyhow::{ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::{parse_vcard, VcardContact};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use tokio::{fs, io};
+use crate::blob::BlobObject;
+use crate::chat::{Chat, ChatId, ChatIdBlocked};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    Blocked, Chattype, VideochatType, DC_CHAT_ID_TRASH, DC_DESIRED_TEXT_LEN, DC_MSG_ID_LAST_SPECIAL,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::debug_logging::set_debug_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::{start_ephemeral_timers_msgids, Timer as EphemeralTimer};
+use crate::events::EventType;
+use crate::imap::markseen_on_imap_table;
+use crate::location::delete_poi_location;
+use crate::mimeparser::{parse_message_id, SystemMessage};
+use crate::param::{Param, Params};
+use crate::pgp::split_armored_data;
+use crate::reaction::get_msg_reactions;
+use crate::sql;
+use crate::summary::Summary;
+use crate::tools::{
+    buf_compress, buf_decompress, get_filebytes, get_filemeta, gm2local_offset, read_file, time,
+    timestamp_to_str, truncate,
+};
+use MessageState::*;
+use MessageState::*;
+use num_traits::FromPrimitive;
+use super::*;
+use crate::chat::{
+        self, add_contact_to_chat, marknoticed_chat, send_text_msg, ChatItem, ProtectionStatus,
+    };
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::reaction::send_reaction;
+use crate::receive_imf::receive_imf;
+use crate::test_utils as test;
+use crate::test_utils::{TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn get_filemime(&self) -> Option<String> {
+        if let Some(m) = self.param.get(Param::MimeType) {
+            return Some(m.to_string());
+        } else if let Some(file) = self.param.get(Param::File) {
+            if let Some((_, mime)) = guess_msgtype_from_suffix(Path::new(file)) {
+                return Some(mime.to_string());
+            }
+            // we have a file but no mimetype, let's use a generic one
+            return Some("application/octet-stream".to_string());
+        }
+        // no mimetype and no file
+        None
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+use std::path::Path;
+
+pub fn get_filemime(&self) -> Option<String> {
+    if self.is_none() || self.magic!= DC_MSG_MAGIC {
+        return None;
+    }
+
+    let mime = self.param.get(DC_PARAM_MIMETYPE).ok();
+    if mime.is_none() {
+        let file = self.param(DC_PARAM_FILE).ok();
+        if file.is_none() {
+            return None;
+        }
+        let mime = guess_msgtype_from_suffix(file.unwrap()).ok();
+        if mime.is_none() {
+            mime = "application/octet-stream";
+        }
+    }
+
+    Some(mime.unwrap_or("application/octet-stream"))
+}
+```
+Note that I've assumed that `DC_MSG_MAGIC` and `DC_PARAM_MIMETYPE` are constants defined elsewhere in the code, and that `guess_msgtype_from_suffix` is a function that takes a `Path` as input and returns an `Option<(Viewtype, &str)>`. If these assumptions are incorrect, please let me know and I'll adjust the translation accordingly.</translated function>Here is the translated Rust function:
+```rust
+use std::path::Path;
+
+pub fn get_filemime(&self) -> Option<String> {
+    if self.is_none() || self.magic!= DC_MSG_MAGIC {
+        return None;
+    }
+
+    let mime = self.param.get(DC_PARAM_MIMETYPE).ok();
+    if mime.is_none() {
+        let file = self.param(DC_PARAM_FILE).ok();
+        if file.is_none() {
+            return None;
+        }
+        let mime = guess_msgtype_from_suffix(file.unwrap()).ok();
+        if mime.is_none() {
+            mime = "application/octet-stream";
+        }
+    }
+
+    Some(mime.unwrap_or("application/octet-stream"))
+}
+```
+Note that I've assumed that `DC_MSG_MAGIC` and `DC_PARAM_MIMETYPE` are constants defined elsewhere in the code, and that `guess_msgtype_from_suffix` is a function that takes a `Path` as input and returns an `Option<(Viewtype, &str)>`. If these assumptions are incorrect, please let me know and I'll adjust the translation accordingly.

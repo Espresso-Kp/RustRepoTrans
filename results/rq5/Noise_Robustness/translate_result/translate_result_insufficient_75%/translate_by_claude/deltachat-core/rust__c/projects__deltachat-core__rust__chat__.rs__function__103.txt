@@ -1,0 +1,272 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int dc_is_contact_in_chat(dc_context_t* context, uint32_t chat_id, uint32_t contact_id)
+{
+	/* this function works for group and for normal chats, however, it is more useful for group chats.
+	DC_CONTACT_ID_SELF may be used to check, if the user itself is in a group chat (DC_CONTACT_ID_SELF is not added to normal chats) */
+	int           ret = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM chats_contacts WHERE chat_id=? AND contact_id=?;");
+	sqlite3_bind_int(stmt, 1, chat_id);
+	sqlite3_bind_int(stmt, 2, contact_id);
+	ret = sqlite3_step(stmt);
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn is_contact_in_chat(
+    context: &Context,
+    chat_id: ChatId,
+    contact_id: ContactId,
+) -> Result<bool> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub async fn exists(&self, sql: &str, params: impl rusqlite::Params + Send) -> Result<bool> {
+        let count = self.count(sql, params).await?;
+        Ok(count > 0)
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+pub struct ChatId(u32);
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn is_contact_in_chat(
+    context: &Context,
+    chat_id: ChatId,
+    contact_id: ContactId,
+) -> Result<bool> {
+    // this function works for group and for normal chats, however, it is more useful
+    // for group chats.
+    // ContactId::SELF may be used to check, if the user itself is in a group
+    // chat (ContactId::SELF is not added to normal chats)
+
+    let exists = context
+        .sql
+        .exists(
+            "SELECT COUNT(*) FROM chats_contacts WHERE chat_id=? AND contact_id=?;",
+            (chat_id, contact_id),
+        )
+        .await?;
+    Ok(exists)
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn is_contact_in_chat(
+    context: &Context,
+    chat_id: ChatId,
+    contact_id: ContactId,
+) -> Result<bool> {
+    // This function works for group and normal chats, however, it is more useful for group chats.
+    // DC_CONTACT_ID_SELF may be used to check if the user itself is in a group chat
+    // (DC_CONTACT_ID_SELF is not added to normal chats)
+
+    let sql = "SELECT COUNT(*) FROM chats_contacts WHERE chat_id=? AND contact_id=?;";
+    let params = rusqlite::params![chat_id.0, contact_id.0];
+
+    context.inner.sql.exists(sql, params).await
+}
+```
+
+This translation makes the following changes and assumptions:
+
+1. The function is now asynchronous, as indicated by the `async` keyword and `Result<bool>` return type.
+
+2. We use the `Context` struct directly, assuming it contains the necessary SQL functionality.
+
+3. Instead of manually preparing statements and handling cleanup, we use the `exists` method from the `Sql` struct, which is part of the `Context`.
+
+4. The `chat_id` and `contact_id` are assumed to be of types `ChatId` and `ContactId` respectively, which likely wrap `u32` values.
+
+5. We use `rusqlite::params!` macro to create the parameter list for the SQL query.
+
+6. Error handling is implicit in the `Result<bool>` return type, which will propagate any errors that occur during the database query.
+
+7. The original C function's manual cleanup and error checking are not necessary in Rust due to its ownership system and the `?` operator for error propagation.
+
+This translation assumes that the `exists` method on the `Sql` struct handles the actual database query and returns a `Result<bool>` indicating whether the count is greater than zero.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn is_contact_in_chat(
+    context: &Context,
+    chat_id: ChatId,
+    contact_id: ContactId,
+) -> Result<bool> {
+    // This function works for group and normal chats, however, it is more useful for group chats.
+    // DC_CONTACT_ID_SELF may be used to check if the user itself is in a group chat
+    // (DC_CONTACT_ID_SELF is not added to normal chats)
+
+    let sql = "SELECT COUNT(*) FROM chats_contacts WHERE chat_id=? AND contact_id=?;";
+    let params = rusqlite::params![chat_id.0, contact_id.0];
+
+    context.inner.sql.exists(sql, params).await
+}
+```
+
+This translation makes the following changes and assumptions:
+
+1. The function is now asynchronous, as indicated by the `async` keyword and `Result<bool>` return type.
+
+2. We use the `Context` struct directly, assuming it contains the necessary SQL functionality.
+
+3. Instead of manually preparing statements and handling cleanup, we use the `exists` method from the `Sql` struct, which is part of the `Context`.
+
+4. The `chat_id` and `contact_id` are assumed to be of types `ChatId` and `ContactId` respectively, which likely wrap `u32` values.
+
+5. We use `rusqlite::params!` macro to create the parameter list for the SQL query.
+
+6. Error handling is implicit in the `Result<bool>` return type, which will propagate any errors that occur during the database query.
+
+7. The original C function's manual cleanup and error checking are not necessary in Rust due to its ownership system and the `?` operator for error propagation.
+
+This translation assumes that the `exists` method on the `Sql` struct handles the actual database query and returns a `Result<bool>` indicating whether the count is greater than zero.

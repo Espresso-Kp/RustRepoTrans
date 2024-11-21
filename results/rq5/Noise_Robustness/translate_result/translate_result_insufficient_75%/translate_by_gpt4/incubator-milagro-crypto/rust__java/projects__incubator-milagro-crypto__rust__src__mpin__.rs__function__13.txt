@@ -1,0 +1,316 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int GET_G1_MULTIPLE(RAND rng, int type,byte[] X,byte[] G,byte[] W)
+	{
+		BIG x;
+		BIG r=new BIG(ROM.CURVE_Order);
+		if (rng!=null)
+		{
+			x=BIG.randomnum(r,rng);
+			//if (ROM.AES_S>0)
+			//{
+			//	x.mod2m(2*ROM.AES_S);
+			//}
+			x.toBytes(X);
+		}
+		else
+		{
+			x=BIG.fromBytes(X);
+		}
+		ECP P;
+		if (type==0)
+		{
+			P=ECP.fromBytes(G);
+			if (P.is_infinity()) return INVALID_POINT;
+		}
+		else
+			P=ECP.mapit(G);
+
+		PAIR.G1mul(P,x).toBytes(W,false);
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn get_g1_multiple(
+    rng: Option<&mut RAND>,
+    typ: usize,
+    x: &mut [u8],
+    g: &[u8],
+    w: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn to_bytes(&self, b: &mut [u8], compress: bool) {
+        let mb = big::MODBYTES as usize;
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mut W = self.clone();
+
+        W.affine();
+        W.x.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 1] = t[i]
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            b[0] = 0x06;
+            return;
+        }
+
+        if compress {
+            b[0] = 0x02;
+            if W.y.redc().parity() == 1 {
+                b[0] = 0x03
+            }
+            return;
+        }
+
+        b[0] = 0x04;
+
+        W.y.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + mb + 1] = t[i]
+        }
+    }
+pub fn is_infinity(&self) -> bool {
+        self.x.is_zilch() && self.z.is_zilch()
+    }
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+pub fn randomnum(q: &Big, rng: &mut RAND) -> Big {
+        let mut d = DBig::new();
+        let mut j = 0;
+        let mut r: u8 = 0;
+        let t = q.clone();
+        for _ in 0..2 * t.nbits() {
+            if j == 0 {
+                r = rng.getbyte();
+            } else {
+                r >>= 1
+            }
+
+            let b = (r as Chunk) & 1;
+            d.shl(1);
+            d.w[0] += b;
+            j += 1;
+            j &= 7;
+        }
+        let m = d.dmod(q);
+        m
+    }
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub const INVALID_POINT: isize = -14;
+pub struct ECP {
+    x: FP,
+    y: FP,
+    z: FP,
+}
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn get_g1_multiple(
+    rng: Option<&mut RAND>,
+    typ: usize,
+    x: &mut [u8],
+    g: &[u8],
+    w: &mut [u8],
+) -> isize {
+    let mut sx: Big;
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    if let Some(rd) = rng {
+        sx = Big::randomnum(&r, rd);
+        sx.to_bytes(x);
+    } else {
+        sx = Big::from_bytes(x);
+    }
+    let P: ECP;
+
+    if typ == 0 {
+        P = ECP::from_bytes(g);
+        if P.is_infinity() {
+            return INVALID_POINT;
+        }
+    } else {
+        P = ECP::mapit(g)
+    }
+
+    pair::g1mul(&P, &mut sx).to_bytes(w, false);
+    return 0;
+}
+</function>
+<translated function>
+Below is the translated function from Java to Rust, in accordance with the provided Rust function signature, variable, functions, and data type declarations as well as the dependency libraries.
+
+```rust
+pub fn get_g1_multiple(
+    rng: Option<&mut RAND>,
+    typ: usize,
+    x: &mut [u8],
+    g: &[u8],
+    w: &mut [u8],
+) -> isize {
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+    let mut x_val: Big;
+    if let Some(ref mut rng_val) = rng {
+        x_val = Big::randomnum(&r, rng_val);
+        x_val.to_bytes(x);
+    } else {
+        x_val = Big::from_bytes(x);
+    }
+    let mut p: ECP;
+    if typ == 0 {
+        p = ECP::from_bytes(g);
+        if p.is_infinity() {
+            return INVALID_POINT;
+        }
+    } else {
+        p = ECP::mapit(g);
+    }
+    ECP::g1mul(&p, &x_val).to_bytes(w, false);
+    0
+}
+```
+
+Notes:
+- Assumed `mapit` is a method of `ECP`, as it was not included in the provided information.
+- The `invalid_point` constant is assumed accessible from the current scope.
+- This translation assumes that the `to_bytes` and `mapit` methods take `&mut` and `&` references respectively, as they were not included in the provided information. Changes might be required based on actual method signatures.</translated function>Below is the translated function from Java to Rust, in accordance with the provided Rust function signature, variable, functions, and data type declarations as well as the dependency libraries.
+
+```rust
+pub fn get_g1_multiple(
+    rng: Option<&mut RAND>,
+    typ: usize,
+    x: &mut [u8],
+    g: &[u8],
+    w: &mut [u8],
+) -> isize {
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+    let mut x_val: Big;
+    if let Some(ref mut rng_val) = rng {
+        x_val = Big::randomnum(&r, rng_val);
+        x_val.to_bytes(x);
+    } else {
+        x_val = Big::from_bytes(x);
+    }
+    let mut p: ECP;
+    if typ == 0 {
+        p = ECP::from_bytes(g);
+        if p.is_infinity() {
+            return INVALID_POINT;
+        }
+    } else {
+        p = ECP::mapit(g);
+    }
+    ECP::g1mul(&p, &x_val).to_bytes(w, false);
+    0
+}
+```
+
+Notes:
+- Assumed `mapit` is a method of `ECP`, as it was not included in the provided information.
+- The `invalid_point` constant is assumed accessible from the current scope.
+- This translation assumes that the `to_bytes` and `mapit` methods take `&mut` and `&` references respectively, as they were not included in the provided information. Changes might be required based on actual method signatures.

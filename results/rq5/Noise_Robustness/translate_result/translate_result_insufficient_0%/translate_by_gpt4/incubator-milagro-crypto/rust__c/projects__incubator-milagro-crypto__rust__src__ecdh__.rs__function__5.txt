@@ -1,0 +1,207 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void PBKDF2(int sha,const octet *p,octet *s,int rep,int olen,octet *key)
+{
+    int len;
+    int d=ROUNDUP(olen,sha);
+    char f[64];
+    char u[64];
+    octet F= {0,sizeof(f),f};
+    octet U= {0,sizeof(u),u};
+    OCT_empty(key);
+
+    for (int i=1; i<=d; i++)
+    {
+        len=s->len;
+        OCT_jint(s,i,4);
+
+        HMAC(sha,s,p,sha,&F);
+
+        s->len=len;
+        OCT_copy(&U,&F);
+        for (int j=2; j<=rep; j++)
+        {
+            HMAC(sha,&U,p,sha,&U);
+            OCT_xor(&F,&U);
+        }
+
+        OCT_joctet(key,&F);
+    }
+
+    OCT_chop(key,NULL,olen);
+}
+</c function>
+<rust function signature>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut d = olen / sha;
+    if olen % sha != 0 {
+        d += 1
+    }
+    let mut f: [u8; 64] = [0; 64];
+    let mut u: [u8; 64] = [0; 64];
+    let mut ku: [u8; 64] = [0; 64];
+    let mut s: [u8; 36] = [0; 36]; // Maximum salt of 32 bytes + 4
+    let mut n: [u8; 4] = [0; 4];
+
+    let sl = salt.len();
+    let mut kp = 0;
+    for i in 0..d {
+        for j in 0..sl {
+            s[j] = salt[j]
+        }
+        intto_bytes(i + 1, &mut n);
+        for j in 0..4 {
+            s[sl + j] = n[j]
+        }
+
+        hmac(sha, &s[0..sl + 4], pass, sha, &mut f);
+
+        for j in 0..sha {
+            u[j] = f[j]
+        }
+        for _ in 1..rep {
+            hmac(sha, &u, pass, sha, &mut ku);
+            for k in 0..sha {
+                u[k] = ku[k];
+                f[k] ^= u[k]
+            }
+        }
+        for j in 0..EFS {
+            if kp < olen && kp < f.len() {
+                k[kp] = f[j]
+            }
+            kp += 1
+        }
+    }
+}
+</function>
+<translated function>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &mut [u8], rep: usize, olen: usize, key: &mut [u8]) {
+    let d = ((olen + sha - 1) / sha) as usize;
+    let mut f = vec![0; 64];
+    let mut u = vec![0; 64];
+    
+    let mut len: usize;
+    key.clear();
+
+    for i in 1..=d {
+        len = salt.len();
+
+        salt[len..len+4].copy_from_slice(&(i as u32).to_be_bytes());
+        
+        hmac(sha, salt, pass, &mut f);
+
+        salt.truncate(len);
+        u.copy_from_slice(&f);
+
+        for _j in 2..=rep {
+            hmac(sha, &u, pass, &mut u);
+            for k in 0..f.len() {
+               f[k] ^= u[k];
+            }
+        }
+
+        key.extend_from_slice(&f);
+    }
+
+    key.truncate(olen);
+}
+
+fn hmac(sha: usize, i: &[u8], o: &[u8], r: &mut [u8]) {
+    match sha {
+        32 => {
+            let mut h = HASH256::new();
+            // hmac
+            h.process_array(i);
+            h.process_array(o);
+            h.hash(r);
+        }
+        64 => {
+            let mut h = HASH512::new();
+            // hmac
+            h.process_array(i);
+            h.process_array(o);
+            h.hash(r);
+        }
+        _ => panic!("Unsupported sha hash size"),
+    }
+}</translated function>pub fn pbkdf2(sha: usize, pass: &[u8], salt: &mut [u8], rep: usize, olen: usize, key: &mut [u8]) {
+    let d = ((olen + sha - 1) / sha) as usize;
+    let mut f = vec![0; 64];
+    let mut u = vec![0; 64];
+    
+    let mut len: usize;
+    key.clear();
+
+    for i in 1..=d {
+        len = salt.len();
+
+        salt[len..len+4].copy_from_slice(&(i as u32).to_be_bytes());
+        
+        hmac(sha, salt, pass, &mut f);
+
+        salt.truncate(len);
+        u.copy_from_slice(&f);
+
+        for _j in 2..=rep {
+            hmac(sha, &u, pass, &mut u);
+            for k in 0..f.len() {
+               f[k] ^= u[k];
+            }
+        }
+
+        key.extend_from_slice(&f);
+    }
+
+    key.truncate(olen);
+}
+
+fn hmac(sha: usize, i: &[u8], o: &[u8], r: &mut [u8]) {
+    match sha {
+        32 => {
+            let mut h = HASH256::new();
+            // hmac
+            h.process_array(i);
+            h.process_array(o);
+            h.hash(r);
+        }
+        64 => {
+            let mut h = HASH512::new();
+            // hmac
+            h.process_array(i);
+            h.process_array(o);
+            h.hash(r);
+        }
+        _ => panic!("Unsupported sha hash size"),
+    }
+}

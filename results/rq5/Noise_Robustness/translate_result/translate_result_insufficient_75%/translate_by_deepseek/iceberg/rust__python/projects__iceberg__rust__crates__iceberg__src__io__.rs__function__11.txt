@@ -1,0 +1,101 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def read(self, n: int) -> bytes:
+        """Read n bytes."""
+        if n < 0:
+            raise ValueError(f"Requested {n} bytes to read, expected positive integer.")
+        data: List[bytes] = []
+
+        n_remaining = n
+        while n_remaining > 0:
+            data_read = self._input_stream.read(n_remaining)
+            read_len = len(data_read)
+            if read_len == n:
+                # If we read everything, we return directly
+                # otherwise we'll continue to fetch the rest
+                return data_read
+            elif read_len <= 0:
+                raise EOFError(f"EOF: read {read_len} bytes")
+            data.append(data_read)
+            n_remaining -= read_len
+
+        return b"".join(data)
+</python function>
+<rust function signature>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub struct InputFile {
+    op: Operator,
+    // Absolution path of file.
+    path: String,
+    // Relative path of file to uri, starts at [`relative_path_pos`]
+    relative_path_pos: usize,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+        Ok(opendal::Reader::read(self, range).await?.to_bytes())
+    }
+</function>
+<translated function>
+ ```rust
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+    if range.start < 0 {
+        return Err(Error::new(ErrorKind::InvalidInput, "Requested range start is negative"));
+    }
+
+    let mut data: Vec<u8> = Vec::new();
+    let mut n_remaining = range.end - range.start;
+
+    while n_remaining > 0 {
+        let read_len = self._input_stream.read(&mut data[data.len()..]).await?;
+        if read_len == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "EOF: read 0 bytes"));
+        }
+        n_remaining -= read_len as u64;
+    }
+
+    Ok(Bytes::from(data))
+}
+```</translated function> ```rust
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+    if range.start < 0 {
+        return Err(Error::new(ErrorKind::InvalidInput, "Requested range start is negative"));
+    }
+
+    let mut data: Vec<u8> = Vec::new();
+    let mut n_remaining = range.end - range.start;
+
+    while n_remaining > 0 {
+        let read_len = self._input_stream.read(&mut data[data.len()..]).await?;
+        if read_len == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "EOF: read 0 bytes"));
+        }
+        n_remaining -= read_len as u64;
+    }
+
+    Ok(Bytes::from(data))
+}
+```

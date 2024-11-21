@@ -1,0 +1,229 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public List<TableIdentifier> listTables(Namespace namespace) {
+    namespaceExists(namespace);
+    // should be safe to list all before returning the list, instead of dynamically load the list.
+    String nextToken = null;
+    List<TableIdentifier> results = Lists.newArrayList();
+    do {
+      GetTablesResponse response =
+          glue.getTables(
+              GetTablesRequest.builder()
+                  .catalogId(awsProperties.glueCatalogId())
+                  .databaseName(
+                      IcebergToGlueConverter.toDatabaseName(
+                          namespace, awsProperties.glueCatalogSkipNameValidation()))
+                  .nextToken(nextToken)
+                  .build());
+      nextToken = response.nextToken();
+      if (response.hasTableList()) {
+        results.addAll(
+            response.tableList().stream()
+                .filter(this::isGlueIcebergTable)
+                .map(GlueToIcebergConverter::toTableId)
+                .collect(Collectors.toList()));
+      }
+    } while (nextToken != null);
+
+    LOG.debug("Listing of namespace: {} resulted in the following tables: {}", namespace, results);
+    return results;
+  }
+</java function>
+<rust function signature>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+pub struct TableIdent {
+    /// Namespace of the table.
+    pub namespace: NamespaceIdent,
+    /// Table name.
+    pub name: String,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let db_name = validate_namespace(namespace)?;
+
+        let mut table_list: Vec<TableIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self
+                    .client
+                    .0
+                    .get_tables()
+                    .database_name(&db_name)
+                    .next_token(token),
+                None => self.client.0.get_tables().database_name(&db_name),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let tables: Vec<_> = resp
+                .table_list()
+                .iter()
+                .map(|tbl| TableIdent::new(namespace.clone(), tbl.name().to_string()))
+                .collect();
+
+            table_list.extend(tables);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(table_list)
+    }
+</function>
+<translated function>
+Here is your translation from Java to Rust:
+
+```rust
+use aws_sdk_glue::client::Glue;
+use aws_sdk_glue::model::{GetTablesError, GetTablesInput, GetTablesRequest, GetTablesResponse};
+use futures::{StreamExt, TryStreamExt};
+use tracing::debug;
+
+#[async_trait]
+impl Catalog for GlueCatalog {
+    async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        self.namespace_exists(namespace).await?;
+        let mut next_token = None;
+        let mut results = vec![];
+
+        loop {
+            let request = GetTablesRequest::builder()
+                .catalog_id(self.aws_properties.glue_catalog_id())
+                .database_name(convert_to_database(
+                    namespace,
+                    self.aws_properties.glue_catalog_skip_name_validation(),
+                ))
+                .next_token(next_token)
+                .build()?;
+
+            let response = self.glue.get_tables(request).await?;
+
+            next_token = response.next_token();
+
+            for table in response.table_list(){
+                if self.is_glue_iceberg_table(&table){
+                    results.push(convert_to_table_id(&table));
+                }
+            }
+
+            if next_token.is_none() {
+                break;
+            }
+       }
+
+       debug!(
+            "Listing of namespace: {:?} resulted in the following tables: {:?}",
+            namespace, results
+        );
+        
+        Ok(results)
+    }
+}
+```
+
+I revised the function to follow Rust's asynchronous patterns and naming conventions.
+
+In the Rust-based version of the function, the "do-while" loop from the Java code was replaced with a `loop` statement and a `break` statement when `next_token` becomes `null` (or, in Rust terms, `None`). Rustraise any exceptions, I am raising Rust Results with `Ok()` and `Err()`. 
+
+For logging, I have used the `tracing` library's `debug!` macro, which is much more idiomatic in Rust.
+
+Note that I've added some assumptions about your Rust code, like the name of the `glue` client and the existence of the `is_glue_iceberg_table` method. Make sure to customize the example to match your actual codebase. Also, keep in mind that the proper error handling mechanism should be added to this function according to your project specifications and the function might be different depending upon the actual AWS Glue SDK Rust's API.</translated function>Here is your translation from Java to Rust:
+
+```rust
+use aws_sdk_glue::client::Glue;
+use aws_sdk_glue::model::{GetTablesError, GetTablesInput, GetTablesRequest, GetTablesResponse};
+use futures::{StreamExt, TryStreamExt};
+use tracing::debug;
+
+#[async_trait]
+impl Catalog for GlueCatalog {
+    async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        self.namespace_exists(namespace).await?;
+        let mut next_token = None;
+        let mut results = vec![];
+
+        loop {
+            let request = GetTablesRequest::builder()
+                .catalog_id(self.aws_properties.glue_catalog_id())
+                .database_name(convert_to_database(
+                    namespace,
+                    self.aws_properties.glue_catalog_skip_name_validation(),
+                ))
+                .next_token(next_token)
+                .build()?;
+
+            let response = self.glue.get_tables(request).await?;
+
+            next_token = response.next_token();
+
+            for table in response.table_list(){
+                if self.is_glue_iceberg_table(&table){
+                    results.push(convert_to_table_id(&table));
+                }
+            }
+
+            if next_token.is_none() {
+                break;
+            }
+       }
+
+       debug!(
+            "Listing of namespace: {:?} resulted in the following tables: {:?}",
+            namespace, results
+        );
+        
+        Ok(results)
+    }
+}
+```
+
+I revised the function to follow Rust's asynchronous patterns and naming conventions.
+
+In the Rust-based version of the function, the "do-while" loop from the Java code was replaced with a `loop` statement and a `break` statement when `next_token` becomes `null` (or, in Rust terms, `None`). Rustraise any exceptions, I am raising Rust Results with `Ok()` and `Err()`. 
+
+For logging, I have used the `tracing` library's `debug!` macro, which is much more idiomatic in Rust.
+
+Note that I've added some assumptions about your Rust code, like the name of the `glue` client and the existence of the `is_glue_iceberg_table` method. Make sure to customize the example to match your actual codebase. Also, keep in mind that the proper error handling mechanism should be added to this function according to your project specifications and the function might be different depending upon the actual AWS Glue SDK Rust's API.

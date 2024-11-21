@@ -1,0 +1,223 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_KEY(int sha,byte[] G1,byte[] G2,int pin,byte[] R,byte[] X,byte[] H,byte[] wCID,byte[] CK)
+	{
+		byte[] t;
+
+		FP48 g1=FP48.fromBytes(G1);
+		FP48 g2=FP48.fromBytes(G2);
+		BIG z=BIG.fromBytes(R);
+		BIG x=BIG.fromBytes(X);
+		BIG h=BIG.fromBytes(H);
+
+		ECP W=ECP.fromBytes(wCID);
+		if (W.is_infinity()) return INVALID_POINT; 
+
+		W=PAIR256.G1mul(W,x);
+
+//		FP2 f=new FP2(new BIG(ROM.Fra),new BIG(ROM.Frb));
+		BIG r=new BIG(ROM.CURVE_Order);
+//		BIG q=new BIG(ROM.Modulus);
+
+		z.add(h);	//new
+		z.mod(r);
+
+		g2.pinpow(pin,PBLEN);
+		g1.mul(g2);
+
+		FP16 c=g1.compow(z,r);
+
+		t=mpin_hash(sha,c,W);
+
+		for (int i=0;i<ECP.AESKEY;i++) CK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP48::from_bytes(&g1);
+    let mut g2 = FP48::from_bytes(&g2);
+    let mut z = Big::from_bytes(&r);
+    let mut x = Big::from_bytes(&x);
+    let h = Big::from_bytes(&h);
+
+    let mut W = ECP::from_bytes(&wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    W = pair256::g1mul(&mut W, &mut x);
+
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+
+    z.add(&h); //new
+    z.rmod(&mut r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&mut g2);
+
+    let mut c = g1.compow(&z, &mut r);
+
+    hash(sha, &mut c, &mut W, ck);
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the translation according to what you provided:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    use super::rom::{CURVE_Order, PBLEN};
+    let x = BIG::fromBytes(x);
+    let h = BIG::fromBytes(h);
+    let r = BIG::fromBytes(r);
+    let mut res = [0; ECP::AESKEY as usize];
+    
+    // g1 is a FP48
+    let mut g1 = FP48::fromBytes(&g1);
+    let mut w = ECP::fromBytes(wcid);
+    
+    // return if invalid point
+    if w.is_infinity() { return INVALID_POINT; }
+
+    w = pair256::g1mul(&w, &x);
+
+    let mut z = BIG::fromBytes(r);
+    let mut g2 = {
+        let mut g = FP48::fromBytes(&g2);
+        g.pinpow(pin, PBLEN);
+        g
+    };
+
+    z.plus(&h);
+    z.modulo(&BIG::new_ints(&rom::CURVE_Order));
+
+    g1.mul(&mut g2);
+
+    let c = g1.compow(&z, &BIG::new_ints(&rom::CURVE_Order));
+
+    let t = mpin_hash(sha, &c, &w);
+
+    for i in 0..ECP::AESKEY { ck[i] = t[i]; }
+    
+    return 0;
+}
+```
+
+Please note that the `mpin_hash` function might need to be adjusted according to your implementation. Also, the `INVALID_POINT` constant needs to be declared/defined which I assume is negative.</translated function>Here is the translation according to what you provided:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    use super::rom::{CURVE_Order, PBLEN};
+    let x = BIG::fromBytes(x);
+    let h = BIG::fromBytes(h);
+    let r = BIG::fromBytes(r);
+    let mut res = [0; ECP::AESKEY as usize];
+    
+    // g1 is a FP48
+    let mut g1 = FP48::fromBytes(&g1);
+    let mut w = ECP::fromBytes(wcid);
+    
+    // return if invalid point
+    if w.is_infinity() { return INVALID_POINT; }
+
+    w = pair256::g1mul(&w, &x);
+
+    let mut z = BIG::fromBytes(r);
+    let mut g2 = {
+        let mut g = FP48::fromBytes(&g2);
+        g.pinpow(pin, PBLEN);
+        g
+    };
+
+    z.plus(&h);
+    z.modulo(&BIG::new_ints(&rom::CURVE_Order));
+
+    g1.mul(&mut g2);
+
+    let c = g1.compow(&z, &BIG::new_ints(&rom::CURVE_Order));
+
+    let t = mpin_hash(sha, &c, &w);
+
+    for i in 0..ECP::AESKEY { ck[i] = t[i]; }
+    
+    return 0;
+}
+```
+
+Please note that the `mpin_hash` function might need to be adjusted according to your implementation. Also, the `INVALID_POINT` constant needs to be declared/defined which I assume is negative.

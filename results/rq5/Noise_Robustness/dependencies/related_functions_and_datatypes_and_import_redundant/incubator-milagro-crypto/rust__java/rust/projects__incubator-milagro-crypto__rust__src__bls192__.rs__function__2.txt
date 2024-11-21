@@ -1,0 +1,165 @@
+pub fn to_bytes(&self, b: &mut [u8]) {
+        self.to_byte_array(b, 0)
+    }
+
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+
+pub fn generator() -> ECP2 {
+        return ECP2::new_fp2s(
+            FP2::new_bigs(
+                Big::new_ints(&rom::CURVE_PXA),
+                Big::new_ints(&rom::CURVE_PXB),
+            ),
+            FP2::new_bigs(
+                Big::new_ints(&rom::CURVE_PYA),
+                Big::new_ints(&rom::CURVE_PYB),
+            ),
+        );
+    }
+
+pub fn randomnum(q: &Big, rng: &mut RAND) -> Big {
+        let mut d = DBig::new();
+        let mut j = 0;
+        let mut r: u8 = 0;
+        let t = q.clone();
+        for _ in 0..2 * t.nbits() {
+            if j == 0 {
+                r = rng.getbyte();
+            } else {
+                r >>= 1
+            }
+
+            let b = (r as Chunk) & 1;
+            d.shl(1);
+            d.w[0] += b;
+            j += 1;
+            j &= 7;
+        }
+        let m = d.dmod(q);
+        m
+    }  
+
+pub fn g2mul(P: &ECP4, e: &Big) -> ECP4 {
+    if rom::USE_GS_G2 {
+        let mut Q: [ECP4; 8] = [
+            ECP4::new(),
+            ECP4::new(),
+            ECP4::new(),
+            ECP4::new(),
+            ECP4::new(),
+            ECP4::new(),
+            ECP4::new(),
+            ECP4::new(),
+        ];
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut u = gs(e);
+
+        let f = ECP4::frob_constants();
+
+        Q[0] = P.clone();
+        for i in 1..8 {
+            Q[i] = Q[i - 1].clone();
+            Q[i].frob(&f, 1);
+        }
+        for i in 0..8 {
+            let np = u[i].nbits();
+            let t = Big::modneg(&mut u[i], &q);
+            let nn = t.nbits();
+            if nn < np {
+                u[i] = t.clone();
+                Q[i].neg();
+            }
+            u[i].norm();
+        }
+
+        ECP4::mul8(&mut Q, &u)
+    } else {
+        P.mul(e)
+    }
+}
+
+pub const BLS_OK: isize = 0;
+pub const BLS_FAIL: isize = -1;
+
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+
+pub fn g2mul(P: &ECP8, e: &Big) -> ECP8 {
+    if rom::USE_GS_G2 {
+        let mut Q: [ECP8; 16] = [
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+            ECP8::new(),
+        ];
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut u = gs(e);
+
+        let f = ECP8::frob_constants();
+
+        Q[0] = P.clone();
+        for i in 1..16 {
+            Q[i] = Q[i - 1].clone();
+            Q[i].frob(&f, 1);
+        }
+        for i in 0..16 {
+            let np = u[i].nbits();
+            let t = Big::modneg(&mut u[i], &q);
+            let nn = t.nbits();
+            if nn < np {
+                u[i] = t.clone();
+                Q[i].neg();
+            }
+            u[i].norm();
+        }
+
+        ECP8::mul16(&mut Q, &u)
+    } else {
+        P.mul(e)
+    }
+}
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+------
+
+use super::big;
+use super::big::Big;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::pair192;
+use super::rom;
+use crate::rand::RAND;
+use crate::sha3::SHA3;
+use crate::sha3::SHAKE256;
+use std::str;
+use super::*;
+use crate::test_utils::*;

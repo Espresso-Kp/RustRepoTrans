@@ -1,0 +1,93 @@
+<path>
+projects/deltachat-core/rust/chat.rs
+</path>
+<function>
+    pub async fn get_fresh_msg_cnt(self, context: &Context) -> Result<usize> {
+        // this function is typically used to show a badge counter beside _each_ chatlist item.
+        // to make this as fast as possible, esp. on older devices, we added an combined index over the rows used for querying.
+        // so if you alter the query here, you may want to alter the index over `(state, hidden, chat_id)` in `sql.rs`.
+        //
+        // the impact of the index is significant once the database grows:
+        // - on an older android4 with 18k messages, query-time decreased from 110ms to 2ms
+        // - on an mid-class moto-g or iphone7 with 50k messages, query-time decreased from 26ms or 6ms to 0-1ms
+        // the times are average, no matter if there are fresh messages or not -
+        // and have to be multiplied by the number of items shown at once on the chatlist,
+        // so savings up to 2 seconds are possible on older devices - newer ones will feel "snappier" :)
+        let count = if self.is_archived_link() {
+            context
+                .sql
+                .count(
+                    "SELECT COUNT(DISTINCT(m.chat_id))
+                    FROM msgs m
+                    LEFT JOIN chats c ON m.chat_id=c.id
+                    WHERE m.state=10
+                    and m.hidden=0
+                    AND m.chat_id>9
+                    AND c.blocked=0
+                    AND c.archived=1
+                    ",
+                    (),
+                )
+                .await?
+        } else {
+            context
+                .sql
+                .count(
+                    "SELECT COUNT(*)
+                FROM msgs
+                WHERE state=?
+                AND hidden=0
+                AND chat_id=?;",
+                    (MessageState::InFresh, self),
+                )
+                .await?
+        };
+        Ok(count)
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chat.c
+</path>
+<function>
+int dc_get_fresh_msg_cnt(dc_context_t* context, uint32_t chat_id)
+{
+	int           ret = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+    if (chat_id == DC_CHAT_ID_ARCHIVED_LINK){
+        stmt = dc_sqlite3_prepare(context->sql,       
+        "SELECT COUNT(DISTINCT(m.chat_id))"
+        "FROM msgs m"
+        "LEFT JOIN chats c ON m.chat_id=c.id"
+        "WHERE m.state=10"
+        "and m.hidden=0"
+        "AND m.chat_id>9"
+        "AND c.blocked=0"
+        "AND c.archived=1;");
+    }
+    else{
+        stmt = dc_sqlite3_prepare(context->sql,
+            "SELECT COUNT(*) FROM msgs "
+            " WHERE state=" DC_STRINGIFY(DC_STATE_IN_FRESH)
+            "   AND hidden=0 "
+            "   AND chat_id=?;"); /* we have an index over the state-column, this should be sufficient as there are typically only few fresh messages */
+        sqlite3_bind_int(stmt, 1, chat_id);
+    }
+ 
+
+	if (sqlite3_step(stmt)!=SQLITE_ROW) {
+		goto cleanup;
+	}
+
+	ret = sqlite3_column_int(stmt, 0);
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</function>

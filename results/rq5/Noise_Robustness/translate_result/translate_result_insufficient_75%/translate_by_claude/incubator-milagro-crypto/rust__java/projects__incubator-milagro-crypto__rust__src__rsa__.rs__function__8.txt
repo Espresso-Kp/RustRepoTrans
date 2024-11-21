@@ -1,0 +1,446 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static byte[] OAEP_DECODE(int sha,byte[] p,byte[] f)
+	{
+		int x,t;
+		boolean comp;
+		int i,k,olen=RFS-1;
+		int hlen,seedlen;
+
+		hlen=sha;
+		byte[] SEED=new byte[hlen];
+		seedlen=hlen;
+		byte[] CHASH=new byte[hlen];
+	
+		if (olen<seedlen+hlen+1) return new byte[0];
+		byte[] DBMASK=new byte[olen-seedlen];
+		for (i=0;i<olen-seedlen;i++) DBMASK[i]=0;
+
+		if (f.length<RFS)
+		{
+			int d=RFS-f.length;
+			for (i=RFS-1;i>=d;i--)
+				f[i]=f[i-d];
+			for (i=d-1;i>=0;i--)
+				f[i]=0;
+
+		}
+
+		byte[] h=hashit(sha,p,-1);
+
+		for (i=0;i<hlen;i++) CHASH[i]=h[i];
+
+		x=f[0];
+
+		for (i=seedlen;i<olen;i++)
+			DBMASK[i-seedlen]=f[i+1]; 
+
+		MGF1(sha,DBMASK,seedlen,SEED);
+		for (i=0;i<seedlen;i++) SEED[i]^=f[i+1];
+		MGF1(sha,SEED,olen-seedlen,f);
+		for (i=0;i<olen-seedlen;i++) DBMASK[i]^=f[i];
+
+		comp=true;
+		for (i=0;i<hlen;i++)
+		{
+			if (CHASH[i]!=DBMASK[i]) comp=false;
+		}
+
+		for (i=0;i<olen-seedlen-hlen;i++)
+			DBMASK[i]=DBMASK[i+hlen];
+
+		for (i=0;i<hlen;i++)
+			SEED[i]=CHASH[i]=0;
+		
+		for (k=0;;k++)
+		{
+			if (k>=olen-seedlen-hlen) return new byte[0];
+			if (DBMASK[k]!=0) break;
+		}
+
+		t=DBMASK[k];
+		if (!comp || x!=0 || t!=0x01) 
+		{
+			for (i=0;i<olen-seedlen;i++) DBMASK[i]=0;
+			return new byte[0];
+		}
+
+		byte[] r=new byte[olen-seedlen-hlen-k-1];
+
+		for (i=0;i<olen-seedlen-hlen-k-1;i++)
+			r[i]=DBMASK[i+k+1];
+	
+		for (i=0;i<olen-seedlen;i++) DBMASK[i]=0;
+
+		return r;
+	}
+</java function>
+<rust function signature>
+pub fn oaep_decode(sha: usize, p: Option<&[u8]>, f: &mut [u8]) -> usize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn hashit(sha: usize, a: Option<&[u8]>, n: isize, w: &mut [u8]) {
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if let Some(x) = a {
+            h.process_array(x);
+        }
+        if n >= 0 {
+            h.process_num(n as i32)
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            w[i] = hs[i]
+        }
+    }
+}
+pub fn mgf1(sha: usize, z: &[u8], olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+
+    let mut j = 0;
+    for i in 0..k.len() {
+        k[i] = 0
+    }
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+    for counter in 0..cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, Some(z), counter as isize, &mut b);
+
+        if j + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[j] = b[i];
+                j += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[j] = b[i];
+                j += 1
+            }
+        }
+    }
+}
+pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn oaep_decode(sha: usize, p: Option<&[u8]>, f: &mut [u8]) -> usize {
+    let olen = RFS - 1;
+
+    let hlen = sha;
+    let mut seed: [u8; 64] = [0; 64];
+    let seedlen = hlen;
+    let mut chash: [u8; 64] = [0; 64];
+
+    if olen < seedlen + hlen + 1 {
+        return 0;
+    }
+    let mut dbmask: [u8; RFS] = [0; RFS];
+    //for i in 0..olen-seedlen {dbmask[i]=0}
+
+    if f.len() < RFS {
+        let d = RFS - f.len();
+        for i in (d..RFS).rev() {
+            f[i] = f[i - d];
+        }
+        for i in (0..d).rev() {
+            f[i] = 0;
+        }
+    }
+
+    hashit(sha, p, -1, &mut chash);
+
+    let x = f[0];
+
+    for i in seedlen..olen {
+        dbmask[i - seedlen] = f[i + 1];
+    }
+
+    mgf1(sha, &dbmask[0..olen - seedlen], seedlen, &mut seed);
+    for i in 0..seedlen {
+        seed[i] ^= f[i + 1]
+    }
+    mgf1(sha, &seed, olen - seedlen, f);
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i]
+    }
+
+    let mut comp = true;
+    for i in 0..hlen {
+        if chash[i] != dbmask[i] {
+            comp = false
+        }
+    }
+
+    for i in 0..olen - seedlen - hlen {
+        dbmask[i] = dbmask[i + hlen]
+    }
+
+    for i in 0..hlen {
+        seed[i] = 0;
+        chash[i] = 0
+    }
+
+    let mut k = 0;
+    loop {
+        if k >= olen - seedlen - hlen {
+            return 0;
+        }
+        if dbmask[k] != 0 {
+            break;
+        }
+        k += 1;
+    }
+
+    let t = dbmask[k];
+    if !comp || x != 0 || t != 0x01 {
+        for i in 0..olen - seedlen {
+            dbmask[i] = 0
+        }
+        return 0;
+    }
+
+    for i in 0..olen - seedlen - hlen - k - 1 {
+        f[i] = dbmask[i + k + 1];
+    }
+
+    for i in 0..olen - seedlen {
+        dbmask[i] = 0
+    }
+
+    return olen - seedlen - hlen - k - 1;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn oaep_decode(sha: usize, p: Option<&[u8]>, f: &mut [u8]) -> usize {
+    let hlen = sha;
+    let seedlen = hlen;
+    let olen = RFS - 1;
+
+    if olen < seedlen + hlen + 1 {
+        return 0;
+    }
+
+    let mut seed = vec![0u8; hlen];
+    let mut chash = vec![0u8; hlen];
+    let mut dbmask = vec![0u8; olen - seedlen];
+
+    if f.len() < RFS {
+        let d = RFS - f.len();
+        for i in (d..RFS).rev() {
+            f[i] = f[i - d];
+        }
+        for i in 0..d {
+            f[i] = 0;
+        }
+    }
+
+    let mut h = vec![0u8; hlen];
+    hashit(sha, p, -1, &mut h);
+
+    chash.copy_from_slice(&h[..hlen]);
+
+    let x = f[0];
+
+    for i in seedlen..olen {
+        dbmask[i - seedlen] = f[i + 1];
+    }
+
+    mgf1(sha, &dbmask, seedlen, &mut seed);
+    for i in 0..seedlen {
+        seed[i] ^= f[i + 1];
+    }
+    mgf1(sha, &seed, olen - seedlen, &mut f[..olen - seedlen]);
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i];
+    }
+
+    let mut comp = true;
+    for i in 0..hlen {
+        if chash[i] != dbmask[i] {
+            comp = false;
+        }
+    }
+
+    dbmask.copy_within(hlen.., 0);
+
+    for i in 0..hlen {
+        seed[i] = 0;
+        chash[i] = 0;
+    }
+
+    let mut k = 0;
+    while k < olen - seedlen - hlen {
+        if dbmask[k] != 0 {
+            break;
+        }
+        k += 1;
+    }
+
+    if k >= olen - seedlen - hlen {
+        return 0;
+    }
+
+    let t = dbmask[k];
+    if !comp || x != 0 || t != 0x01 {
+        for i in 0..olen - seedlen {
+            dbmask[i] = 0;
+        }
+        return 0;
+    }
+
+    let r_len = olen - seedlen - hlen - k - 1;
+    let mut r = vec![0u8; r_len];
+
+    r.copy_from_slice(&dbmask[k + 1..k + 1 + r_len]);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] = 0;
+    }
+
+    r_len
+}
+```
+
+This Rust function closely follows the logic of the original Java function while adhering to Rust conventions and using the provided dependencies. The function returns the length of the decoded message as a `usize` instead of the message itself, as specified in the Rust function signature.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn oaep_decode(sha: usize, p: Option<&[u8]>, f: &mut [u8]) -> usize {
+    let hlen = sha;
+    let seedlen = hlen;
+    let olen = RFS - 1;
+
+    if olen < seedlen + hlen + 1 {
+        return 0;
+    }
+
+    let mut seed = vec![0u8; hlen];
+    let mut chash = vec![0u8; hlen];
+    let mut dbmask = vec![0u8; olen - seedlen];
+
+    if f.len() < RFS {
+        let d = RFS - f.len();
+        for i in (d..RFS).rev() {
+            f[i] = f[i - d];
+        }
+        for i in 0..d {
+            f[i] = 0;
+        }
+    }
+
+    let mut h = vec![0u8; hlen];
+    hashit(sha, p, -1, &mut h);
+
+    chash.copy_from_slice(&h[..hlen]);
+
+    let x = f[0];
+
+    for i in seedlen..olen {
+        dbmask[i - seedlen] = f[i + 1];
+    }
+
+    mgf1(sha, &dbmask, seedlen, &mut seed);
+    for i in 0..seedlen {
+        seed[i] ^= f[i + 1];
+    }
+    mgf1(sha, &seed, olen - seedlen, &mut f[..olen - seedlen]);
+    for i in 0..olen - seedlen {
+        dbmask[i] ^= f[i];
+    }
+
+    let mut comp = true;
+    for i in 0..hlen {
+        if chash[i] != dbmask[i] {
+            comp = false;
+        }
+    }
+
+    dbmask.copy_within(hlen.., 0);
+
+    for i in 0..hlen {
+        seed[i] = 0;
+        chash[i] = 0;
+    }
+
+    let mut k = 0;
+    while k < olen - seedlen - hlen {
+        if dbmask[k] != 0 {
+            break;
+        }
+        k += 1;
+    }
+
+    if k >= olen - seedlen - hlen {
+        return 0;
+    }
+
+    let t = dbmask[k];
+    if !comp || x != 0 || t != 0x01 {
+        for i in 0..olen - seedlen {
+            dbmask[i] = 0;
+        }
+        return 0;
+    }
+
+    let r_len = olen - seedlen - hlen - k - 1;
+    let mut r = vec![0u8; r_len];
+
+    r.copy_from_slice(&dbmask[k + 1..k + 1 + r_len]);
+
+    for i in 0..olen - seedlen {
+        dbmask[i] = 0;
+    }
+
+    r_len
+}
+```
+
+This Rust function closely follows the logic of the original Java function while adhering to Rust conventions and using the provided dependencies. The function returns the length of the decoded message as a `usize` instead of the message itself, as specified in the Rust function signature.

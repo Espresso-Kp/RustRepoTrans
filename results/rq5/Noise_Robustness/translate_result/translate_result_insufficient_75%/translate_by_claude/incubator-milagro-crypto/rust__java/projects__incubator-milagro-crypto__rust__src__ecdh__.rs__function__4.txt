@@ -1,0 +1,217 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static byte[] KDF2(int sha,byte[] Z,byte[] P,int olen)
+	{
+/* NOTE: the parameter olen is the length of the output k in bytes */
+		int hlen=sha;
+		byte[] K=new byte[olen];
+		byte[] B;
+		int counter,cthreshold,k=0;
+    
+		for (int i=0;i<K.length;i++) K[i]=0;
+
+		cthreshold=olen/hlen; if (olen%hlen!=0) cthreshold++;
+
+		for (counter=1;counter<=cthreshold;counter++)
+		{
+			B=hashit(sha,Z,counter,P,0);
+			if (k+hlen>olen) for (int i=0;i<olen%hlen;i++) K[k++]=B[i];
+			else for (int i=0;i<hlen;i++) K[k++]=B[i];
+		}
+
+		return K;
+	}
+</java function>
+<rust function signature>
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn hashit(sha: usize, a: &[u8], n: usize, b: Option<&[u8]>, pad: usize, w: &mut [u8]) {
+    let mut r: [u8; 64] = [0; 64];
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+
+    if pad == 0 {
+        for i in 0..sha {
+            w[i] = r[i]
+        }
+    } else {
+        if pad <= sha {
+            for i in 0..pad {
+                w[i] = r[i]
+            }
+        } else {
+            for i in 0..sha {
+                w[i + pad - sha] = r[i]
+            }
+            for i in 0..(pad - sha) {
+                w[i] = 0
+            }
+        }
+    }
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    // NOTE: the parameter olen is the length of the output K in bytes
+    let hlen = sha;
+    let mut lk = 0;
+
+    let mut cthreshold = olen / hlen;
+    if olen % hlen != 0 {
+        cthreshold += 1
+    }
+
+    for counter in 1..=cthreshold {
+        let mut b: [u8; 64] = [0; 64];
+        hashit(sha, z, counter, p, 0, &mut b);
+        if lk + hlen > olen {
+            for i in 0..(olen % hlen) {
+                k[lk] = b[i];
+                lk += 1
+            }
+        } else {
+            for i in 0..hlen {
+                k[lk] = b[i];
+                lk += 1
+            }
+        }
+    }
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+    let mut counter = 1;
+    let cthreshold = if olen % hlen != 0 {
+        olen / hlen + 1
+    } else {
+        olen / hlen
+    };
+
+    let mut offset = 0;
+    let mut b = vec![0u8; sha];
+
+    while counter <= cthreshold {
+        hashit(sha, z, counter, p, 0, &mut b);
+        let remaining = olen - offset;
+        let to_copy = remaining.min(hlen);
+        k[offset..offset + to_copy].copy_from_slice(&b[..to_copy]);
+        offset += to_copy;
+        counter += 1;
+    }
+}
+```
+
+This Rust implementation follows the logic of the original Java function while adhering to Rust idioms and making use of the provided dependencies. Here are some key points about the translation:
+
+1. The function signature matches the provided Rust signature.
+2. We use the `hashit` function as provided in the dependencies.
+3. Instead of initializing `K` with zeros, we assume the input `k` slice is already initialized.
+4. We use `vec![0u8; sha]` to create a temporary buffer for `B`.
+5. The main loop uses Rust's `while` construct instead of `for`.
+6. We use `copy_from_slice` to efficiently copy data from `b` to `k`.
+7. The function doesn't return anything as it modifies the input `k` slice directly.
+
+This implementation should be functionally equivalent to the Java version while being idiomatic Rust code.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    let hlen = sha;
+    let mut counter = 1;
+    let cthreshold = if olen % hlen != 0 {
+        olen / hlen + 1
+    } else {
+        olen / hlen
+    };
+
+    let mut offset = 0;
+    let mut b = vec![0u8; sha];
+
+    while counter <= cthreshold {
+        hashit(sha, z, counter, p, 0, &mut b);
+        let remaining = olen - offset;
+        let to_copy = remaining.min(hlen);
+        k[offset..offset + to_copy].copy_from_slice(&b[..to_copy]);
+        offset += to_copy;
+        counter += 1;
+    }
+}
+```
+
+This Rust implementation follows the logic of the original Java function while adhering to Rust idioms and making use of the provided dependencies. Here are some key points about the translation:
+
+1. The function signature matches the provided Rust signature.
+2. We use the `hashit` function as provided in the dependencies.
+3. Instead of initializing `K` with zeros, we assume the input `k` slice is already initialized.
+4. We use `vec![0u8; sha]` to create a temporary buffer for `B`.
+5. The main loop uses Rust's `while` construct instead of `for`.
+6. We use `copy_from_slice` to efficiently copy data from `b` to `k`.
+7. The function doesn't return anything as it modifies the input `k` slice directly.
+
+This implementation should be functionally equivalent to the Java version while being idiomatic Rust code.

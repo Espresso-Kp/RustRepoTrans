@@ -1,0 +1,272 @@
+pub fn inverse(&mut self) {
+        if MODTYPE == ModType::PseudoMersenne || MODTYPE == ModType::GeneralisedMersenne {
+            let mut y = self.fpow();
+            if MOD8 == 5 {
+                let mut t = self.clone();
+                t.sqr();
+                self.mul(&t);
+                y.sqr();
+            }
+            y.sqr();
+            y.sqr();
+            self.mul(&y);
+        } else {
+            // Constant time inversion using Fermat's little theorem.
+            // Fermat's little theorem says for a prime p and for any a < p, a^p = a % p => a^(p-1) = 1 % p => a^(p-2) = a^-1 % p
+            let mut m2 = Big::new_ints(&rom::MODULUS);
+            m2.dec(2);
+            m2.norm();
+            let inv = self.pow(&mut m2);
+            *self = inv.clone();
+        }
+    }
+pub fn neg(&mut self) {
+        self.y.norm();
+        self.y.neg();
+        self.y.norm();
+    }
+pub fn frob(&mut self, x: &FP2) {
+        let mut x2 = x.clone();
+        x2.sqr();
+        self.x.conj();
+        self.y.conj();
+        self.z.conj();
+        self.z.reduce();
+        self.x.mul(&x2);
+        self.y.mul(&x2);
+        self.y.mul(x);
+    }
+pub fn affine(&mut self) {
+        if self.is_infinity() {
+            return;
+        }
+        let one = FP2::new_int(1);
+        if self.z.equals(&one) {
+            return;
+        }
+        self.z.inverse();
+
+        self.x.mul(&self.z);
+        self.x.reduce();
+        self.y.mul(&self.z);
+        self.y.reduce();
+        self.z = one.clone();
+    }
+pub fn mul(&self, e: &Big) -> ECP2 {
+        if self.is_infinity() {
+            return ECP2::new();
+        }
+
+        let mut W: [ECP2; 8] = [
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+        ];
+
+        const CT: usize = 1 + (big::NLEN * (big::BASEBITS as usize) + 3) / 4;
+        let mut w: [i8; CT] = [0; CT];
+
+        /* precompute table */
+        let mut Q = self.clone();
+        Q.dbl();
+
+        W[0] = self.clone();
+
+        for i in 1..8 {
+            W[i] = W[i - 1].clone();
+            W[i].add(&Q);
+        }
+
+        /* make exponent odd - add 2P if even, P if odd */
+        let mut t = e.clone();
+        let s = t.parity();
+        t.inc(1);
+        t.norm();
+        let ns = t.parity();
+        let mut mt = t.clone();
+        mt.inc(1);
+        mt.norm();
+        t.cmove(&mt, s);
+        Q.cmove(&self, ns);
+        let C = Q.clone();
+
+        let nb = 1 + (t.nbits() + 3) / 4;
+
+        /* convert exponent to signed 4-bit window */
+        for i in 0..nb {
+            w[i] = (t.lastbits(5) - 16) as i8;
+            t.dec(w[i] as isize);
+            t.norm();
+            t.fshr(4);
+        }
+        w[nb] = (t.lastbits(5)) as i8;
+
+        let mut P = W[((w[nb] as usize) - 1) / 2].clone();
+        for i in (0..nb).rev() {
+            Q.selector(&W, w[i] as i32);
+            P.dbl();
+            P.dbl();
+            P.dbl();
+            P.dbl();
+            P.add(&Q);
+        }
+        P.sub(&C);
+        P.affine();
+        P
+    }
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+pub fn sub(&mut self, Q: &ECP2) -> isize {
+        let mut NQ = Q.clone();
+        NQ.neg();
+        let d = self.add(&NQ);
+        return d;
+    }
+pub fn new_bigs(c: Big, d: Big) -> FP2 {
+        FP2 {
+            a: FP::new_big(c),
+            b: FP::new_big(d),
+        }
+    }
+pub fn norm(&mut self) {
+        self.x.norm();
+    }
+pub const SEXTIC_TWIST: SexticTwist = SexticTwist::DType;
+pub const CURVE_PAIRING_TYPE: CurvePairingType = CurvePairingType::Bn;
+pub enum SexticTwist {
+    Not,
+    DType,
+    MType,
+}
+pub enum CurvePairingType {
+    Not,
+    Bn,
+    Bls,
+}
+pub const FRA: [Chunk; NLEN] = [
+    0x7DE6C06F2A6DE9,
+    0x74924D3F77C2E1,
+    0x50A846953F8509,
+    0x212E7C8CB6499B,
+    0x1B377619,
+];
+pub const FRB: [Chunk; NLEN] = [
+    0x82193F90D5922A,
+    0x8B6DB2C08850C5,
+    0x2F57B96AC8DC17,
+    0x1ED1837503EAB2,
+    0x9EBEE69,
+];
+------
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::fp2::FP2;
+use super::rom;
+use crate::types::{CurvePairingType, SexticTwist, SignOfX};
+use std::fmt;
+use std::str::SplitWhitespace;

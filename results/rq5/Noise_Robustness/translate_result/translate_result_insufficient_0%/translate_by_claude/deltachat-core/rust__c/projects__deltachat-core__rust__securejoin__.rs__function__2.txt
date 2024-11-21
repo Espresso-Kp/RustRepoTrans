@@ -1,0 +1,365 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+char* dc_get_securejoin_qr(dc_context_t* context, uint32_t group_chat_id)
+{
+	/* =========================================================
+	   ====             Alice - the inviter side            ====
+	   ====   Step 1 in "Setup verified contact" protocol   ====
+	   ========================================================= */
+
+	char*      qr = NULL;
+	char*      self_addr = NULL;
+	char*      self_addr_urlencoded = NULL;
+	char*      self_name = NULL;
+	char*      self_name_urlencoded = NULL;
+	char*      fingerprint = NULL;
+	char*      invitenumber = NULL;
+	char*      auth = NULL;
+	dc_chat_t* chat = NULL;
+	char*      group_name = NULL;
+	char*      group_name_urlencoded= NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	dc_ensure_secret_key_exists(context);
+
+		// invitenumber will be used to allow starting the handshake, auth will be used to verify the fingerprint
+		invitenumber = dc_token_lookup(context, DC_TOKEN_INVITENUMBER, group_chat_id);
+		if (invitenumber==NULL) {
+			invitenumber = dc_create_id();
+			dc_token_save(context, DC_TOKEN_INVITENUMBER, group_chat_id, invitenumber);
+		}
+
+		auth = dc_token_lookup(context, DC_TOKEN_AUTH, group_chat_id);
+		if (auth==NULL) {
+			auth = dc_create_id();
+			dc_token_save(context, DC_TOKEN_AUTH, group_chat_id, auth);
+		}
+
+		if ((self_addr = dc_sqlite3_get_config(context->sql, "configured_addr", NULL))==NULL) {
+			dc_log_error(context, 0, "Not configured, cannot generate QR code.");
+			goto cleanup;
+		}
+
+		self_name = dc_sqlite3_get_config(context->sql, "displayname", "");
+
+	if ((fingerprint=get_self_fingerprint(context))==NULL) {
+		goto cleanup;
+	}
+
+	self_addr_urlencoded = dc_urlencode(self_addr);
+	self_name_urlencoded = dc_urlencode(self_name);
+
+	if (group_chat_id)
+	{
+		// parameters used: a=g=x=i=s=
+		chat = dc_get_chat(context, group_chat_id);
+		if (chat==NULL) {
+			dc_log_error(context, 0, "Cannot get QR-code for chat-id %i", group_chat_id);
+			goto cleanup;
+		}
+		group_name = dc_chat_get_name(chat);
+		group_name_urlencoded = dc_urlencode(group_name);
+		qr = dc_mprintf(DC_OPENPGP4FPR_SCHEME "%s#a=%s&g=%s&x=%s&i=%s&s=%s", fingerprint, self_addr_urlencoded, group_name_urlencoded, chat->grpid, invitenumber, auth);
+	}
+	else
+	{
+		// parameters used: a=n=i=s=
+		qr = dc_mprintf(DC_OPENPGP4FPR_SCHEME "%s#a=%s&n=%s&i=%s&s=%s", fingerprint, self_addr_urlencoded, self_name_urlencoded, invitenumber, auth);
+	}
+
+	dc_log_info(context, 0, "Generated QR code: %s", qr);
+
+cleanup:
+	free(self_addr_urlencoded);
+	free(self_addr);
+	free(self_name);
+	free(self_name_urlencoded);
+	free(fingerprint);
+	free(invitenumber);
+	free(auth);
+	dc_chat_unref(chat);
+	free(group_name);
+	free(group_name_urlencoded);
+	return qr? qr : dc_strdup(NULL);
+}
+</c function>
+<rust function signature>
+pub async fn get_securejoin_qr(context: &Context, group: Option<ChatId>) -> Result<String> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use anyhow::{bail, Context as _, Error, Result};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use crate::aheader::EncryptPreference;
+use crate::chat::{self, Chat, ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::e2ee::ensure_secret_key_exists;
+use crate::events::EventType;
+use crate::headerdef::HeaderDef;
+use crate::key::{load_self_public_key, DcKey, Fingerprint};
+use crate::message::{Message, Viewtype};
+use crate::mimeparser::{MimeMessage, SystemMessage};
+use crate::param::Param;
+use crate::peerstate::Peerstate;
+use crate::qr::check_qr;
+use crate::securejoin::bob::JoinerProgress;
+use crate::stock_str;
+use crate::sync::Sync::*;
+use crate::token;
+use crate::tools::time;
+use bobstate::BobState;
+use qrinvite::QrInvite;
+use crate::token::Namespace;
+use deltachat_contact_tools::{ContactAddress, EmailAddress};
+use super::*;
+use crate::chat::{remove_contact_from_chat, CantSendReason};
+use crate::chatlist::Chatlist;
+use crate::constants::{self, Chattype};
+use crate::imex::{imex, ImexMode};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::{self, chat_protection_enabled};
+use crate::test_utils::get_chat_msg;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+use std::collections::HashSet;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_securejoin_qr(context: &Context, group: Option<ChatId>) -> Result<String> {
+    /*=======================================================
+    ====             Alice - the inviter side            ====
+    ====   Step 1 in "Setup verified contact" protocol   ====
+    =======================================================*/
+
+    ensure_secret_key_exists(context).await.ok();
+
+    // invitenumber will be used to allow starting the handshake,
+    // auth will be used to verify the fingerprint
+    let sync_token = token::lookup(context, Namespace::InviteNumber, group)
+        .await?
+        .is_none();
+    let invitenumber = token::lookup_or_new(context, Namespace::InviteNumber, group).await?;
+    let auth = token::lookup_or_new(context, Namespace::Auth, group).await?;
+    let self_addr = context.get_primary_self_addr().await?;
+    let self_name = context
+        .get_config(Config::Displayname)
+        .await?
+        .unwrap_or_default();
+
+    let fingerprint: Fingerprint = match get_self_fingerprint(context).await {
+        Some(fp) => fp,
+        None => {
+            bail!("No fingerprint, cannot generate QR code.");
+        }
+    };
+
+    let self_addr_urlencoded =
+        utf8_percent_encode(&self_addr, NON_ALPHANUMERIC_WITHOUT_DOT).to_string();
+    let self_name_urlencoded =
+        utf8_percent_encode(&self_name, NON_ALPHANUMERIC_WITHOUT_DOT).to_string();
+
+    let qr = if let Some(group) = group {
+        // parameters used: a=g=x=i=s=
+        let chat = Chat::load_from_db(context, group).await?;
+        if chat.grpid.is_empty() {
+            bail!(
+                "can't generate securejoin QR code for ad-hoc group {}",
+                group
+            );
+        }
+        let group_name = chat.get_name();
+        let group_name_urlencoded = utf8_percent_encode(group_name, NON_ALPHANUMERIC).to_string();
+        if sync_token {
+            context.sync_qr_code_tokens(Some(chat.id)).await?;
+        }
+        format!(
+            "OPENPGP4FPR:{}#a={}&g={}&x={}&i={}&s={}",
+            fingerprint.hex(),
+            self_addr_urlencoded,
+            &group_name_urlencoded,
+            &chat.grpid,
+            &invitenumber,
+            &auth,
+        )
+    } else {
+        // parameters used: a=n=i=s=
+        if sync_token {
+            context.sync_qr_code_tokens(None).await?;
+        }
+        format!(
+            "OPENPGP4FPR:{}#a={}&n={}&i={}&s={}",
+            fingerprint.hex(),
+            self_addr_urlencoded,
+            self_name_urlencoded,
+            &invitenumber,
+            &auth,
+        )
+    };
+
+    info!(context, "Generated QR code.");
+    Ok(qr)
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn get_securejoin_qr(context: &Context, group: Option<ChatId>) -> Result<String> {
+    ensure_secret_key_exists(context).await?;
+
+    let self_addr = context.get_config(Config::Addr).await?;
+    let self_name = context.get_config(Config::Displayname).await?.unwrap_or_default();
+
+    let fingerprint = load_self_public_key(context)
+        .await?
+        .fingerprint()
+        .to_string();
+
+    let self_addr_urlencoded = utf8_percent_encode(&self_addr, NON_ALPHANUMERIC).to_string();
+    let self_name_urlencoded = utf8_percent_encode(&self_name, NON_ALPHANUMERIC).to_string();
+
+    let qr = if let Some(group_id) = group {
+        let chat = Chat::load_from_db(context, group_id).await?;
+        let group_name = chat.name;
+        let group_name_urlencoded = utf8_percent_encode(&group_name, NON_ALPHANUMERIC).to_string();
+
+        let invitenumber = token::lookup(context, Namespace::InviteNumber, Some(group_id))
+            .await?
+            .unwrap_or_else(|| token::rand_string(8));
+        token::save(context, Namespace::InviteNumber, Some(group_id), &invitenumber).await?;
+
+        let auth = token::lookup(context, Namespace::Auth, Some(group_id))
+            .await?
+            .unwrap_or_else(|| token::rand_string(8));
+        token::save(context, Namespace::Auth, Some(group_id), &auth).await?;
+
+        format!(
+            "{}{}#a={}&g={}&x={}&i={}&s={}",
+            constants::OPENPGP4FPR_SCHEME,
+            fingerprint,
+            self_addr_urlencoded,
+            group_name_urlencoded,
+            chat.grpid,
+            invitenumber,
+            auth
+        )
+    } else {
+        let invitenumber = token::lookup(context, Namespace::InviteNumber, None)
+            .await?
+            .unwrap_or_else(|| token::rand_string(8));
+        token::save(context, Namespace::InviteNumber, None, &invitenumber).await?;
+
+        let auth = token::lookup(context, Namespace::Auth, None)
+            .await?
+            .unwrap_or_else(|| token::rand_string(8));
+        token::save(context, Namespace::Auth, None, &auth).await?;
+
+        format!(
+            "{}{}#a={}&n={}&i={}&s={}",
+            constants::OPENPGP4FPR_SCHEME,
+            fingerprint,
+            self_addr_urlencoded,
+            self_name_urlencoded,
+            invitenumber,
+            auth
+        )
+    };
+
+    context.emit_event(EventType::InfoMessage {
+        msg: format!("Generated QR code: {}", qr),
+    });
+
+    Ok(qr)
+}
+```
+
+This Rust function closely follows the logic of the original C function while adapting to Rust's async/await paradigm and using the provided dependencies. It generates a secure join QR code for either a group chat or an individual chat, depending on whether a `group` parameter is provided.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn get_securejoin_qr(context: &Context, group: Option<ChatId>) -> Result<String> {
+    ensure_secret_key_exists(context).await?;
+
+    let self_addr = context.get_config(Config::Addr).await?;
+    let self_name = context.get_config(Config::Displayname).await?.unwrap_or_default();
+
+    let fingerprint = load_self_public_key(context)
+        .await?
+        .fingerprint()
+        .to_string();
+
+    let self_addr_urlencoded = utf8_percent_encode(&self_addr, NON_ALPHANUMERIC).to_string();
+    let self_name_urlencoded = utf8_percent_encode(&self_name, NON_ALPHANUMERIC).to_string();
+
+    let qr = if let Some(group_id) = group {
+        let chat = Chat::load_from_db(context, group_id).await?;
+        let group_name = chat.name;
+        let group_name_urlencoded = utf8_percent_encode(&group_name, NON_ALPHANUMERIC).to_string();
+
+        let invitenumber = token::lookup(context, Namespace::InviteNumber, Some(group_id))
+            .await?
+            .unwrap_or_else(|| token::rand_string(8));
+        token::save(context, Namespace::InviteNumber, Some(group_id), &invitenumber).await?;
+
+        let auth = token::lookup(context, Namespace::Auth, Some(group_id))
+            .await?
+            .unwrap_or_else(|| token::rand_string(8));
+        token::save(context, Namespace::Auth, Some(group_id), &auth).await?;
+
+        format!(
+            "{}{}#a={}&g={}&x={}&i={}&s={}",
+            constants::OPENPGP4FPR_SCHEME,
+            fingerprint,
+            self_addr_urlencoded,
+            group_name_urlencoded,
+            chat.grpid,
+            invitenumber,
+            auth
+        )
+    } else {
+        let invitenumber = token::lookup(context, Namespace::InviteNumber, None)
+            .await?
+            .unwrap_or_else(|| token::rand_string(8));
+        token::save(context, Namespace::InviteNumber, None, &invitenumber).await?;
+
+        let auth = token::lookup(context, Namespace::Auth, None)
+            .await?
+            .unwrap_or_else(|| token::rand_string(8));
+        token::save(context, Namespace::Auth, None, &auth).await?;
+
+        format!(
+            "{}{}#a={}&n={}&i={}&s={}",
+            constants::OPENPGP4FPR_SCHEME,
+            fingerprint,
+            self_addr_urlencoded,
+            self_name_urlencoded,
+            invitenumber,
+            auth
+        )
+    };
+
+    context.emit_event(EventType::InfoMessage {
+        msg: format!("Generated QR code: {}", qr),
+    });
+
+    Ok(qr)
+}
+```
+
+This Rust function closely follows the logic of the original C function while adapting to Rust's async/await paradigm and using the provided dependencies. It generates a secure join QR code for either a group chat or an individual chat, depending on whether a `group` parameter is provided.

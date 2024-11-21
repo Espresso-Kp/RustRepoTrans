@@ -1,0 +1,276 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public Type primitive(Schema primitive) {
+    // first check supported logical types
+    LogicalType logical = primitive.getLogicalType();
+    if (logical != null) {
+      String name = logical.getName();
+      if (logical instanceof LogicalTypes.Decimal) {
+        return Types.DecimalType.of(
+            ((LogicalTypes.Decimal) logical).getPrecision(),
+            ((LogicalTypes.Decimal) logical).getScale());
+
+      } else if (logical instanceof LogicalTypes.Date) {
+        return Types.DateType.get();
+
+      } else if (logical instanceof LogicalTypes.TimeMicros) {
+        return Types.TimeType.get();
+
+      } else if (logical instanceof LogicalTypes.TimestampMicros) {
+        return Types.TimestampType.get();
+
+      } else if (LogicalTypes.uuid().getName().equals(name)) {
+        return Types.UUIDType.get();
+      }
+    }
+
+    switch (primitive.getType()) {
+      case BOOLEAN:
+        return Types.BooleanType.get();
+      case INT:
+        return Types.IntegerType.get();
+      case LONG:
+        return Types.LongType.get();
+      case FLOAT:
+        return Types.FloatType.get();
+      case DOUBLE:
+        return Types.DoubleType.get();
+      case STRING:
+      case ENUM:
+        return Types.StringType.get();
+      case FIXED:
+        return Types.FixedType.ofLength(primitive.getFixedSize());
+      case BYTES:
+        return Types.BinaryType.get();
+      case NULL:
+        return null;
+    }
+
+    throw new UnsupportedOperationException("Unsupported primitive type: " + primitive);
+  }
+</java function>
+<rust function signature>
+fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub enum PrimitiveType {
+    /// True or False
+    Boolean,
+    /// 32-bit signed integer
+    Int,
+    /// 64-bit signed integer
+    Long,
+    /// 32-bit IEEE 754 floating point.
+    Float,
+    /// 64-bit IEEE 754 floating point.
+    Double,
+    /// Fixed point decimal
+    Decimal {
+        /// Precision, must be 38 or less
+        precision: u32,
+        /// Scale
+        scale: u32,
+    },
+    /// Calendar date without timezone or time.
+    Date,
+    /// Time of day in microsecond precision, without date or timezone.
+    Time,
+    /// Timestamp in microsecond precision, without timezone
+    Timestamp,
+    /// Timestamp in microsecond precision, with timezone
+    Timestamptz,
+    /// Arbitrary-length character sequences encoded in utf-8
+    String,
+    /// Universally Unique Identifiers, should use 16-byte fixed
+    Uuid,
+    /// Fixed length byte array
+    Fixed(u64),
+    /// Arbitrary-length byte array.
+    Binary,
+}
+pub enum Type {
+    /// Primitive types
+    Primitive(PrimitiveType),
+    /// Struct type
+    Struct(StructType),
+    /// List type.
+    List(ListType),
+    /// Map type
+    Map(MapType),
+}
+const LOGICAL_TYPE: &str = "logicalType";
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> {
+        let typ = match schema {
+            AvroSchema::Decimal(decimal) => {
+                Type::decimal(decimal.precision as u32, decimal.scale as u32)?
+            }
+            AvroSchema::Date => Type::Primitive(PrimitiveType::Date),
+            AvroSchema::TimeMicros => Type::Primitive(PrimitiveType::Time),
+            AvroSchema::TimestampMicros => Type::Primitive(PrimitiveType::Timestamp),
+            AvroSchema::Boolean => Type::Primitive(PrimitiveType::Boolean),
+            AvroSchema::Int => Type::Primitive(PrimitiveType::Int),
+            AvroSchema::Long => Type::Primitive(PrimitiveType::Long),
+            AvroSchema::Float => Type::Primitive(PrimitiveType::Float),
+            AvroSchema::Double => Type::Primitive(PrimitiveType::Double),
+            AvroSchema::String | AvroSchema::Enum(_) => Type::Primitive(PrimitiveType::String),
+            AvroSchema::Fixed(fixed) => {
+                if let Some(logical_type) = fixed.attributes.get(LOGICAL_TYPE) {
+                    let logical_type = logical_type.as_str().ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::DataInvalid,
+                            "logicalType in attributes of avro schema is not a string type",
+                        )
+                    })?;
+                    match logical_type {
+                        UUID_LOGICAL_TYPE => Type::Primitive(PrimitiveType::Uuid),
+                        ty => {
+                            return Err(Error::new(
+                                ErrorKind::FeatureUnsupported,
+                                format!(
+                                    "Logical type {ty} is not support in iceberg primitive type.",
+                                ),
+                            ))
+                        }
+                    }
+                } else {
+                    Type::Primitive(PrimitiveType::Fixed(fixed.size as u64))
+                }
+            }
+            AvroSchema::Bytes => Type::Primitive(PrimitiveType::Binary),
+            AvroSchema::Null => return Ok(None),
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::Unexpected,
+                    "Unable to convert avro {schema} to iceberg primitive type.",
+                ))
+            }
+        };
+
+        Ok(Some(typ))
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, data type declarations, and dependency libraries:
+
+```rust
+fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> {
+    match schema {
+        AvroSchema::Boolean => Ok(Some(Type::Primitive(PrimitiveType::Boolean))),
+        AvroSchema::Int => Ok(Some(Type::Primitive(PrimitiveType::Int))),
+        AvroSchema::Long => Ok(Some(Type::Primitive(PrimitiveType::Long))),
+        AvroSchema::Float => Ok(Some(Type::Primitive(PrimitiveType::Float))),
+        AvroSchema::Double => Ok(Some(Type::Primitive(PrimitiveType::Double))),
+        AvroSchema::String => Ok(Some(Type::Primitive(PrimitiveType::String))),
+        AvroSchema::Enum { .. } => Ok(Some(Type::Primitive(PrimitiveType::String))),
+        AvroSchema::Fixed { size, .. } => Ok(Some(Type::Primitive(PrimitiveType::Fixed(*size as u64)))),
+        AvroSchema::Bytes => Ok(Some(Type::Primitive(PrimitiveType::Binary))),
+        AvroSchema::Null => Ok(None),
+        AvroSchema::Record(record_schema) => {
+            if let Some(logical_type) = record_schema.get_attribute(LOGICAL_TYPE) {
+                match logical_type.as_str() {
+                    Some("decimal") => {
+                        if let (Some(precision), Some(scale)) = (
+                            record_schema.get_attribute("precision").and_then(|v| v.as_u64()),
+                            record_schema.get_attribute("scale").and_then(|v| v.as_u64()),
+                        ) {
+                            Ok(Some(Type::Primitive(PrimitiveType::Decimal {
+                                precision: precision as u32,
+                                scale: scale as u32,
+                            })))
+                        } else {
+                            Err(Error::new(ErrorKind::InvalidFormat, "Invalid decimal schema"))
+                        }
+                    }
+                    Some("date") => Ok(Some(Type::Primitive(PrimitiveType::Date))),
+                    Some("time-micros") => Ok(Some(Type::Primitive(PrimitiveType::Time))),
+                    Some("timestamp-micros") => Ok(Some(Type::Primitive(PrimitiveType::Timestamp))),
+                    Some("uuid") => Ok(Some(Type::Primitive(PrimitiveType::Uuid))),
+                    _ => Err(Error::new(ErrorKind::InvalidFormat, "Unsupported logical type")),
+                }
+            } else {
+                Err(Error::new(ErrorKind::InvalidFormat, "Unsupported record schema"))
+            }
+        }
+        _ => Err(Error::new(ErrorKind::InvalidFormat, "Unsupported primitive type")),
+    }
+}
+```
+
+This Rust function follows the provided signature and handles the conversion of Avro schema types to the corresponding Iceberg `Type` enum. It uses pattern matching to handle different Avro schema types and includes error handling for unsupported or invalid schemas. The function also handles logical types as specified in the original Java function.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, data type declarations, and dependency libraries:
+
+```rust
+fn primitive(&mut self, schema: &AvroSchema) -> Result<Option<Type>> {
+    match schema {
+        AvroSchema::Boolean => Ok(Some(Type::Primitive(PrimitiveType::Boolean))),
+        AvroSchema::Int => Ok(Some(Type::Primitive(PrimitiveType::Int))),
+        AvroSchema::Long => Ok(Some(Type::Primitive(PrimitiveType::Long))),
+        AvroSchema::Float => Ok(Some(Type::Primitive(PrimitiveType::Float))),
+        AvroSchema::Double => Ok(Some(Type::Primitive(PrimitiveType::Double))),
+        AvroSchema::String => Ok(Some(Type::Primitive(PrimitiveType::String))),
+        AvroSchema::Enum { .. } => Ok(Some(Type::Primitive(PrimitiveType::String))),
+        AvroSchema::Fixed { size, .. } => Ok(Some(Type::Primitive(PrimitiveType::Fixed(*size as u64)))),
+        AvroSchema::Bytes => Ok(Some(Type::Primitive(PrimitiveType::Binary))),
+        AvroSchema::Null => Ok(None),
+        AvroSchema::Record(record_schema) => {
+            if let Some(logical_type) = record_schema.get_attribute(LOGICAL_TYPE) {
+                match logical_type.as_str() {
+                    Some("decimal") => {
+                        if let (Some(precision), Some(scale)) = (
+                            record_schema.get_attribute("precision").and_then(|v| v.as_u64()),
+                            record_schema.get_attribute("scale").and_then(|v| v.as_u64()),
+                        ) {
+                            Ok(Some(Type::Primitive(PrimitiveType::Decimal {
+                                precision: precision as u32,
+                                scale: scale as u32,
+                            })))
+                        } else {
+                            Err(Error::new(ErrorKind::InvalidFormat, "Invalid decimal schema"))
+                        }
+                    }
+                    Some("date") => Ok(Some(Type::Primitive(PrimitiveType::Date))),
+                    Some("time-micros") => Ok(Some(Type::Primitive(PrimitiveType::Time))),
+                    Some("timestamp-micros") => Ok(Some(Type::Primitive(PrimitiveType::Timestamp))),
+                    Some("uuid") => Ok(Some(Type::Primitive(PrimitiveType::Uuid))),
+                    _ => Err(Error::new(ErrorKind::InvalidFormat, "Unsupported logical type")),
+                }
+            } else {
+                Err(Error::new(ErrorKind::InvalidFormat, "Unsupported record schema"))
+            }
+        }
+        _ => Err(Error::new(ErrorKind::InvalidFormat, "Unsupported primitive type")),
+    }
+}
+```
+
+This Rust function follows the provided signature and handles the conversion of Avro schema types to the corresponding Iceberg `Type` enum. It uses pattern matching to handle different Avro schema types and includes error handling for unsupported or invalid schemas. The function also handles logical types as specified in the original Java function.

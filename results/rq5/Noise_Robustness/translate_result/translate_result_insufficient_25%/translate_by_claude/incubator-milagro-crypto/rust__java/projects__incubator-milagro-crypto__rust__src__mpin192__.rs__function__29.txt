@@ -1,0 +1,358 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int SERVER_KEY(int sha,byte[] Z,byte[] SST,byte[] W,byte[] H,byte[] HID,byte[] xID,byte[] xCID,byte[] SK)
+	{
+		byte[] t;
+
+		ECP4 sQ=ECP4.fromBytes(SST);
+		if (sQ.is_infinity()) return INVALID_POINT; 
+		ECP R=ECP.fromBytes(Z);
+		if (R.is_infinity()) return INVALID_POINT; 
+		ECP A=ECP.fromBytes(HID);
+		if (A.is_infinity()) return INVALID_POINT; 
+
+		ECP U;
+		if (xCID!=null)
+			U=ECP.fromBytes(xCID);
+		else
+			U=ECP.fromBytes(xID);
+		if (U.is_infinity()) return INVALID_POINT; 
+
+		BIG w=BIG.fromBytes(W);
+		BIG h=BIG.fromBytes(H);
+		A=PAIR192.G1mul(A,h);	// new
+		R.add(A); //R.affine();
+
+		U=PAIR192.G1mul(U,w);
+		FP24 g=PAIR192.ate(sQ,R);
+		g=PAIR192.fexp(g);
+
+		FP8 c=g.trace();
+
+		t=mpin_hash(sha,c,U);
+
+		for (int i=0;i<ECP.AESKEY;i++) SK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn trace(&mut self) -> FP8 {
+        let mut t = self.geta();
+        t.imul(3);
+        t.reduce();
+        return t;
+    }
+pub fn is_infinity(&self) -> bool {
+        let xx = self.getpx();
+        let zz = self.getpz();
+        return xx.is_zilch() && zz.is_zilch();
+    }
+pub fn fexp(m: &FP24) -> FP24 {
+    let f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+    let mut x = Big::new_ints(&rom::CURVE_BNX);
+    let mut r = m.clone();
+
+    /* Easy part of final exp */
+    let mut lv = r.clone();
+    lv.inverse();
+    r.conj();
+
+    r.mul(&lv);
+    lv = r.clone();
+    r.frob(&f, 4);
+    r.mul(&lv);
+    //    if r.is_unity() {
+    //	r.zero();
+    //	return r;
+    //    }
+    /* Hard part of final exp */
+    // Ghamman & Fouotsa Method
+
+    let mut t7 = r.clone();
+    t7.usqr();
+    let mut t1 = t7.pow(&mut x);
+
+    x.fshr(1);
+    let mut t2 = t1.pow(&mut x);
+    x.fshl(1);
+
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        t1.conj();
+    }
+    let mut t3 = t1.clone();
+    t3.conj();
+    t2.mul(&t3);
+    t2.mul(&r);
+
+    t3 = t2.pow(&mut x);
+    let mut t4 = t3.pow(&mut x);
+    let mut t5 = t4.pow(&mut x);
+
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        t3.conj();
+        t5.conj();
+    }
+
+    t3.frob(&f, 6);
+    t4.frob(&f, 5);
+    t3.mul(&t4);
+
+    let mut t6 = t5.pow(&mut x);
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        t6.conj();
+    }
+
+    t5.frob(&f, 4);
+    t3.mul(&t5);
+
+    let mut t0 = t2.clone();
+    t0.conj();
+    t6.mul(&t0);
+
+    t5 = t6.clone();
+    t5.frob(&f, 3);
+
+    t3.mul(&t5);
+    t5 = t6.pow(&mut x);
+    t6 = t5.pow(&mut x);
+
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        t5.conj();
+    }
+
+    t0 = t5.clone();
+    t0.frob(&f, 2);
+    t3.mul(&t0);
+    t0 = t6.clone();
+    t0.frob(&f, 1);
+
+    t3.mul(&t0);
+    t5 = t6.pow(&mut x);
+
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        t5.conj();
+    }
+    t2.frob(&f, 7);
+
+    t5.mul(&t7);
+    t3.mul(&t2);
+    t3.mul(&t5);
+
+    r.mul(&t3);
+
+    r.reduce();
+    return r;
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let sQ = ECP4::from_bytes(&sst);
+    if sQ.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut R = ECP::from_bytes(&z);
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut A = ECP::from_bytes(&hid);
+    if A.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut U = if let Some(rxcid) = xcid {
+        ECP::from_bytes(&rxcid)
+    } else {
+        ECP::from_bytes(&xid)
+    };
+
+    if U.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut w = Big::from_bytes(&w);
+    let mut h = Big::from_bytes(&h);
+    A = pair192::g1mul(&mut A, &mut h); // new
+    R.add(&mut A);
+
+    U = pair192::g1mul(&mut U, &mut w);
+    let mut g = pair192::ate(&sQ, &R);
+    g = pair192::fexp(&g);
+
+    let mut c = g.trace();
+
+    hash(sha, &mut c, &mut U, sk);
+
+    return 0;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let s_q = ECP4::frombytes(sst);
+    if s_q.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut r = ECP::frombytes(z);
+    if r.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut a = ECP::frombytes(hid);
+    if a.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let u = match xcid {
+        Some(xcid_bytes) => ECP::frombytes(xcid_bytes),
+        None => ECP::frombytes(xid),
+    };
+    if u.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let w_big = Big::frombytes(w);
+    let h_big = Big::frombytes(h);
+
+    a = pair192::g1mul(&a, &h_big);
+    r.add(&a);
+
+    let u = pair192::g1mul(&u, &w_big);
+    let mut g = pair192::ate(&s_q, &r);
+    g = pair192::fexp(&g);
+
+    let c = g.trace();
+
+    let t = mpin_hash(sha, &c, &u);
+
+    sk[..ecp::AESKEY].copy_from_slice(&t[..ecp::AESKEY]);
+
+    0
+}
+```
+
+Please note that this translation assumes the existence of certain functions and constants (like `INVALID_POINT`, `mpin_hash`, `AESKEY`) that were not provided in the given context. You may need to define or import these as needed in your Rust implementation.
+
+Also, some function calls (like `frombytes`, `g1mul`) might need to be adjusted based on the exact method names in your Rust implementation of the cryptographic library.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let s_q = ECP4::frombytes(sst);
+    if s_q.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut r = ECP::frombytes(z);
+    if r.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut a = ECP::frombytes(hid);
+    if a.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let u = match xcid {
+        Some(xcid_bytes) => ECP::frombytes(xcid_bytes),
+        None => ECP::frombytes(xid),
+    };
+    if u.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let w_big = Big::frombytes(w);
+    let h_big = Big::frombytes(h);
+
+    a = pair192::g1mul(&a, &h_big);
+    r.add(&a);
+
+    let u = pair192::g1mul(&u, &w_big);
+    let mut g = pair192::ate(&s_q, &r);
+    g = pair192::fexp(&g);
+
+    let c = g.trace();
+
+    let t = mpin_hash(sha, &c, &u);
+
+    sk[..ecp::AESKEY].copy_from_slice(&t[..ecp::AESKEY]);
+
+    0
+}
+```
+
+Please note that this translation assumes the existence of certain functions and constants (like `INVALID_POINT`, `mpin_hash`, `AESKEY`) that were not provided in the given context. You may need to define or import these as needed in your Rust implementation.
+
+Also, some function calls (like `frombytes`, `g1mul`) might need to be adjusted based on the exact method names in your Rust implementation of the cryptographic library.

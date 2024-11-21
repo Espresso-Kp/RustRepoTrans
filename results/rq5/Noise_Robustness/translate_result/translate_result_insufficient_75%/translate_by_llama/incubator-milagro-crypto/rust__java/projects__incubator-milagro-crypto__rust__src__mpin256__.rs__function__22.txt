@@ -1,0 +1,349 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_2(byte[] X,byte[] Y,byte[] SEC)
+	{
+		BIG r=new BIG(ROM.CURVE_Order);
+		ECP P=ECP.fromBytes(SEC);
+		if (P.is_infinity()) return INVALID_POINT;
+
+		BIG px=BIG.fromBytes(X);
+		BIG py=BIG.fromBytes(Y);
+		px.add(py);
+		px.mod(r);
+	//	px.rsub(r);
+
+		P=PAIR256.G1mul(P,px);
+		P.neg();
+		P.toBytes(SEC,false);
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_2(x: &[u8], y: &[u8], sec: &mut [u8]) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+pub fn neg(&mut self) {
+        self.y.norm();
+        self.y.neg();
+        self.y.norm();
+    }
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+pub fn to_bytes(&self, b: &mut [u8], compress: bool) {
+        let mb = big::MODBYTES as usize;
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mut W = self.clone();
+
+        W.affine();
+        W.x.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + 1] = t[i]
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            b[0] = 0x06;
+            return;
+        }
+
+        if compress {
+            b[0] = 0x02;
+            if W.y.redc().parity() == 1 {
+                b[0] = 0x03
+            }
+            return;
+        }
+
+        b[0] = 0x04;
+
+        W.y.redc().to_bytes(&mut t);
+        for i in 0..mb {
+            b[i + mb + 1] = t[i]
+        }
+    }
+pub fn is_infinity(&self) -> bool {
+        self.x.is_zilch() && self.z.is_zilch()
+    }
+pub const INVALID_POINT: isize = -14;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_2(x: &[u8], y: &[u8], sec: &mut [u8]) -> isize {
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+    let mut P = ECP::from_bytes(sec);
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut px = Big::from_bytes(x);
+    let py = Big::from_bytes(y);
+    px.add(&py);
+    px.rmod(&mut r);
+
+    P = pair256::g1mul(&mut P, &mut px);
+    P.neg();
+    P.to_bytes(sec, false);
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+pub fn client_2(x: &[u8], y: &[u8], sec: &mut [u8]) -> isize {
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+    let P = ECP::from_bytes(sec);
+    if P.is_infinity() { return INVALID_POINT; }
+
+    let px = Big::from_bytes(x);
+    let py = Big::from_bytes(y);
+    px.add(&py);
+    px.rmod(&r);
+
+    let P = PAIR256::G1mul(&P, &px);
+    P.neg();
+    P.to_bytes(sec, false);
+    0
+}
+```
+
+Note that I've assumed that `Big` and `ECP` are types from the `super::big` and `super::ecp` modules respectively, and that `PAIR256` and `rom` are also from the same modules. Also, I've assumed that `INVALID_POINT` is a constant defined in the same module. If this is not the case, you should adjust the code accordingly.</translated function>Here is the translated Rust function:
+
+```rust
+pub fn client_2(x: &[u8], y: &[u8], sec: &mut [u8]) -> isize {
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+    let P = ECP::from_bytes(sec);
+    if P.is_infinity() { return INVALID_POINT; }
+
+    let px = Big::from_bytes(x);
+    let py = Big::from_bytes(y);
+    px.add(&py);
+    px.rmod(&r);
+
+    let P = PAIR256::G1mul(&P, &px);
+    P.neg();
+    P.to_bytes(sec, false);
+    0
+}
+```
+
+Note that I've assumed that `Big` and `ECP` are types from the `super::big` and `super::ecp` modules respectively, and that `PAIR256` and `rom` are also from the same modules. Also, I've assumed that `INVALID_POINT` is a constant defined in the same module. If this is not the case, you should adjust the code accordingly.

@@ -1,0 +1,121 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+time_t dc_smeared_time(dc_context_t* context)
+{
+	/* function returns a corrected time(NULL) */
+	time_t now = time(NULL);
+	SMEAR_LOCK
+		if (context->last_smeared_timestamp >= now) {
+			now = context->last_smeared_timestamp+1;
+		}
+	SMEAR_UNLOCK
+	return now;
+}
+</c function>
+<rust function signature>
+pub(crate) fn smeared_time(context: &Context) -> i64 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) fn time() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+pub fn current(&self) -> i64 {
+        self.smeared_timestamp.load(Ordering::Relaxed)
+    }
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::borrow::Cow;
+use std::io::{Cursor, Write};
+use std::mem;
+use std::path::{Path, PathBuf};
+use std::str::from_utf8;
+use std::time::Duration;
+use std::time::SystemTime as Time;
+use std::time::SystemTime;
+use anyhow::{bail, Context as _, Result};
+use base64::Engine as _;
+use chrono::{Local, NaiveDateTime, NaiveTime, TimeZone};
+use deltachat_contact_tools::{strip_rtlo_characters, EmailAddress};
+use deltachat_time::SystemTimeTools as SystemTime;
+use futures::{StreamExt, TryStreamExt};
+use mailparse::dateparse;
+use mailparse::headers::Headers;
+use mailparse::MailHeaderMap;
+use rand::{thread_rng, Rng};
+use tokio::{fs, io};
+use url::Url;
+use crate::chat::{add_device_msg, add_device_msg_with_importance};
+use crate::constants::{DC_ELLIPSIS, DC_OUTDATED_WARNING_DAYS};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::message::{Message, Viewtype};
+use crate::stock_str;
+use chrono::NaiveDate;
+use proptest::prelude::*;
+use super::*;
+use crate::chatlist::Chatlist;
+use crate::{chat, test_utils};
+use crate::{receive_imf::receive_imf, test_utils::TestContext};
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn smeared_time(context: &Context) -> i64 {
+    let now = time();
+    let ts = context.smeared_timestamp.current();
+    std::cmp::max(ts, now)
+}
+</function>
+<translated function>
+Here is the Rust translation for the given C function. Conversion has been handled for unlocking and locking scenario using atomic types and standard memory orders provided by Rust.
+
+```rust
+use std::sync::atomic::{AtomicI64, Ordering};
+
+pub struct Context {
+    last_smeared_timestamp: AtomicI64,
+}
+
+pub(crate) fn smeared_time(context: &Context) -> i64 {
+    let now = time();
+    let last_smeared_timestamp = context.last_smeared_timestamp.load(Ordering::Relaxed);
+   
+    if last_smeared_timestamp >= now {
+        context.last_smeared_timestamp.store(last_smeared_timestamp + 1, Ordering::Relaxed);
+        return last_smeared_timestamp+1;
+    }
+    now
+}
+```
+
+This translation operates on the atomic `last_smeared_timestamp` member variable with `Relaxed` memory ordering to achieve necessary actions of lock/unlock sequence in the original C code. So, please ensure to add atomic `last_smeared_timestamp` variable to your `Context` struct. As for the function `time()`, it is assumed to be within the scope of this function's module.</translated function>Here is the Rust translation for the given C function. Conversion has been handled for unlocking and locking scenario using atomic types and standard memory orders provided by Rust.
+
+```rust
+use std::sync::atomic::{AtomicI64, Ordering};
+
+pub struct Context {
+    last_smeared_timestamp: AtomicI64,
+}
+
+pub(crate) fn smeared_time(context: &Context) -> i64 {
+    let now = time();
+    let last_smeared_timestamp = context.last_smeared_timestamp.load(Ordering::Relaxed);
+   
+    if last_smeared_timestamp >= now {
+        context.last_smeared_timestamp.store(last_smeared_timestamp + 1, Ordering::Relaxed);
+        return last_smeared_timestamp+1;
+    }
+    now
+}
+```
+
+This translation operates on the atomic `last_smeared_timestamp` member variable with `Relaxed` memory ordering to achieve necessary actions of lock/unlock sequence in the original C code. So, please ensure to add atomic `last_smeared_timestamp` variable to your `Context` struct. As for the function `time()`, it is assumed to be within the scope of this function's module.

@@ -1,0 +1,228 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def list_namespaces(self, namespace: Union[str, Identifier] = ()) -> List[Identifier]:
+        namespace_tuple = self.identifier_to_tuple(namespace)
+        response = self._session.get(
+            self.url(
+                f"{Endpoints.list_namespaces}?parent={NAMESPACE_SEPARATOR.join(namespace_tuple)}"
+                if namespace_tuple
+                else Endpoints.list_namespaces
+            ),
+        )
+        try:
+            response.raise_for_status()
+        except HTTPError as exc:
+            self._handle_non_200_response(exc, {})
+
+        namespaces = ListNamespaceResponse(**response.json())
+        return [namespace_tuple + child_namespace for child_namespace in namespaces.namespaces]
+</python function>
+<rust function signature>
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+async fn query<
+        R: DeserializeOwned,
+        E: DeserializeOwned + Into<Error>,
+        const SUCCESS_CODE: u16,
+    >(
+        &self,
+        request: Request,
+    ) -> Result<R> {
+        let resp = self.0.execute(request).await?;
+
+        if resp.status().as_u16() == SUCCESS_CODE {
+            let text = resp.bytes().await?;
+            Ok(serde_json::from_slice::<R>(&text).map_err(|e| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    "Failed to parse response from rest catalog server!",
+                )
+                .with_context("json", String::from_utf8_lossy(&text))
+                .with_source(e)
+            })?)
+        } else {
+            let code = resp.status();
+            let text = resp.bytes().await?;
+            let e = serde_json::from_slice::<E>(&text).map_err(|e| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    "Failed to parse response from rest catalog server!",
+                )
+                .with_context("json", String::from_utf8_lossy(&text))
+                .with_context("code", code.to_string())
+                .with_source(e)
+            })?;
+            Err(e.into())
+        }
+    }
+
+pub fn from_vec(names: Vec<String>) -> Result<Self> {
+        if names.is_empty() {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                "Namespace identifier can't be empty!",
+            ));
+        }
+        Ok(Self(names))
+    }
+        
+fn namespaces_endpoint(&self) -> String {
+        self.url_prefixed(&["namespaces"])
+    }
+
+pub(super) struct ListNamespaceResponse {
+        pub(super) namespaces: Vec<Vec<String>>,
+    }
+
+pub struct RestCatalog {
+    config: RestCatalogConfig,
+    client: HttpClient,
+}
+
+struct HttpClient(Client);
+
+pub(super) struct ErrorResponse {
+        error: ErrorModel,
+    }
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::collections::HashMap;
+use std::str::FromStr;
+use async_trait::async_trait;
+use itertools::Itertools;
+use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, Request, Response, StatusCode, Url};
+use serde::de::DeserializeOwned;
+use typed_builder::TypedBuilder;
+use urlencoding::encode;
+use crate::catalog::_serde::{
+    CommitTableRequest, CommitTableResponse, CreateTableRequest, LoadTableResponse,
+};
+use iceberg::io::FileIO;
+use iceberg::table::Table;
+use iceberg::Result;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+};
+use self::_serde::{
+    CatalogConfig, ErrorResponse, ListNamespaceResponse, ListTableResponse, NamespaceSerde,
+    RenameTableRequest, TokenResponse, NO_CONTENT, OK,
+};
+use std::collections::HashMap;
+use serde_derive::{Deserialize, Serialize};
+use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
+use iceberg::{Error, ErrorKind, Namespace, TableIdent, TableRequirement, TableUpdate};
+use chrono::{TimeZone, Utc};
+use iceberg::spec::{
+        FormatVersion, NestedField, NullOrder, Operation, PrimitiveType, Schema, Snapshot,
+        SnapshotLog, SortDirection, SortField, SortOrder, Summary, Transform, Type,
+        UnboundPartitionField, UnboundPartitionSpec,
+    };
+use iceberg::transaction::Transaction;
+use mockito::{Mock, Server, ServerGuard};
+use serde_json::json;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+use uuid::uuid;
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+        let mut request = self.client.0.get(self.config.namespaces_endpoint());
+        if let Some(ns) = parent {
+            request = request.query(&[("parent", ns.encode_in_url())]);
+        }
+
+        let resp = self
+            .client
+            .query::<ListNamespaceResponse, ErrorResponse, OK>(request.build()?)
+            .await?;
+
+        resp.namespaces
+            .into_iter()
+            .map(NamespaceIdent::from_vec)
+            .collect::<Result<Vec<NamespaceIdent>>>()
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+async fn list_namespaces(
+    &self,
+    parent: Option<&NamespaceIdent>,
+) -> Result<Vec<NamespaceIdent>> {
+    let endpoint = match parent {
+        Some(namespace) => {
+            let namespace_str = namespace.as_ref().join(".");
+            format!("{}?parent={}", self.namespaces_endpoint(), encode(&namespace_str))
+        }
+        None => self.namespaces_endpoint(),
+    };
+
+    let request = Request::new(reqwest::Method::GET, Url::parse(&endpoint)?);
+
+    let response: ListNamespaceResponse = self.query::<ListNamespaceResponse, ErrorResponse, OK>(request).await?;
+
+    let mut result = Vec::new();
+    for child_namespace in response.namespaces {
+        let mut full_namespace = match parent {
+            Some(p) => p.as_ref().to_vec(),
+            None => Vec::new(),
+        };
+        full_namespace.extend(child_namespace);
+        result.push(NamespaceIdent::from_vec(full_namespace)?);
+    }
+
+    Ok(result)
+}
+```
+
+This Rust function translates the functionality of the Python function while adhering to the provided Rust function signature and using the available dependencies and libraries. It uses the `query` method for making the HTTP request, handles the response, and constructs the `Vec<NamespaceIdent>` result.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+async fn list_namespaces(
+    &self,
+    parent: Option<&NamespaceIdent>,
+) -> Result<Vec<NamespaceIdent>> {
+    let endpoint = match parent {
+        Some(namespace) => {
+            let namespace_str = namespace.as_ref().join(".");
+            format!("{}?parent={}", self.namespaces_endpoint(), encode(&namespace_str))
+        }
+        None => self.namespaces_endpoint(),
+    };
+
+    let request = Request::new(reqwest::Method::GET, Url::parse(&endpoint)?);
+
+    let response: ListNamespaceResponse = self.query::<ListNamespaceResponse, ErrorResponse, OK>(request).await?;
+
+    let mut result = Vec::new();
+    for child_namespace in response.namespaces {
+        let mut full_namespace = match parent {
+            Some(p) => p.as_ref().to_vec(),
+            None => Vec::new(),
+        };
+        full_namespace.extend(child_namespace);
+        result.push(NamespaceIdent::from_vec(full_namespace)?);
+    }
+
+    Ok(result)
+}
+```
+
+This Rust function translates the functionality of the Python function while adhering to the provided Rust function signature and using the available dependencies and libraries. It uses the `query` method for making the HTTP request, handles the response, and constructs the `Vec<NamespaceIdent>` result.

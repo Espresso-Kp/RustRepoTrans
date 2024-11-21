@@ -1,0 +1,93 @@
+fn ntt(x: &mut [i32]) {
+    let mut t = DEGREE / 2;
+    let q = PRIME;
+
+    /* Convert to Montgomery form */
+    for j in 0..DEGREE {
+        x[j] = nres(x[j])
+    }
+    let mut m = 1;
+    while m < DEGREE {
+        let mut k = 0;
+        for i in 0..m {
+            let s = ROOTS[m + i];
+            for j in k..k + t {
+                let u = x[j];
+                let v = modmul(x[j + t], s);
+                x[j] = u + v;
+                x[j + t] = u + 2 * q - v;
+            }
+            k += 2 * t;
+        }
+        t /= 2;
+        m *= 2;
+    }
+}
+fn redc_it(p: &mut [i32]) {
+    for i in 0..DEGREE {
+        p[i] = redc(p[i] as u64);
+    }
+}
+fn error(rng: &mut RAND, poly: &mut [i32]) {
+    for i in 0..DEGREE {
+        let mut n1 = ((rng.getbyte() as i32) & 0xff) + (((rng.getbyte() as i32) & 0xff) << 8);
+        let mut n2 = ((rng.getbyte() as i32) & 0xff) + (((rng.getbyte() as i32) & 0xff) << 8);
+        let mut r = 0 as i32;
+        for _ in 0..16 {
+            r += (n1 & 1) - (n2 & 1);
+            n1 >>= 1;
+            n2 >>= 1;
+        }
+        poly[i] = r + PRIME;
+    }
+}
+fn poly_add(p1: &mut [i32], p3: &[i32]) {
+    for i in 0..DEGREE {
+        p1[i] = p1[i] + p3[i];
+    }
+}
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+fn nhs_pack(poly: &[i32], array: &mut [u8]) {
+    let mut j = 0;
+    let mut i = 0;
+    while i < DEGREE {
+        let a = poly[i];
+        let b = poly[i + 1];
+        let c = poly[i + 2];
+        let d = poly[i + 3];
+        i += 4;
+        array[j] = (a & 0xff) as u8;
+        array[j + 1] = (((a >> 8) | (b << 6)) & 0xff) as u8;
+        array[j + 2] = ((b >> 2) & 0xff) as u8;
+        array[j + 3] = (((b >> 10) | (c << 4)) & 0xff) as u8;
+        array[j + 4] = ((c >> 4) & 0xff) as u8;
+        array[j + 5] = (((c >> 12) | (d << 2)) & 0xff) as u8;
+        array[j + 6] = (d >> 6) as u8;
+        j += 7;
+    }
+}
+fn poly_mul(p1: &mut [i32], p3: &[i32]) {
+    for i in 0..DEGREE {
+        p1[i] = modmul(p1[i], p3[i]);
+    }
+}
+fn poly_hard_reduce(poly: &mut [i32]) {
+    for i in 0..DEGREE {
+        let mut e = modmul(poly[i], ONE);
+        e = e - PRIME;
+        poly[i] = e + ((e >> (WL - 1)) & PRIME);
+    }
+}
+------
+
+use crate::rand::RAND;
+use crate::sha3;
+use crate::sha3::SHA3;
+use super::*;

@@ -1,0 +1,126 @@
+<path>
+projects/deltachat-core/rust/imex.rs
+</path>
+<function>
+pub async fn initiate_key_transfer(context: &Context) -> Result<String> {
+    let setup_code = create_setup_code(context);
+    /* this may require a keypair to be created. this may take a second ... */
+    let setup_file_content = render_setup_file(context, &setup_code).await?;
+    /* encrypting may also take a while ... */
+    let setup_file_blob = BlobObject::create(
+        context,
+        "autocrypt-setup-message.html",
+        setup_file_content.as_bytes(),
+    )
+    .await?;
+
+    let chat_id = ChatId::create_for_contact(context, ContactId::SELF).await?;
+    let mut msg = Message {
+        viewtype: Viewtype::File,
+        ..Default::default()
+    };
+    msg.param.set(Param::File, setup_file_blob.as_name());
+    msg.subject = stock_str::ac_setup_msg_subject(context).await;
+    msg.param
+        .set(Param::MimeType, "application/autocrypt-setup");
+    msg.param.set_cmd(SystemMessage::AutocryptSetupMessage);
+    msg.force_plaintext();
+    msg.param.set_int(Param::SkipAutocrypt, 1);
+
+    chat::send_msg(context, chat_id, &mut msg).await?;
+    // no maybe_add_bcc_self_device_msg() here.
+    // the ui shows the dialog with the setup code on this device,
+    // it would be too much noise to have two things popping up at the same time.
+    // maybe_add_bcc_self_device_msg() is called on the other device
+    // once the transfer is completed.
+    Ok(setup_code)
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_imex.c
+</path>
+<function>
+char* dc_initiate_key_transfer(dc_context_t* context)
+{
+	int       success = 0;
+	char*     setup_code = NULL;
+	char*     setup_file_content = NULL;
+	char*     setup_file_name = NULL;
+	uint32_t  chat_id = 0;
+	dc_msg_t* msg = NULL;
+	uint32_t  msg_id = 0;
+
+	if (!dc_alloc_ongoing(context)) {
+		return 0; /* no cleanup as this would call dc_free_ongoing() */
+	}
+	#define CHECK_EXIT if (context->shall_stop_ongoing) { goto cleanup; }
+
+	if ((setup_code=dc_create_setup_code(context))==NULL) { /* this may require a keypair to be created. this may take a second ... */
+		goto cleanup;
+	}
+
+	CHECK_EXIT
+
+	if ((setup_file_content=dc_render_setup_file(context, setup_code))==NULL) { /* encrypting may also take a while ... */
+		goto cleanup;
+	}
+
+	CHECK_EXIT
+
+	if ((setup_file_name=dc_get_fine_pathNfilename(context, "$BLOBDIR", "autocrypt-setup-message.html"))==NULL
+	 || !dc_write_file(context, setup_file_name, setup_file_content, strlen(setup_file_content))) {
+		goto cleanup;
+	}
+
+	if ((chat_id=dc_create_chat_by_contact_id(context, DC_CONTACT_ID_SELF))==0) {
+		goto cleanup;
+	}
+
+	msg = dc_msg_new_untyped(context);
+	msg->type = DC_MSG_FILE;
+	dc_param_set    (msg->param, DC_PARAM_FILE,              setup_file_name);
+	dc_param_set    (msg->param, DC_PARAM_MIMETYPE,          "application/autocrypt-setup");
+	dc_param_set_int(msg->param, DC_PARAM_CMD,               DC_CMD_AUTOCRYPT_SETUP_MESSAGE);
+	dc_param_set_int(msg->param, DC_PARAM_FORCE_PLAINTEXT,   DC_FP_NO_AUTOCRYPT_HEADER);
+
+	CHECK_EXIT
+
+	if ((msg_id = dc_send_msg(context, chat_id, msg))==0) {
+		goto cleanup;
+	}
+
+	dc_msg_unref(msg);
+	msg = NULL;
+
+	/* wait until the message is really sent */
+	dc_log_info(context, 0, "Wait for setup message being sent ...");
+
+	while (1)
+	{
+		CHECK_EXIT
+
+		sleep(1);
+
+		msg = dc_get_msg(context, msg_id);
+		if (dc_msg_is_sent(msg)) {
+			break;
+		}
+		dc_msg_unref(msg);
+		msg = NULL;
+	}
+
+	dc_log_info(context, 0, "... setup message sent.");
+
+	success = 1;
+
+cleanup:
+	if (!success) { free(setup_code); setup_code = NULL; }
+	free(setup_file_name);
+	free(setup_file_content);
+	dc_msg_unref(msg);
+	dc_free_ongoing(context);
+	return setup_code;
+}
+</function>

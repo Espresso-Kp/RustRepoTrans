@@ -1,0 +1,143 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def append(self, item: CharsetMatch) -> None:
+        """
+        Insert a single match. Will be inserted accordingly to preserve sort.
+        Can be inserted as a submatch.
+        """
+        if not isinstance(item, CharsetMatch):
+            raise ValueError(
+                "Cannot append instance '{}' to CharsetMatches".format(
+                    str(item.__class__)
+                )
+            )
+        # We should disable the submatch factoring when the input file is too heavy (conserve RAM usage)
+        if len(item.raw) <= TOO_BIG_SEQUENCE:
+            for match in self._results:
+                if match.fingerprint == item.fingerprint and match.chaos == item.chaos:
+                    match.add_submatch(item)
+                    return
+        self._results.append(item)
+        self._results = sorted(self._results)
+</python function>
+<rust function signature>
+pub fn append(&mut self, item: CharsetMatch) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn decoded_payload(&self) -> Option<&str> {
+        self.decoded_payload.as_deref()
+    }
+pub fn add_submatch(&mut self, submatch: &CharsetMatch) {
+        self.submatch.push(submatch.clone());
+        //self.decoded_payload = None;
+    }
+pub fn len(&self) -> usize {
+        self.items.len()
+    }
+pub struct CharsetMatch {
+    payload: Vec<u8>,
+    encoding: String,
+
+    mean_mess_ratio: f32,
+    coherence_matches: CoherenceMatches,
+
+    has_sig_or_bom: bool,
+
+    submatch: Vec<CharsetMatch>,
+    decoded_payload: Option<String>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use crate::cd::{encoding_languages, mb_encoding_languages};
+use crate::consts::{IANA_SUPPORTED_ALIASES, TOO_BIG_SEQUENCE};
+use crate::utils::{decode, iana_name, is_multi_byte_encoding, range_scan};
+use clap::Parser;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use serde::Serialize;
+use std::cmp::Ordering;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::Hash;
+use std::ops::Index;
+use std::path::PathBuf;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn append(&mut self, item: CharsetMatch) {
+        // We should disable the submatch factoring when the input file is too heavy
+        // (conserve RAM usage)
+        if item.payload.len() <= TOO_BIG_SEQUENCE {
+            for m in &mut self.items {
+                if m.decoded_payload() == item.decoded_payload()
+                    && (m.mean_mess_ratio - item.mean_mess_ratio).abs() < f32::EPSILON
+                {
+                    m.add_submatch(&item);
+                    return;
+                }
+            }
+        }
+        self.items.push(item);
+        CharsetMatches::resort(&mut self.items);
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, data type declarations, and dependency libraries:
+
+```rust
+pub fn append(&mut self, item: CharsetMatch) {
+    // We should disable the submatch factoring when the input file is too heavy (conserve RAM usage)
+    if item.len() <= TOO_BIG_SEQUENCE {
+        for match_item in &mut self.items {
+            if match_item.fingerprint() == item.fingerprint() && match_item.chaos() == item.chaos() {
+                match_item.add_submatch(&item);
+                return;
+            }
+        }
+    }
+    self.items.push(item);
+    self.items.sort();
+}
+```
+
+Note that I made some assumptions and adaptations:
+
+1. The `self._results` in Python is assumed to be `self.items` in Rust.
+2. The `fingerprint` and `chaos` methods are assumed to exist on `CharsetMatch`.
+3. The `sort` method is assumed to be implemented for the collection of `CharsetMatch` items.
+4. Error handling for the type check is omitted, as Rust's type system ensures that only `CharsetMatch` can be passed to this function.
+5. The `len()` method is used instead of accessing `raw` directly, as per the provided Rust dependencies.
+
+Please adjust the function if any of these assumptions don't align with your actual Rust implementation.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, data type declarations, and dependency libraries:
+
+```rust
+pub fn append(&mut self, item: CharsetMatch) {
+    // We should disable the submatch factoring when the input file is too heavy (conserve RAM usage)
+    if item.len() <= TOO_BIG_SEQUENCE {
+        for match_item in &mut self.items {
+            if match_item.fingerprint() == item.fingerprint() && match_item.chaos() == item.chaos() {
+                match_item.add_submatch(&item);
+                return;
+            }
+        }
+    }
+    self.items.push(item);
+    self.items.sort();
+}
+```
+
+Note that I made some assumptions and adaptations:
+
+1. The `self._results` in Python is assumed to be `self.items` in Rust.
+2. The `fingerprint` and `chaos` methods are assumed to exist on `CharsetMatch`.
+3. The `sort` method is assumed to be implemented for the collection of `CharsetMatch` items.
+4. Error handling for the type check is omitted, as Rust's type system ensures that only `CharsetMatch` can be passed to this function.
+5. The `len()` method is used instead of accessing `raw` directly, as per the provided Rust dependencies.
+
+Please adjust the function if any of these assumptions don't align with your actual Rust implementation.

@@ -1,0 +1,266 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int VP_DSA(int sha,byte[] W,byte[] F, byte[] C,byte[] D)
+	{
+		BIG r,f,c,d,h2;
+		int res=0;
+		ECP G,WP,P;
+		int valid; 
+
+		byte[] B=hashit(sha,F,0,null,BIG.MODBYTES);
+
+		G=ECP.generator();
+		r=new BIG(ROM.CURVE_Order);
+
+		c=BIG.fromBytes(C);
+		d=BIG.fromBytes(D);
+		f=BIG.fromBytes(B);
+     
+		if (c.iszilch() || BIG.comp(c,r)>=0 || d.iszilch() || BIG.comp(d,r)>=0) 
+            res=INVALID;
+
+		if (res==0)
+		{
+			d.invmodp(r);
+			f.copy(BIG.modmul(f,d,r));
+			h2=BIG.modmul(c,d,r);
+
+			WP=ECP.fromBytes(W);
+			if (WP.is_infinity()) res=ERROR;
+			else
+			{
+				P=new ECP();
+				P.copy(WP);
+				P=P.mul2(h2,G,f);
+				if (P.is_infinity()) res=INVALID;
+				else
+				{
+					d=P.getX();
+					d.mod(r);
+					if (BIG.comp(d,c)!=0) res=INVALID;
+				}
+			}
+		}
+
+		return res;
+	}
+</java function>
+<rust function signature>
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize {
+    let mut res = 0;
+
+    let mut b: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+
+    hashit(sha, f, 0, None, big::MODBYTES as usize, &mut b);
+
+    let G = ECP::generator();
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let cb = Big::from_bytes(c); // c or &c ?
+    let mut db = Big::from_bytes(d); // d or &d ?
+
+    if cb.is_zilch() || Big::comp(&cb, &r) >= 0 || db.is_zilch() || Big::comp(&db, &r) >= 0 {
+        res = INVALID;
+    }
+
+    if res == 0 {
+        let mut fb = Big::from_bytes(&b);
+        db.invmodp(&r);
+        let tb = Big::modmul(&fb, &db, &r);
+        fb = tb.clone();
+        let h2 = Big::modmul(&cb, &db, &r);
+
+        let WP = ECP::from_bytes(&w);
+        if WP.is_infinity() {
+            res = ERROR;
+        } else {
+            let mut P = WP.clone();
+
+            P = P.mul2(&h2, &G, &fb);
+
+            if P.is_infinity() {
+                res = INVALID;
+            } else {
+                db = P.getx();
+                db.rmod(&r);
+
+                if Big::comp(&db, &cb) != 0 {
+                    res = INVALID
+                }
+            }
+        }
+    }
+
+    res
+}
+</function>
+<translated function>
+ ```rust
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize {
+    let mut r: Big;
+    let mut f: Big;
+    let mut c: Big;
+    let mut d: Big;
+    let mut h2: Big;
+    let mut res = 0;
+    let mut wp: ECP;
+    let mut p: ECP;
+    let mut d_inv: Big;
+    let mut d_mul: Big;
+
+    let b = hashit(sha, f, 0, None, BIG.MODBYTES);
+
+    let g = ECP::generator();
+    r = Big::new(rom::CURVE_Order);
+
+    c = Big::from_bytes(c);
+    d = Big::from_bytes(d);
+    f = Big::from_bytes(b);
+
+    if c.is_zilch() || Big::comp(&c, &r) >= 0 || d.is_zilch() || Big::comp(&d, &r) >= 0 {
+        res = -1;
+    }
+
+    if res == 0 {
+        d_inv = d.invmodp(&r);
+        d_mul = Big::modmul(&f, &d_inv, &r);
+        h2 = Big::modmul(&c, &d_inv, &r);
+
+        wp = ECP::from_bytes(w);
+        if wp.is_infinity() {
+            res = -2;
+        } else {
+            p = ECP::new();
+            p.copy(&wp);
+            p = p.mul2(&h2, &g, &d_mul);
+            if p.is_infinity() {
+                res = -3;
+            } else {
+                d = p.get_x();
+                d.mod(&r);
+                if Big::comp(&d, &c) != 0 {
+                    res = -4;
+                }
+            }
+        }
+    }
+
+    res
+}
+```
+
+This Rust function `ecpvp_dsa` is a direct translation of the provided Java function `VP_DSA`. It uses the same logic and dependencies as the original Java function, including the handling of big integers (`Big`), elliptic curve points (`ECP`), and constants from the `rom` module. The</translated function> ```rust
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+pub fn ecpvp_dsa(sha: usize, w: &[u8], f: &[u8], c: &[u8], d: &[u8]) -> isize {
+    let mut r: Big;
+    let mut f: Big;
+    let mut c: Big;
+    let mut d: Big;
+    let mut h2: Big;
+    let mut res = 0;
+    let mut wp: ECP;
+    let mut p: ECP;
+    let mut d_inv: Big;
+    let mut d_mul: Big;
+
+    let b = hashit(sha, f, 0, None, BIG.MODBYTES);
+
+    let g = ECP::generator();
+    r = Big::new(rom::CURVE_Order);
+
+    c = Big::from_bytes(c);
+    d = Big::from_bytes(d);
+    f = Big::from_bytes(b);
+
+    if c.is_zilch() || Big::comp(&c, &r) >= 0 || d.is_zilch() || Big::comp(&d, &r) >= 0 {
+        res = -1;
+    }
+
+    if res == 0 {
+        d_inv = d.invmodp(&r);
+        d_mul = Big::modmul(&f, &d_inv, &r);
+        h2 = Big::modmul(&c, &d_inv, &r);
+
+        wp = ECP::from_bytes(w);
+        if wp.is_infinity() {
+            res = -2;
+        } else {
+            p = ECP::new();
+            p.copy(&wp);
+            p = p.mul2(&h2, &g, &d_mul);
+            if p.is_infinity() {
+                res = -3;
+            } else {
+                d = p.get_x();
+                d.mod(&r);
+                if Big::comp(&d, &c) != 0 {
+                    res = -4;
+                }
+            }
+        }
+    }
+
+    res
+}
+```
+
+This Rust function `ecpvp_dsa` is a direct translation of the provided Java function `VP_DSA`. It uses the same logic and dependencies as the original Java function, including the handling of big integers (`Big`), elliptic curve points (`ECP`), and constants from the `rom` module. The

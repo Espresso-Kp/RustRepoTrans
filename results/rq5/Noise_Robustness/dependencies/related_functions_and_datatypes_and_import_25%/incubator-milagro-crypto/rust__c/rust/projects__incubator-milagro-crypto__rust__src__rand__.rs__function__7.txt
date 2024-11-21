@@ -1,0 +1,38 @@
+pub fn process(&mut self, byt: u8) {
+        /* process the next message byte */
+        let cnt = ((self.length[0] / 32) % 16) as usize;
+        self.w[cnt] <<= 8;
+        self.w[cnt] |= (byt & 0xFF) as u32;
+        self.length[0] += 8;
+        if self.length[0] == 0 {
+            self.length[1] += 1;
+            self.length[0] = 0
+        }
+        if (self.length[0] % 512) == 0 {
+            self.transform()
+        }
+    }
+pub fn hash(&mut self) -> [u8; HASH_BYTES] {
+        // pad message and finish - supply digest
+        let mut digest: [u8; 32] = [0; 32];
+        let len0 = self.length[0];
+        let len1 = self.length[1];
+        self.process(0x80);
+        while (self.length[0] % 512) != 448 {
+            self.process(0)
+        }
+        self.w[14] = len1;
+        self.w[15] = len0;
+        self.transform();
+        for i in 0..32 {
+            // convert to bytes
+            digest[i] = ((self.h[i / 4] >> (8 * (3 - i % 4))) & 0xff) as u8;
+        }
+        self.init();
+        return digest;
+    }
+------
+
+
+
+use crate::hash256::HASH256;

@@ -1,0 +1,165 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def drop_table(self, identifier: Union[str, Identifier]) -> None:
+        """Drop a table.
+
+        Args:
+            identifier: Table identifier.
+
+        Raises:
+            NoSuchTableError: If a table with the name does not exist, or the identifier is invalid.
+        """
+        identifier_tuple = self.identifier_to_tuple_without_catalog(identifier)
+        database_name, table_name = self.identifier_to_database_and_table(identifier_tuple, NoSuchTableError)
+        try:
+            self.glue.delete_table(DatabaseName=database_name, Name=table_name)
+        except self.glue.exceptions.EntityNotFoundException as e:
+            raise NoSuchTableError(f"Table does not exist: {database_name}.{table_name}") from e
+</python function>
+<rust function signature>
+async fn drop_table(&self, table: &TableIdent) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn drop_table(&self, table: &TableIdent) -> Result<()> {
+        let db_name = validate_namespace(table.namespace())?;
+        let table_name = table.name();
+
+        let builder = self
+            .client
+            .0
+            .delete_table()
+            .database_name(&db_name)
+            .name(table_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and library imports:
+
+```rust
+async fn drop_table(&self, table: &TableIdent) -> Result<()> {
+    let (database_name, table_name) = match table {
+        TableIdent::Full { catalog: _, database, table } => (database.clone(), table.clone()),
+        TableIdent::NamespacedTable { namespace, table } => {
+            if namespace.len() != 1 {
+                return Err(Error::new(
+                    ErrorKind::InvalidArgument,
+                    format!("Invalid table identifier: {:?}", table),
+                ));
+            }
+            (namespace[0].clone(), table.clone())
+        }
+    };
+
+    match self.client
+        .delete_table()
+        .database_name(database_name.clone())
+        .name(table_name.clone())
+        .send()
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            if let aws_sdk_glue::error::SdkError::ServiceError(service_err) = &err {
+                if service_err.err().is_entity_not_found_exception() {
+                    return Err(Error::new(
+                        ErrorKind::NoSuchTable,
+                        format!("Table does not exist: {}.{}", database_name, table_name),
+                    ));
+                }
+            }
+            Err(from_aws_sdk_error(err))
+        }
+    }
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries specified. It handles the table identifier, attempts to delete the table using the Glue client, and handles potential errors, including the case where the table doesn't exist.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and library imports:
+
+```rust
+async fn drop_table(&self, table: &TableIdent) -> Result<()> {
+    let (database_name, table_name) = match table {
+        TableIdent::Full { catalog: _, database, table } => (database.clone(), table.clone()),
+        TableIdent::NamespacedTable { namespace, table } => {
+            if namespace.len() != 1 {
+                return Err(Error::new(
+                    ErrorKind::InvalidArgument,
+                    format!("Invalid table identifier: {:?}", table),
+                ));
+            }
+            (namespace[0].clone(), table.clone())
+        }
+    };
+
+    match self.client
+        .delete_table()
+        .database_name(database_name.clone())
+        .name(table_name.clone())
+        .send()
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            if let aws_sdk_glue::error::SdkError::ServiceError(service_err) = &err {
+                if service_err.err().is_entity_not_found_exception() {
+                    return Err(Error::new(
+                        ErrorKind::NoSuchTable,
+                        format!("Table does not exist: {}.{}", database_name, table_name),
+                    ));
+                }
+            }
+            Err(from_aws_sdk_error(err))
+        }
+    }
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries specified. It handles the table identifier, attempts to delete the table using the Glue client, and handles potential errors, including the case where the table doesn't exist.

@@ -1,0 +1,282 @@
+pub fn inc(&mut self, x: isize) {
+        self.norm();
+        self.w[0] += x as Chunk;
+    }
+
+pub fn random(rng: &mut RAND) -> Big {
+        let mut m = Big::new();
+        let mut j = 0;
+        let mut r: u8 = 0;
+
+        // generate random Big
+        for _ in 0..8 * (MODBYTES as usize) {
+            if j == 0 {
+                r = rng.getbyte()
+            } else {
+                r >>= 1
+            }
+
+            let b = (r as Chunk) & 1;
+            m.shl(1);
+            m.w[0] += b;
+            j += 1;
+            j &= 7;
+        }
+        m
+    }
+
+pub fn set(&mut self, i: usize, x: Chunk) {
+        self.w[i] = x;
+    }
+
+pub fn parity(&self) -> isize {
+        (self.w[0] % 2) as isize
+    }
+
+pub fn getlen(&self) -> usize {
+        return self.length;
+    }
+
+pub fn cfactor(&self, s: isize) -> bool {
+        let n = self.length;
+
+        let mut x = FF::new_int(n);
+        let mut y = FF::new_int(n);
+
+        y.set(s);
+        x.copy(&self);
+        x.norm();
+
+        x.sub(&y);
+        x.norm();
+
+        while !x.is_zilch() && x.parity() == 0 {
+            x.shr()
+        }
+
+        while FF::comp(&x, &y) > 0 {
+            x.sub(&y);
+            x.norm();
+            while !x.is_zilch() && x.parity() == 0 {
+                x.shr()
+            }
+        }
+
+        let g = x.v[0].get(0) as isize;
+        let r = FF::igcd(s, g);
+        if r > 1 {
+            return true;
+        }
+        return false;
+    }
+
+pub fn add(&mut self, r: &Big) {
+        for i in 0..NLEN {
+            self.w[i] += r.w[i]
+        }
+    }
+
+pub fn lastbits(&mut self, n: usize) -> isize {
+        let msk = ((1 << n) - 1) as Chunk;
+        self.norm();
+        (self.w[0] & msk) as isize
+    }
+
+pub fn dec(&mut self, x: isize) {
+        self.norm();
+        self.w[0] -= x as Chunk;
+    }
+
+pub fn shr(&mut self, k: usize) {
+        let n = k % BASEBITS;
+        let m = k / BASEBITS;
+        for i in 0..NLEN - m - 1 {
+            self.w[i] = (self.w[m + i] >> n) | ((self.w[m + i + 1] << (BASEBITS - n)) & BMASK)
+        }
+        self.w[NLEN - m - 1] = self.w[NLEN - 1] >> n;
+        for i in NLEN - m..NLEN {
+            self.w[i] = 0
+        }
+    }
+
+pub fn invmodp(&mut self, p: &Big) {
+        self.rmod(p);
+        let mut u = self.clone();
+        let mut v = p.clone();
+        let mut x1 = Big::new_int(1);
+        let mut x2 = Big::new();
+        let one = Big::new_int(1);
+
+        while (Big::comp(&u, &one) != 0) && (Big::comp(&v, &one) != 0) {
+            while u.parity() == 0 {
+                u.fshr(1);
+                if x1.parity() != 0 {
+                    x1.add(p);
+                    x1.norm();
+                }
+                x1.fshr(1);
+            }
+            while v.parity() == 0 {
+                v.fshr(1);
+                if x2.parity() != 0 {
+                    x2.add(p);
+                    x2.norm();
+                }
+                x2.fshr(1);
+            }
+            if Big::comp(&u, &v) >= 0 {
+                u.sub(&v);
+                u.norm();
+                if Big::comp(&x1, &x2) >= 0 {
+                    x1.sub(&x2)
+                } else {
+                    let mut t = p.clone();
+                    t.sub(&x2);
+                    x1.add(&t);
+                }
+                x1.norm();
+            } else {
+                v.sub(&u);
+                v.norm();
+                if Big::comp(&x2, &x1) >= 0 {
+                    x2.sub(&x1)
+                } else {
+                    let mut t = p.clone();
+                    t.sub(&x1);
+                    x2.add(&t);
+                }
+                x2.norm();
+            }
+        }
+        if Big::comp(&u, &one) == 0 {
+            *self = x1
+        } else {
+            *self = x2
+        }
+    }
+
+pub fn norm(&mut self) -> Chunk {
+        let mut carry = 0 as Chunk;
+        for i in 0..NLEN - 1 {
+            let d = self.w[i] + carry;
+            self.w[i] = d & BMASK;
+            carry = d >> BASEBITS;
+        }
+        self.w[NLEN - 1] += carry;
+        (self.w[NLEN - 1] >> ((8 * MODBYTES) % BASEBITS)) as Chunk
+    }
+
+pub fn copy(&mut self, b: &FF) {
+        for i in 0..self.length {
+            self.v[i] = b.v[i].clone();
+        }
+    }
+
+pub fn new_int(n: usize) -> FF {
+        let mut f = FF {
+            v: Vec::new(),
+            length: 0,
+        };
+        for _ in 0..n {
+            f.v.push(Big::new());
+        }
+        f.length = n;
+        return f;
+    }
+
+pub fn mul(x: &FF, y: &FF) -> FF {
+        let n = x.length;
+        let mut z = FF::new_int(2 * n);
+        let mut t = FF::new_int(2 * n);
+        z.karmul(0, &x, 0, &y, 0, &mut t, 0, n);
+        return z;
+    }
+
+pub fn prime(pp: &FF, rng: &mut RAND) -> bool {
+        let mut s = 0;
+        let n = pp.length;
+        let mut d = FF::new_int(n);
+        let mut x = FF::new_int(n);
+        let mut unity = FF::new_int(n);
+        let mut nm1 = FF::new_int(n);
+        let mut p = FF::new_int(n);
+        p.copy(pp);
+
+        let sf = 4849845; /* 3*5*.. *19 */
+        p.norm();
+
+        if p.cfactor(sf) {
+            return false;
+        }
+        unity.one();
+        nm1.copy(&p);
+        nm1.sub(&unity);
+        nm1.norm();
+        d.copy(&nm1);
+
+        while d.parity() == 0 {
+            d.shr();
+            s += 1;
+        }
+        if s == 0 {
+            return false;
+        }
+        for _ in 0..10 {
+            x.randomnum(&p, rng);
+
+            x.pow(&d, &p);
+
+            if FF::comp(&x, &unity) == 0 || FF::comp(&x, &nm1) == 0 {
+                continue;
+            }
+            let mut looper = false;
+            for _ in 1..s {
+                x.power(2, &p);
+                if FF::comp(&x, &unity) == 0 {
+                    return false;
+                }
+                if FF::comp(&x, &nm1) == 0 {
+                    looper = true;
+                    break;
+                }
+            }
+            if looper {
+                continue;
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+pub struct RsaPublicKey {
+    e: isize,
+    n: FF,
+}
+
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+pub struct RsaPrivateKey {
+    p: FF,
+    q: FF,
+    dp: FF,
+    dq: FF,
+    c: FF,
+}
+
+------
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

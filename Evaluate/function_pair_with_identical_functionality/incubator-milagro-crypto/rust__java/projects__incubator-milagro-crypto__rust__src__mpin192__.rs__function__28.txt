@@ -1,0 +1,84 @@
+<path>
+projects/incubator-milagro-crypto/rust/src/mpin192.rs
+</path>
+<function>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP24::from_bytes(&g1);
+    let mut g2 = FP24::from_bytes(&g2);
+    let mut z = Big::from_bytes(&r);
+    let mut x = Big::from_bytes(&x);
+    let h = Big::from_bytes(&h);
+
+    let mut W = ECP::from_bytes(&wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    W = pair192::g1mul(&mut W, &mut x);
+
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+
+    z.add(&h); //new
+    z.rmod(&mut r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&mut g2);
+
+    let mut c = g1.compow(&z, &mut r);
+
+    hash(sha, &mut c, &mut W, ck);
+
+    return 0;
+}
+</function>
+------
+
+<path>
+projects/incubator-milagro-crypto/java/src/main/java/org/apache/milagro/amcl/BLS24/MPIN192.java
+</path>
+<function>
+public static int CLIENT_KEY(int sha,byte[] G1,byte[] G2,int pin,byte[] R,byte[] X,byte[] H,byte[] wCID,byte[] CK)
+	{
+		byte[] t;
+
+		FP24 g1=FP24.fromBytes(G1);
+		FP24 g2=FP24.fromBytes(G2);
+		BIG z=BIG.fromBytes(R);
+		BIG x=BIG.fromBytes(X);
+		BIG h=BIG.fromBytes(H);
+
+		ECP W=ECP.fromBytes(wCID);
+		if (W.is_infinity()) return INVALID_POINT; 
+
+		W=PAIR192.G1mul(W,x);
+
+//		FP2 f=new FP2(new BIG(ROM.Fra),new BIG(ROM.Frb));
+		BIG r=new BIG(ROM.CURVE_Order);
+//		BIG q=new BIG(ROM.Modulus);
+
+		z.add(h);	//new
+		z.mod(r);
+
+		g2.pinpow(pin,PBLEN);
+		g1.mul(g2);
+
+		FP8 c=g1.compow(z,r);
+
+		t=mpin_hash(sha,c,W);
+
+		for (int i=0;i<ECP.AESKEY;i++) CK[i]=t[i];
+
+		return 0;
+	}
+</function>
+

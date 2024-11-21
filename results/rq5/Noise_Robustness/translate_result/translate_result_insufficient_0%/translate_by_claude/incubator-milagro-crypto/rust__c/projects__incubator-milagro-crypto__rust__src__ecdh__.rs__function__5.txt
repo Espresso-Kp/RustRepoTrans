@@ -1,0 +1,171 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+void PBKDF2(int sha,const octet *p,octet *s,int rep,int olen,octet *key)
+{
+    int len;
+    int d=ROUNDUP(olen,sha);
+    char f[64];
+    char u[64];
+    octet F= {0,sizeof(f),f};
+    octet U= {0,sizeof(u),u};
+    OCT_empty(key);
+
+    for (int i=1; i<=d; i++)
+    {
+        len=s->len;
+        OCT_jint(s,i,4);
+
+        HMAC(sha,s,p,sha,&F);
+
+        s->len=len;
+        OCT_copy(&U,&F);
+        for (int j=2; j<=rep; j++)
+        {
+            HMAC(sha,&U,p,sha,&U);
+            OCT_xor(&F,&U);
+        }
+
+        OCT_joctet(key,&F);
+    }
+
+    OCT_chop(key,NULL,olen);
+}
+</c function>
+<rust function signature>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut d = olen / sha;
+    if olen % sha != 0 {
+        d += 1
+    }
+    let mut f: [u8; 64] = [0; 64];
+    let mut u: [u8; 64] = [0; 64];
+    let mut ku: [u8; 64] = [0; 64];
+    let mut s: [u8; 36] = [0; 36]; // Maximum salt of 32 bytes + 4
+    let mut n: [u8; 4] = [0; 4];
+
+    let sl = salt.len();
+    let mut kp = 0;
+    for i in 0..d {
+        for j in 0..sl {
+            s[j] = salt[j]
+        }
+        intto_bytes(i + 1, &mut n);
+        for j in 0..4 {
+            s[sl + j] = n[j]
+        }
+
+        hmac(sha, &s[0..sl + 4], pass, sha, &mut f);
+
+        for j in 0..sha {
+            u[j] = f[j]
+        }
+        for _ in 1..rep {
+            hmac(sha, &u, pass, sha, &mut ku);
+            for k in 0..sha {
+                u[k] = ku[k];
+                f[k] ^= u[k]
+            }
+        }
+        for j in 0..EFS {
+            if kp < olen && kp < f.len() {
+                k[kp] = f[j]
+            }
+            kp += 1
+        }
+    }
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let d = (olen + sha - 1) / sha;
+    let mut f = [0u8; 64];
+    let mut u = [0u8; 64];
+    let mut f_oct = OCT::new(&mut f);
+    let mut u_oct = OCT::new(&mut u);
+    let mut salt_oct = OCT::new(&mut salt.to_vec());
+    let pass_oct = OCT::new(&mut pass.to_vec());
+
+    k.fill(0);
+    let mut k_oct = OCT::new(k);
+
+    for i in 1..=d {
+        let len = salt_oct.len();
+        salt_oct.jint(i as i32, 4);
+
+        hmac(sha, &salt_oct, &pass_oct, sha, &mut f_oct);
+
+        salt_oct.len = len;
+        u_oct.copy(&f_oct);
+        for _ in 2..=rep {
+            hmac(sha, &u_oct, &pass_oct, sha, &mut u_oct);
+            f_oct.xor(&u_oct);
+        }
+
+        k_oct.joctet(&f_oct);
+    }
+
+    k_oct.chop(olen);
+}</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let d = (olen + sha - 1) / sha;
+    let mut f = [0u8; 64];
+    let mut u = [0u8; 64];
+    let mut f_oct = OCT::new(&mut f);
+    let mut u_oct = OCT::new(&mut u);
+    let mut salt_oct = OCT::new(&mut salt.to_vec());
+    let pass_oct = OCT::new(&mut pass.to_vec());
+
+    k.fill(0);
+    let mut k_oct = OCT::new(k);
+
+    for i in 1..=d {
+        let len = salt_oct.len();
+        salt_oct.jint(i as i32, 4);
+
+        hmac(sha, &salt_oct, &pass_oct, sha, &mut f_oct);
+
+        salt_oct.len = len;
+        u_oct.copy(&f_oct);
+        for _ in 2..=rep {
+            hmac(sha, &u_oct, &pass_oct, sha, &mut u_oct);
+            f_oct.xor(&u_oct);
+        }
+
+        k_oct.joctet(&f_oct);
+    }
+
+    k_oct.chop(olen);
+}

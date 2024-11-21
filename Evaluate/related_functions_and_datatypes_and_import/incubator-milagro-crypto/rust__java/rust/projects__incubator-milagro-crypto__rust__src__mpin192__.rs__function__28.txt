@@ -1,0 +1,434 @@
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+
+pub fn mul(&mut self, b: &FP) {
+        if i64::from(self.xes) * i64::from(b.xes) > i64::from(FEXCESS) {
+            self.reduce()
+        }
+
+        let mut d = Big::mul(&(self.x), &(b.x));
+        self.x = FP::modulo(&mut d);
+        self.xes = 2;
+    }
+
+pub fn pinpow(&mut self, e: i32, bts: i32) {
+        let mut r: [FP24; 2] = [FP24::new_int(1), self.clone()];
+
+        for i in (0..bts).rev() {
+            let b: usize = ((e >> i) & 1) as usize;
+            let t = r[b].clone();
+            r[1 - b].mul(&t);
+            r[b].usqr();
+        }
+        *self = r[0].clone();
+    }
+
+pub fn add(&mut self, b: &FP) {
+        self.x.add(&(b.x));
+        self.xes += b.xes;
+        if self.xes > FEXCESS {
+            self.reduce()
+        }
+    }
+
+fn hash(sha: usize, c: &mut FP8, U: &mut ECP, r: &mut [u8]) -> bool {
+    let mut w: [u8; EFS] = [0; EFS];
+    let mut t: [u8; 10 * EFS] = [0; 10 * EFS];
+
+    c.geta().geta().geta().to_bytes(&mut w);
+    for i in 0..EFS {
+        t[i] = w[i]
+    }
+    c.geta().geta().getb().to_bytes(&mut w);
+    for i in EFS..2 * EFS {
+        t[i] = w[i - EFS]
+    }
+    c.geta().getb().geta().to_bytes(&mut w);
+    for i in 2 * EFS..3 * EFS {
+        t[i] = w[i - 2 * EFS]
+    }
+    c.geta().getb().getb().to_bytes(&mut w);
+    for i in 3 * EFS..4 * EFS {
+        t[i] = w[i - 3 * EFS]
+    }
+    c.getb().geta().geta().to_bytes(&mut w);
+    for i in 4 * EFS..5 * EFS {
+        t[i] = w[i - 4 * EFS]
+    }
+    c.getb().geta().getb().to_bytes(&mut w);
+    for i in 5 * EFS..6 * EFS {
+        t[i] = w[i - 5 * EFS]
+    }
+    c.getb().getb().geta().to_bytes(&mut w);
+    for i in 6 * EFS..7 * EFS {
+        t[i] = w[i - 6 * EFS]
+    }
+    c.getb().getb().getb().to_bytes(&mut w);
+    for i in 7 * EFS..8 * EFS {
+        t[i] = w[i - 7 * EFS]
+    }
+
+    U.getx().to_bytes(&mut w);
+    for i in 8 * EFS..9 * EFS {
+        t[i] = w[i - 8 * EFS]
+    }
+    U.gety().to_bytes(&mut w);
+    for i in 9 * EFS..10 * EFS {
+        t[i] = w[i - 9 * EFS]
+    }
+
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    return false;
+}
+
+pub fn is_infinity(&self) -> bool {
+        let xx = self.getpx();
+        let zz = self.getpz();
+        return xx.is_zilch() && zz.is_zilch();
+    }
+
+pub fn compow(&mut self, e: &Big, r: &Big) -> FP8 {
+        let f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+        let q = Big::new_ints(&rom::MODULUS);
+
+        let mut g1 = self.clone();
+        let mut g2 = self.clone();
+
+        let mut m = q.clone();
+        m.rmod(&r);
+
+        let mut a = e.clone();
+        a.rmod(&mut m);
+
+        let mut b = e.clone();
+        b.div(&mut m);
+
+        let mut c = g1.trace();
+
+        if b.is_zilch() {
+            c = c.xtr_pow(&mut a);
+            return c;
+        }
+
+        g2.frob(&f, 1);
+        let cp = g2.trace();
+        g1.conj();
+        g2.mul(&g1);
+        let cpm1 = g2.trace();
+        g2.mul(&g1);
+        let cpm2 = g2.trace();
+
+        c = c.xtr_pow2(&cp, &cpm1, &cpm2, &mut a, &mut b);
+
+        return c;
+    }
+
+pub fn from_bytes(w: &[u8]) -> FP24 {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+
+        for i in 0..mb {
+            t[i] = w[i]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 2 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 3 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 4 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 5 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 6 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 7 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let e = FP8::new_fp4s(ea, eb);
+
+        for i in 0..mb {
+            t[i] = w[i + 8 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 9 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 10 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 11 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 12 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 13 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 14 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 15 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let f = FP8::new_fp4s(ea, eb);
+
+        for i in 0..mb {
+            t[i] = w[i + 16 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 17 * mb]
+        }
+        let b = Big::from_bytes(&t);
+
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 18 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 19 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let ea = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 20 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 21 * mb]
+        }
+        let b = Big::from_bytes(&t);
+
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 22 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 23 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let eb = FP4::new_fp2s(c, d);
+
+        let g = FP8::new_fp4s(ea, eb);
+
+        return FP24::new_fp8s(e, f, g);
+    }
+
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+
+pub const INVALID_POINT: isize = -14;
+
+pub const PBLEN: i32 = 14;
+
+pub const CURVE_ORDER: [Chunk; NLEN] = [
+    0xD,
+    0x800000000010A1,
+    0x8000000007FF9F,
+    0x40000001BA344D,
+    0x25236482,
+];
+
+------
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

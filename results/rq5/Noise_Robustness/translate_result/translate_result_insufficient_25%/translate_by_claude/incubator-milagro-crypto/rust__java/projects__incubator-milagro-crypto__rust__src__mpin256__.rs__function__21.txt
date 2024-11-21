@@ -1,0 +1,243 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static void SERVER_1(int sha,int date,byte[] CID,byte[] HID,byte[] HTID)
+	{
+		byte[] h=hashit(sha,0,CID,EFS);
+		ECP R,P=ECP.mapit(h);
+
+		P.toBytes(HID,false);   // new
+		if (date!=0)
+		{
+	//		if (HID!=null) P.toBytes(HID,false);
+			h=hashit(sha,date,h,EFS);
+			R=ECP.mapit(h);
+			P.add(R); //P.affine();
+			P.toBytes(HTID,false);
+		}
+	//	else P.toBytes(HID,false);
+	}
+</java function>
+<rust function signature>
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn mapit(h: &[u8]) -> ECP {
+        let q = Big::new_ints(&rom::MODULUS);
+        let mut x = Big::from_bytes(h);
+        x.rmod(&q);
+        let mut P: ECP;
+
+        loop {
+            loop {
+                if CURVETYPE != CurveType::Montgomery {
+                    P = ECP::new_bigint(&x, 0);
+                } else {
+                    P = ECP::new_big(&x);
+                }
+                x.inc(1);
+                x.norm();
+                if !P.is_infinity() {
+                    break;
+                }
+            }
+            P.cfp();
+            if !P.is_infinity() {
+                break;
+            }
+        }
+
+        return P;
+    }
+fn hashit(sha: usize, n: usize, id: &[u8], w: &mut [u8]) -> bool {
+    let mut r: [u8; 64] = [0; 64];
+    let mut didit = false;
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if !didit {
+        return false;
+    }
+
+    let rm = big::MODBYTES as usize;
+
+    if sha > rm {
+        for i in 0..rm {
+            w[i] = r[i]
+        }
+    } else {
+        for i in 0..sha {
+            w[i + rm - sha] = r[i]
+        }
+        for i in 0..(rm - sha) {
+            w[i] = 0
+        }
+    }
+
+    return true;
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    const RM: usize = big::MODBYTES as usize;
+    let mut h: [u8; RM] = [0; RM];
+
+    hashit(sha, 0, cid, &mut h);
+
+    let mut P = ECP::mapit(&h);
+
+    P.to_bytes(hid, false);
+    if date != 0 {
+        let mut h2: [u8; RM] = [0; RM];
+        hashit(sha, date, &h, &mut h2);
+        let mut R = ECP::mapit(&h2);
+        P.add(&mut R);
+        if let Some(rhtid) = htid {
+            P.to_bytes(rhtid, false);
+        }
+    }
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    let mut w = [0u8; big::MODBYTES as usize];
+    hashit(sha, 0, cid, &mut w);
+    let h = &w[..];
+
+    let p = ECP::mapit(h);
+
+    p.to_bytes(hid, false);
+
+    if date != 0 {
+        hashit(sha, date, h, &mut w);
+        let r = ECP::mapit(&w);
+        let mut p_sum = p;
+        p_sum.add(&r);
+
+        if let Some(htid_buf) = htid {
+            p_sum.to_bytes(htid_buf, false);
+        }
+    }
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries you've provided. Here are some key points about the translation:
+
+1. We use `hashit` function as provided in the dependencies, which returns a boolean. We ignore the return value since it's not used in the original Java function.
+
+2. We create a temporary buffer `w` to hold the result of `hashit`, as the Rust `hashit` function expects a mutable slice for its output.
+
+3. The `ECP::mapit` function is used directly as provided in the dependencies.
+
+4. We use `to_bytes` method on `ECP` objects to write to the output buffers.
+
+5. The `htid` parameter is now an `Option<&mut [u8]>`, so we use pattern matching to check if it's provided before writing to it.
+
+6. We don't need to call `affine()` on the ECP object as it wasn't present in the original Java code.
+
+7. The function doesn't return anything, as per the provided Rust function signature.
+
+This translation should maintain the functionality of the original Java function while adhering to Rust's syntax and the provided function signature and dependencies.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn server_1(sha: usize, date: usize, cid: &[u8], hid: &mut [u8], htid: Option<&mut [u8]>) {
+    let mut w = [0u8; big::MODBYTES as usize];
+    hashit(sha, 0, cid, &mut w);
+    let h = &w[..];
+
+    let p = ECP::mapit(h);
+
+    p.to_bytes(hid, false);
+
+    if date != 0 {
+        hashit(sha, date, h, &mut w);
+        let r = ECP::mapit(&w);
+        let mut p_sum = p;
+        p_sum.add(&r);
+
+        if let Some(htid_buf) = htid {
+            p_sum.to_bytes(htid_buf, false);
+        }
+    }
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries you've provided. Here are some key points about the translation:
+
+1. We use `hashit` function as provided in the dependencies, which returns a boolean. We ignore the return value since it's not used in the original Java function.
+
+2. We create a temporary buffer `w` to hold the result of `hashit`, as the Rust `hashit` function expects a mutable slice for its output.
+
+3. The `ECP::mapit` function is used directly as provided in the dependencies.
+
+4. We use `to_bytes` method on `ECP` objects to write to the output buffers.
+
+5. The `htid` parameter is now an `Option<&mut [u8]>`, so we use pattern matching to check if it's provided before writing to it.
+
+6. We don't need to call `affine()` on the ECP object as it wasn't present in the original Java code.
+
+7. The function doesn't return anything, as per the provided Rust function signature.
+
+This translation should maintain the functionality of the original Java function while adhering to Rust's syntax and the provided function signature and dependencies.

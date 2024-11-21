@@ -1,0 +1,331 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+char* dc_render_setup_file(dc_context_t* context, const char* passphrase)
+{
+	sqlite3_stmt*          stmt = NULL;
+	char*                  self_addr = NULL;
+	dc_key_t*              curr_private_key = dc_key_new();
+
+	char                   passphrase_begin[8];
+	char*                  encr_string = NULL;
+
+	char*                  ret_setupfilecontent = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || passphrase==NULL
+	 || strlen(passphrase)<2 || curr_private_key==NULL) {
+		goto cleanup;
+	}
+
+	strncpy(passphrase_begin, passphrase, 2);
+	passphrase_begin[2] = 0;
+
+	/* create the payload */
+
+	if (!dc_ensure_secret_key_exists(context)) {
+		goto cleanup;
+	}
+
+	{
+			self_addr = dc_sqlite3_get_config(context->sql, "configured_addr", NULL);
+			dc_key_load_self_private(curr_private_key, self_addr, context->sql);
+
+			int e2ee_enabled = dc_sqlite3_get_config_int(context->sql, "e2ee_enabled", DC_E2EE_DEFAULT_ENABLED);
+			char* payload_key_asc = dc_key_render_asc(curr_private_key, e2ee_enabled? "Autocrypt-Prefer-Encrypt: mutual\r\n" : NULL);
+			if (payload_key_asc==NULL) {
+				goto cleanup;
+			}
+
+		if(!dc_pgp_symm_encrypt(context, passphrase, payload_key_asc, strlen(payload_key_asc), &encr_string)) {
+			goto cleanup;
+		}
+
+		free(payload_key_asc);
+	}
+
+	/* add additional header to armored block */
+
+	#define LINEEND "\r\n" /* use the same lineends as the PGP armored data */
+	{
+		char* replacement = dc_mprintf("-----BEGIN PGP MESSAGE-----" LINEEND
+		                               "Passphrase-Format: numeric9x4" LINEEND
+		                               "Passphrase-Begin: %s", passphrase_begin);
+		dc_str_replace(&encr_string, "-----BEGIN PGP MESSAGE-----", replacement);
+		free(replacement);
+	}
+
+	/* wrap HTML-commands with instructions around the encrypted payload */
+
+	{
+		char* setup_message_title = dc_stock_str(context, DC_STR_AC_SETUP_MSG_SUBJECT);
+		char* setup_message_body = dc_stock_str(context, DC_STR_AC_SETUP_MSG_BODY);
+
+		dc_str_replace(&setup_message_body, "\r", NULL);
+		dc_str_replace(&setup_message_body, "\n", "<br>");
+
+		ret_setupfilecontent = dc_mprintf(
+			"<!DOCTYPE html>" LINEEND
+			"<html>" LINEEND
+				"<head>" LINEEND
+					"<title>%s</title>" LINEEND
+				"</head>" LINEEND
+				"<body>" LINEEND
+					"<h1>%s</h1>" LINEEND
+					"<p>%s</p>" LINEEND
+					"<pre>" LINEEND
+					"%s" LINEEND
+					"</pre>" LINEEND
+				"</body>" LINEEND
+			"</html>" LINEEND,
+			setup_message_title,
+			setup_message_title,
+			setup_message_body,
+			encr_string);
+
+		free(setup_message_title);
+		free(setup_message_body);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+
+	dc_key_unref(curr_private_key);
+	free(encr_string);
+	free(self_addr);
+
+	return ret_setupfilecontent;
+}
+</c function>
+<rust function signature>
+pub async fn render_setup_file(context: &Context, passphrase: &str) -> Result<String> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn render_setup_file(context: &Context, passphrase: &str) -> Result<String> {
+    let passphrase_begin = if let Some(passphrase_begin) = passphrase.get(..2) {
+        passphrase_begin
+    } else {
+        bail!("Passphrase must be at least 2 chars long.");
+    };
+    let private_key = load_self_secret_key(context).await?;
+    let ac_headers = match context.get_config_bool(Config::E2eeEnabled).await? {
+        false => None,
+        true => Some(("Autocrypt-Prefer-Encrypt", "mutual")),
+    };
+    let private_key_asc = private_key.to_asc(ac_headers);
+    let encr = pgp::symm_encrypt(passphrase, private_key_asc.as_bytes())
+        .await?
+        .replace('\n', "\r\n");
+
+    let replacement = format!(
+        concat!(
+            "-----BEGIN PGP MESSAGE-----\r\n",
+            "Passphrase-Format: numeric9x4\r\n",
+            "Passphrase-Begin: {}"
+        ),
+        passphrase_begin
+    );
+    let pgp_msg = encr.replace("-----BEGIN PGP MESSAGE-----", &replacement);
+
+    let msg_subj = stock_str::ac_setup_msg_subject(context).await;
+    let msg_body = stock_str::ac_setup_msg_body(context).await;
+    let msg_body_html = msg_body.replace('\r', "").replace('\n', "<br>");
+    Ok(format!(
+        concat!(
+            "<!DOCTYPE html>\r\n",
+            "<html>\r\n",
+            "  <head>\r\n",
+            "    <title>{}</title>\r\n",
+            "  </head>\r\n",
+            "  <body>\r\n",
+            "    <h1>{}</h1>\r\n",
+            "    <p>{}</p>\r\n",
+            "    <pre>\r\n{}\r\n</pre>\r\n",
+            "  </body>\r\n",
+            "</html>\r\n"
+        ),
+        msg_subj, msg_subj, msg_body_html, pgp_msg
+    ))
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn render_setup_file(context: &Context, passphrase: &str) -> Result<String> {
+    if passphrase.len() < 2 {
+        bail!("Passphrase too short");
+    }
+
+    let passphrase_begin = &passphrase[..2];
+
+    // Create the payload
+    ensure!(context.ensure_secret_key_exists().await?, "Failed to ensure secret key exists");
+
+    let self_addr = context.get_config(Config::ConfiguredAddr).await?;
+    let curr_private_key = load_self_secret_key(context, &self_addr).await?;
+
+    let e2ee_enabled = context.get_config_int(Config::E2eeEnabled).await?;
+    let autocrypt_header = if e2ee_enabled != 0 {
+        Some("Autocrypt-Prefer-Encrypt: mutual\r\n")
+    } else {
+        None
+    };
+
+    let payload_key_asc = curr_private_key.render_asc(autocrypt_header)?;
+
+    let encr_string = pgp::symm_encrypt(context, passphrase, payload_key_asc.as_bytes()).await?;
+
+    // Add additional header to armored block
+    let replacement = format!(
+        "-----BEGIN PGP MESSAGE-----\r\n\
+         Passphrase-Format: numeric9x4\r\n\
+         Passphrase-Begin: {}",
+        passphrase_begin
+    );
+    let encr_string = encr_string.replace("-----BEGIN PGP MESSAGE-----", &replacement);
+
+    // Wrap HTML-commands with instructions around the encrypted payload
+    let setup_message_title = stock_str::get(context, StockMessage::AcSetupMsgSubject).await?;
+    let mut setup_message_body = stock_str::get(context, StockMessage::AcSetupMsgBody).await?;
+    setup_message_body = setup_message_body.replace('\r', "").replace('\n', "<br>");
+
+    let ret_setupfilecontent = format!(
+        "<!DOCTYPE html>\r\n\
+         <html>\r\n\
+             <head>\r\n\
+                 <title>{}</title>\r\n\
+             </head>\r\n\
+             <body>\r\n\
+                 <h1>{}</h1>\r\n\
+                 <p>{}</p>\r\n\
+                 <pre>\r\n\
+                 {}\r\n\
+                 </pre>\r\n\
+             </body>\r\n\
+         </html>\r\n",
+        setup_message_title, setup_message_title, setup_message_body, encr_string
+    );
+
+    Ok(ret_setupfilecontent)
+}
+```
+
+This Rust function follows the provided signature and uses the available dependencies and libraries. It performs the same operations as the C function, including creating the payload, encrypting it, adding headers, and wrapping it in HTML.
+
+Note that some error handling has been added using the `?` operator and `ensure!` macro, which is more idiomatic in Rust. The function now returns a `Result<String>` instead of a raw pointer, which is safer and more Rust-like.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn render_setup_file(context: &Context, passphrase: &str) -> Result<String> {
+    if passphrase.len() < 2 {
+        bail!("Passphrase too short");
+    }
+
+    let passphrase_begin = &passphrase[..2];
+
+    // Create the payload
+    ensure!(context.ensure_secret_key_exists().await?, "Failed to ensure secret key exists");
+
+    let self_addr = context.get_config(Config::ConfiguredAddr).await?;
+    let curr_private_key = load_self_secret_key(context, &self_addr).await?;
+
+    let e2ee_enabled = context.get_config_int(Config::E2eeEnabled).await?;
+    let autocrypt_header = if e2ee_enabled != 0 {
+        Some("Autocrypt-Prefer-Encrypt: mutual\r\n")
+    } else {
+        None
+    };
+
+    let payload_key_asc = curr_private_key.render_asc(autocrypt_header)?;
+
+    let encr_string = pgp::symm_encrypt(context, passphrase, payload_key_asc.as_bytes()).await?;
+
+    // Add additional header to armored block
+    let replacement = format!(
+        "-----BEGIN PGP MESSAGE-----\r\n\
+         Passphrase-Format: numeric9x4\r\n\
+         Passphrase-Begin: {}",
+        passphrase_begin
+    );
+    let encr_string = encr_string.replace("-----BEGIN PGP MESSAGE-----", &replacement);
+
+    // Wrap HTML-commands with instructions around the encrypted payload
+    let setup_message_title = stock_str::get(context, StockMessage::AcSetupMsgSubject).await?;
+    let mut setup_message_body = stock_str::get(context, StockMessage::AcSetupMsgBody).await?;
+    setup_message_body = setup_message_body.replace('\r', "").replace('\n', "<br>");
+
+    let ret_setupfilecontent = format!(
+        "<!DOCTYPE html>\r\n\
+         <html>\r\n\
+             <head>\r\n\
+                 <title>{}</title>\r\n\
+             </head>\r\n\
+             <body>\r\n\
+                 <h1>{}</h1>\r\n\
+                 <p>{}</p>\r\n\
+                 <pre>\r\n\
+                 {}\r\n\
+                 </pre>\r\n\
+             </body>\r\n\
+         </html>\r\n",
+        setup_message_title, setup_message_title, setup_message_body, encr_string
+    );
+
+    Ok(ret_setupfilecontent)
+}
+```
+
+This Rust function follows the provided signature and uses the available dependencies and libraries. It performs the same operations as the C function, including creating the payload, encrypting it, adding headers, and wrapping it in HTML.
+
+Note that some error handling has been added using the `?` operator and `ensure!` macro, which is more idiomatic in Rust. The function now returns a `Result<String>` instead of a raw pointer, which is safer and more Rust-like.

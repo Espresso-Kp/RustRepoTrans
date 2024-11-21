@@ -1,0 +1,253 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_set_location(dc_context_t* context,
+                    double latitude, double longitude, double accuracy)
+{
+	sqlite3_stmt* stmt_chats = NULL;
+	sqlite3_stmt* stmt_insert = NULL;
+	int           continue_streaming = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || (latitude==0.0 && longitude==0.0)) {
+		continue_streaming = 1;
+		goto cleanup;
+	}
+
+	stmt_chats = dc_sqlite3_prepare(context->sql,
+		"SELECT id FROM chats WHERE locations_send_until>?;");
+	sqlite3_bind_int64(stmt_chats, 1, time(NULL));
+	while (sqlite3_step(stmt_chats)==SQLITE_ROW)
+	{
+		uint32_t chat_id = sqlite3_column_int(stmt_chats, 0);
+
+		stmt_insert = dc_sqlite3_prepare(context->sql,
+				"INSERT INTO locations "
+				" (latitude, longitude, accuracy, timestamp, chat_id, from_id)"
+				" VALUES (?,?,?,?,?,?);");
+		sqlite3_bind_double(stmt_insert, 1, latitude);
+		sqlite3_bind_double(stmt_insert, 2, longitude);
+		sqlite3_bind_double(stmt_insert, 3, accuracy);
+		sqlite3_bind_int64 (stmt_insert, 4, time(NULL));
+		sqlite3_bind_int   (stmt_insert, 5, chat_id);
+		sqlite3_bind_int   (stmt_insert, 6, DC_CONTACT_ID_SELF);
+		sqlite3_step(stmt_insert);
+
+		continue_streaming = 1;
+	}
+
+	if (continue_streaming) {
+		context->cb(context, DC_EVENT_LOCATION_CHANGED, DC_CONTACT_ID_SELF, 0);
+		schedule_MAYBE_SEND_LOCATIONS(context, 0);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt_chats);
+	sqlite3_finalize(stmt_insert);
+	return continue_streaming;
+}
+</c function>
+<rust function signature>
+pub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::Duration;
+use anyhow::{ensure, Context as _, Result};
+use async_channel::Receiver;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText};
+use tokio::time::timeout;
+use crate::chat::{self, ChatId};
+use crate::constants::DC_CHAT_ID_TRASH;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::events::EventType;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::tools::{duration_to_str, time};
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::config::Config;
+use crate::message::MessageState;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool> {
+    if latitude == 0.0 && longitude == 0.0 {
+        return Ok(true);
+    }
+    let mut continue_streaming = false;
+    let now = time();
+
+    let chats = context
+        .sql
+        .query_map(
+            "SELECT id FROM chats WHERE locations_send_until>?;",
+            (now,),
+            |row| row.get::<_, i32>(0),
+            |chats| {
+                chats
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(Into::into)
+            },
+        )
+        .await?;
+
+    let mut stored_location = false;
+    for chat_id in chats {
+        context.sql.execute(
+                "INSERT INTO locations  \
+                 (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?);",
+                 (
+                    latitude,
+                    longitude,
+                    accuracy,
+                    now,
+                    chat_id,
+                    ContactId::SELF,
+                )).await.context("Failed to store location")?;
+        stored_location = true;
+
+        info!(context, "Stored location for chat {chat_id}.");
+        continue_streaming = true;
+    }
+    if continue_streaming {
+        context.emit_location_changed(Some(ContactId::SELF)).await?;
+    };
+    if stored_location {
+        // Interrupt location loop so it may send a location-only message.
+        context.scheduler.interrupt_location().await;
+    }
+
+    Ok(continue_streaming)
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+use std::time::Duration;
+use anyhow::{ensure, Context as _, Result};
+use async_channel::Receiver;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText};
+use tokio::time::timeout;
+use crate::chat::{self, ChatId};
+use crate::constants::DC_CHAT_ID_TRASH;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::events::EventType;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::tools::{duration_to_str, time};
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::config::Config;
+use crate::message::MessageState;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+
+pub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool> {
+    let mut stmt_chats = None;
+    let mut stmt_insert = None;
+    let mut continue_streaming = false;
+
+    if context.is_none() || context.magic!= DC_CONTEXT_MAGIC || (latitude == 0.0 && longitude == 0.0) {
+        continue_streaming = true;
+        return Ok(continue_streaming);
+    }
+
+    stmt_chats = Some(context.sql.prepare("SELECT id FROM chats WHERE locations_send_until>?;").await?);
+    context.sql.bind_param(stmt_chats.as_ref().unwrap(), 1, time::now()).await?;
+    while stmt_chats.as_ref().unwrap().next().await? {
+        let chat_id = stmt_chats.as_ref().unwrap().get(0).await?;
+        stmt_insert = Some(context.sql.prepare("INSERT INTO locations (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?);").await?);
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 1, latitude).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 2, longitude).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 3, accuracy).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 4, time::now()).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 5, chat_id).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 6, DC_CONTACT_ID_SELF).await?;
+        context.sql.execute(stmt_insert.as_ref().unwrap()).await?;
+        continue_streaming = true;
+    }
+
+    if continue_streaming {
+        context.cb(context, EventType::LocationChanged, DC_CONTACT_ID_SELF, 0).await?;
+        schedule_MAYBE_SEND_LOCATIONS(context, 0).await?;
+    }
+
+    context.sql.close(stmt_chats.as_ref().unwrap()).await?;
+    context.sql.close(stmt_insert.as_ref().unwrap()).await?;
+    Ok(continue_streaming)
+}
+```
+Note that I've assumed that `schedule_MAYBE_SEND_LOCATIONS` is an async function, and that `context.cb` is also an async function. If that's not the case, you may need to modify the code accordingly.</translated function>Here is the translated Rust function:
+```rust
+use std::time::Duration;
+use anyhow::{ensure, Context as _, Result};
+use async_channel::Receiver;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText};
+use tokio::time::timeout;
+use crate::chat::{self, ChatId};
+use crate::constants::DC_CHAT_ID_TRASH;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::events::EventType;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::tools::{duration_to_str, time};
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::config::Config;
+use crate::message::MessageState;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+
+pub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool> {
+    let mut stmt_chats = None;
+    let mut stmt_insert = None;
+    let mut continue_streaming = false;
+
+    if context.is_none() || context.magic!= DC_CONTEXT_MAGIC || (latitude == 0.0 && longitude == 0.0) {
+        continue_streaming = true;
+        return Ok(continue_streaming);
+    }
+
+    stmt_chats = Some(context.sql.prepare("SELECT id FROM chats WHERE locations_send_until>?;").await?);
+    context.sql.bind_param(stmt_chats.as_ref().unwrap(), 1, time::now()).await?;
+    while stmt_chats.as_ref().unwrap().next().await? {
+        let chat_id = stmt_chats.as_ref().unwrap().get(0).await?;
+        stmt_insert = Some(context.sql.prepare("INSERT INTO locations (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?);").await?);
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 1, latitude).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 2, longitude).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 3, accuracy).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 4, time::now()).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 5, chat_id).await?;
+        context.sql.bind_param(stmt_insert.as_ref().unwrap(), 6, DC_CONTACT_ID_SELF).await?;
+        context.sql.execute(stmt_insert.as_ref().unwrap()).await?;
+        continue_streaming = true;
+    }
+
+    if continue_streaming {
+        context.cb(context, EventType::LocationChanged, DC_CONTACT_ID_SELF, 0).await?;
+        schedule_MAYBE_SEND_LOCATIONS(context, 0).await?;
+    }
+
+    context.sql.close(stmt_chats.as_ref().unwrap()).await?;
+    context.sql.close(stmt_insert.as_ref().unwrap()).await?;
+    Ok(continue_streaming)
+}
+```
+Note that I've assumed that `schedule_MAYBE_SEND_LOCATIONS` is an async function, and that `context.cb` is also an async function. If that's not the case, you may need to modify the code accordingly.

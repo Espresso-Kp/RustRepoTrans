@@ -1,0 +1,252 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def list_namespaces(self, namespace: Union[str, Identifier] = ()) -> List[Identifier]:
+        """List namespaces from the given namespace. If not given, list top-level namespaces from the catalog.
+
+        Returns:
+            List[Identifier]: a List of namespace identifiers.
+        """
+        # Hierarchical namespace is not supported. Return an empty list
+        if namespace:
+            return []
+
+        database_list: List[DatabaseTypeDef] = []
+        next_token: Optional[str] = None
+
+        while True:
+            databases_response = self.glue.get_databases() if not next_token else self.glue.get_databases(NextToken=next_token)
+            database_list.extend(databases_response["DatabaseList"])
+            next_token = databases_response.get("NextToken")
+            if not next_token:
+                break
+
+        return [self.identifier_to_tuple(database["Name"]) for database in database_list]
+</python function>
+<rust function signature>
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub fn new(name: String) -> Self {
+        Self(vec![name])
+    }
+
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+struct GlueClient(aws_sdk_glue::Client);
+
+pub struct NamespaceIdent(Vec<String>);
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+        if parent.is_some() {
+            return Ok(vec![]);
+        }
+
+        let mut database_list: Vec<NamespaceIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self.client.0.get_databases().next_token(token),
+                None => self.client.0.get_databases(),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let dbs: Vec<NamespaceIdent> = resp
+                .database_list()
+                .iter()
+                .map(|db| NamespaceIdent::new(db.name().to_string()))
+                .collect();
+
+            database_list.extend(dbs);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(database_list)
+    }
+</function>
+<translated function>
+Based on the Python code you provided and the Rust declarations given, here's the corresponding Rust function:
+
+<rust translated function>
+```rust
+#[async_trait]
+impl Catalog for GlueCatalog {
+    async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+
+        // Hierarchical namespace is not supported. Return an empty vector
+        if parent.is_some() {
+            return Ok(vec![]);
+        }
+        
+        let mut database_list : Vec<NamespaceIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+        
+        loop {
+            let builder = self.client.glue().get_databases();
+            let request = with_catalog_id!(builder, self.config);
+
+            if let Some(token) = &next_token {
+                request.set_next_token(token);
+            }
+            
+            let response = request
+                .send()
+                .await
+                .map_err(from_aws_sdk_error)
+                .map_err(|sdk_error| {
+                    Error::new(
+                        ErrorKind::Unexpected,
+                        "Failed to get Database list from Glue Catalog",
+                    )
+                    .with_source(anyhow!("SdkError: {:?}", sdk_error))
+                })?;
+
+            if let Some(databases) = response.database_list() {
+                for database in databases {
+                    database_list.push(NamespaceIdent::new(database.name().to_owned()));
+                }
+            }
+
+            next_token = response.next_token().and_then(|t| if t.is_empty() { None } else { Some(t.to_string()) });
+
+            if next_token.is_none() {
+                break;
+            }
+        }
+        Ok(database_list)
+    }
+}
+```
+</rust translated function>
+Few points to note, 
+* This Rust function uses async await since AWS SDK for Rust is async, the equivalent Python function does not clarify how aws sdk is handled (sync or async). 
+* The error handling in Rust and Python are quite different, Rust uses `?` for error propagation. 
+* For list handling, Python uses `extend` function, whereas in Rust, we are using a for loop to iterate and push to the vector. 
+* In Rust's AWS SDK, next_token is set using `set_next_token` method.
+* I assume that `client.glue()` return type is GlueCatalog and the `get_databases()` function does take an ownership of `self` as per the Python function and the glue client here is initialized as per my understanding as you were not provided information about the glue client initialization. The function may change based on how the GlueClient structure is implemented.</translated function>Based on the Python code you provided and the Rust declarations given, here's the corresponding Rust function:
+
+<rust translated function>
+```rust
+#[async_trait]
+impl Catalog for GlueCatalog {
+    async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+
+        // Hierarchical namespace is not supported. Return an empty vector
+        if parent.is_some() {
+            return Ok(vec![]);
+        }
+        
+        let mut database_list : Vec<NamespaceIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+        
+        loop {
+            let builder = self.client.glue().get_databases();
+            let request = with_catalog_id!(builder, self.config);
+
+            if let Some(token) = &next_token {
+                request.set_next_token(token);
+            }
+            
+            let response = request
+                .send()
+                .await
+                .map_err(from_aws_sdk_error)
+                .map_err(|sdk_error| {
+                    Error::new(
+                        ErrorKind::Unexpected,
+                        "Failed to get Database list from Glue Catalog",
+                    )
+                    .with_source(anyhow!("SdkError: {:?}", sdk_error))
+                })?;
+
+            if let Some(databases) = response.database_list() {
+                for database in databases {
+                    database_list.push(NamespaceIdent::new(database.name().to_owned()));
+                }
+            }
+
+            next_token = response.next_token().and_then(|t| if t.is_empty() { None } else { Some(t.to_string()) });
+
+            if next_token.is_none() {
+                break;
+            }
+        }
+        Ok(database_list)
+    }
+}
+```
+</rust translated function>
+Few points to note, 
+* This Rust function uses async await since AWS SDK for Rust is async, the equivalent Python function does not clarify how aws sdk is handled (sync or async). 
+* The error handling in Rust and Python are quite different, Rust uses `?` for error propagation. 
+* For list handling, Python uses `extend` function, whereas in Rust, we are using a for loop to iterate and push to the vector. 
+* In Rust's AWS SDK, next_token is set using `set_next_token` method.
+* I assume that `client.glue()` return type is GlueCatalog and the `get_databases()` function does take an ownership of `self` as per the Python function and the glue client here is initialized as per my understanding as you were not provided information about the glue client initialization. The function may change based on how the GlueClient structure is implemented.

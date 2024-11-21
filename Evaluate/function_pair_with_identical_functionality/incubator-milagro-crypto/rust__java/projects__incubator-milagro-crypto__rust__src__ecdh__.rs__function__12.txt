@@ -1,0 +1,121 @@
+<path>
+projects/incubator-milagro-crypto/rust/src/ecdh.rs
+</path>
+<function>
+pub fn ecpsp_dsa(
+    sha: usize,
+    rng: &mut RAND,
+    s: &[u8],
+    f: &[u8],
+    c: &mut [u8],
+    d: &mut [u8],
+) -> isize {
+    let mut t: [u8; EFS] = [0; EFS];
+    let mut b: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+
+    hashit(sha, f, 0, None, big::MODBYTES as usize, &mut b);
+
+    let G = ECP::generator();
+
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let sc = Big::from_bytes(s); // s or &s?
+    let fb = Big::from_bytes(&b);
+
+    let mut cb = Big::new();
+    let mut db = Big::new();
+
+    while db.is_zilch() {
+        let mut u = Big::randomnum(&r, rng);
+        let w = Big::randomnum(&r, rng); // side channel masking
+
+        let mut V = G.clone();
+        V = V.mul(&u);
+        let vx = V.getx();
+        cb = vx.clone();
+        cb.rmod(&r);
+        if cb.is_zilch() {
+            continue;
+        }
+
+        let mut tb = Big::modmul(&u, &w, &r);
+        u = tb.clone();
+
+        u.invmodp(&r);
+        db = Big::modmul(&sc, &cb, &r);
+        db.add(&fb);
+
+        tb = Big::modmul(&db, &w, &r);
+        db = tb.clone();
+
+        tb = Big::modmul(&u, &db, &r);
+        db = tb.clone();
+    }
+
+    cb.to_bytes(&mut t);
+    for i in 0..EFS {
+        c[i] = t[i]
+    }
+    db.to_bytes(&mut t);
+    for i in 0..EFS {
+        d[i] = t[i]
+    }
+    0
+}
+</function>
+------
+
+<path>
+projects/incubator-milagro-crypto/java/src/main/java/org/apache/milagro/amcl/GOLDILOCKS/ECDH.java
+</path>
+<function>
+public static int SP_DSA(int sha,RAND RNG,byte[] S,byte[] F,byte[] C,byte[] D)
+	{
+		byte[] T=new byte[EFS];
+		BIG r,s,f,c,d,u,vx,w;
+		ECP G,V;
+		byte[] B=hashit(sha,F,0,null,BIG.MODBYTES);
+
+		G=ECP.generator();
+		r=new BIG(ROM.CURVE_Order);
+
+		s=BIG.fromBytes(S);
+		f=BIG.fromBytes(B);
+
+		c=new BIG(0);
+		d=new BIG(0);
+		V=new ECP();
+
+		do {
+			u=BIG.randomnum(r,RNG);
+			w=BIG.randomnum(r,RNG); /* side channel masking */
+			//if (ROM.AES_S>0)
+			//{
+			//	u.mod2m(2*ROM.AES_S);
+			//}			
+			V.copy(G);
+			V=V.mul(u);   		
+			vx=V.getX();
+			c.copy(vx);
+			c.mod(r);
+			if (c.iszilch()) continue;
+
+			u.copy(BIG.modmul(u,w,r));
+
+			u.invmodp(r);
+			d.copy(BIG.modmul(s,c,r));
+			d.add(f);
+
+			d.copy(BIG.modmul(d,w,r));
+
+			d.copy(BIG.modmul(u,d,r));
+		} while (d.iszilch());
+       
+		c.toBytes(T);
+		for (int i=0;i<EFS;i++) C[i]=T[i];
+		d.toBytes(T);
+		for (int i=0;i<EFS;i++) D[i]=T[i];
+		return 0;
+	}
+</function>
+

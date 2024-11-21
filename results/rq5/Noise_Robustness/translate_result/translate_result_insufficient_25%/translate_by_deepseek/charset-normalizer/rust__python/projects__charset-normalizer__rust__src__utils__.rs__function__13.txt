@@ -1,0 +1,191 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def cp_similarity(iana_name_a: str, iana_name_b: str) -> float:
+    if is_multi_byte_encoding(iana_name_a) or is_multi_byte_encoding(iana_name_b):
+        return 0.0
+
+    decoder_a = importlib.import_module(
+        "encodings.{}".format(iana_name_a)
+    ).IncrementalDecoder
+    decoder_b = importlib.import_module(
+        "encodings.{}".format(iana_name_b)
+    ).IncrementalDecoder
+
+    id_a: IncrementalDecoder = decoder_a(errors="ignore")
+    id_b: IncrementalDecoder = decoder_b(errors="ignore")
+
+    character_match_count: int = 0
+
+    for i in range(255):
+        to_be_decoded: bytes = bytes([i])
+        if id_a.decode(to_be_decoded) == id_b.decode(to_be_decoded):
+            character_match_count += 1
+
+    return character_match_count / 254
+</python function>
+<rust function signature>
+pub(crate) fn cp_similarity(iana_name_a: &str, iana_name_b: &str) -> f32 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn is_multi_byte_encoding(name: &str) -> bool {
+    [
+        "utf-8",
+        "utf-16le",
+        "utf-16be",
+        "euc-jp",
+        "euc-kr",
+        "iso-2022-jp",
+        "gbk",
+        "gb18030",
+        "hz",
+        "big5",
+        "shift_jis",
+    ]
+    .contains(&name)
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use crate::assets::LANGUAGES;
+use crate::consts::{
+    ENCODING_MARKS, IANA_SUPPORTED, IANA_SUPPORTED_SIMILAR, RE_POSSIBLE_ENCODING_INDICATION,
+    UNICODE_RANGES_COMBINED, UNICODE_SECONDARY_RANGE_KEYWORD,
+};
+use crate::entity::Language;
+use ahash::{HashSet, HashSetExt};
+use encoding::label::encoding_from_whatwg_label;
+use encoding::{CodecError, DecoderTrap, EncoderTrap, Encoding, EncodingRef, StringWriter};
+use icu_normalizer::DecomposingNormalizer;
+use unicode_names2::name;
+use std::borrow::Cow;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn cp_similarity(iana_name_a: &str, iana_name_b: &str) -> f32 {
+    // we don't want to compare multi-byte encodings
+    if is_multi_byte_encoding(iana_name_a) || is_multi_byte_encoding(iana_name_b) {
+        return 0.0;
+    }
+
+    if let (Some(encoder_a), Some(encoder_b)) = (
+        encoding_from_whatwg_label(iana_name_a),
+        encoding_from_whatwg_label(iana_name_b),
+    ) {
+        let character_match_count = (1..255u8)
+            .filter(|&ch| {
+                let res_a = encoder_a.decode(&[ch], DecoderTrap::Ignore).ok();
+                let res_b = encoder_b.decode(&[ch], DecoderTrap::Ignore).ok();
+                res_a.is_some() && res_a == res_b //check that they aren't none and equal
+            })
+            .count();
+        return character_match_count as f32 / 254.0;
+    }
+    0.0 // Return 0.0 if encoders could not be retrieved.
+}
+</function>
+<translated function>
+ ```rust
+pub(crate) fn cp_similarity(iana_name_a: &str, iana_name_b: &str) -> f32 {
+    if is_multi_byte_encoding(iana_name_a) || is_multi_byte_encoding(iana_name_b) {
+        return 0.0;
+    }
+
+    let decoder_a: Box<dyn encoding::IncrementalDecoder> = match encoding_from_whatwg_label(&format!("encoding.{}", iana_name_a)) {
+        Ok(enc) => enc.new_decoder().into_owned(),
+        Err(_) => return 0.0,
+    };
+    let decoder_b: Box<dyn encoding::IncrementalDecoder> = match encoding_from_whatwg_label(&format!("encoding.{}", iana_name_b)) {
+        Ok(enc) => enc.new_decoder().into_owned(),
+        Err(_) => return 0.0,
+    };
+
+    let mut character_match_count: u32 = 0;
+
+    for i in 0..255 {
+        let to_be_decoded: &[u8] = &[i];
+        let decoded_a: Result<Cow<str>, CodecError> = decoder_a.decode(to_be_decoded, DecoderTrap::Ignore);
+        let decoded_b: Result<Cow<str>, CodecError> = decoder_b.decode(to_be_decoded, DecoderTrap::Ignore);
+
+        if let (Ok(decoded_a_str), Ok(decoded_b_str)) = (decoded_a, decoded_b) {
+            if decoded_a_str == decoded_b_str {
+                character_match_count += 1;
+            }
+        }
+    }
+
+    (character_match_count as f32) / 254.0
+}
+
+pub fn is_multi_byte_encoding(name: &str) -> bool {
+    [
+        "utf-8",
+        "utf-16le",
+        "utf-16be",
+        "euc-jp",
+        "euc-kr",
+        "iso-2022-jp",
+        "gbk",
+        "gb18030",
+        "hz",
+        "big5",
+        "shift_jis",
+    ]
+    .contains(&name)
+}
+```</translated function> ```rust
+pub(crate) fn cp_similarity(iana_name_a: &str, iana_name_b: &str) -> f32 {
+    if is_multi_byte_encoding(iana_name_a) || is_multi_byte_encoding(iana_name_b) {
+        return 0.0;
+    }
+
+    let decoder_a: Box<dyn encoding::IncrementalDecoder> = match encoding_from_whatwg_label(&format!("encoding.{}", iana_name_a)) {
+        Ok(enc) => enc.new_decoder().into_owned(),
+        Err(_) => return 0.0,
+    };
+    let decoder_b: Box<dyn encoding::IncrementalDecoder> = match encoding_from_whatwg_label(&format!("encoding.{}", iana_name_b)) {
+        Ok(enc) => enc.new_decoder().into_owned(),
+        Err(_) => return 0.0,
+    };
+
+    let mut character_match_count: u32 = 0;
+
+    for i in 0..255 {
+        let to_be_decoded: &[u8] = &[i];
+        let decoded_a: Result<Cow<str>, CodecError> = decoder_a.decode(to_be_decoded, DecoderTrap::Ignore);
+        let decoded_b: Result<Cow<str>, CodecError> = decoder_b.decode(to_be_decoded, DecoderTrap::Ignore);
+
+        if let (Ok(decoded_a_str), Ok(decoded_b_str)) = (decoded_a, decoded_b) {
+            if decoded_a_str == decoded_b_str {
+                character_match_count += 1;
+            }
+        }
+    }
+
+    (character_match_count as f32) / 254.0
+}
+
+pub fn is_multi_byte_encoding(name: &str) -> bool {
+    [
+        "utf-8",
+        "utf-16le",
+        "utf-16be",
+        "euc-jp",
+        "euc-kr",
+        "iso-2022-jp",
+        "gbk",
+        "gb18030",
+        "hz",
+        "big5",
+        "shift_jis",
+    ]
+    .contains(&name)
+}
+```

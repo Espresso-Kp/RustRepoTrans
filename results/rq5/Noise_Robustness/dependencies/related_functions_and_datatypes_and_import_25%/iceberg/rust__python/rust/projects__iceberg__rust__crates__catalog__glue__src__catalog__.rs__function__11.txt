@@ -1,0 +1,94 @@
+fn build(file_io_builder: FileIOBuilder) -> Result<Self> {
+        let scheme_str = file_io_builder.scheme_str.unwrap_or("".to_string());
+        let scheme = Self::parse_scheme(&scheme_str)?;
+        let mut new_props = HashMap::default();
+        new_props.insert("root".to_string(), DEFAULT_ROOT_PATH.to_string());
+
+        match scheme {
+            Scheme::Fs => Ok(Self::LocalFs {
+                op: Operator::via_map(Scheme::Fs, new_props)?,
+            }),
+            Scheme::S3 => {
+                for prop in file_io_builder.props {
+                    if let Some(op_key) = S3_CONFIG_MAPPING.get(prop.0.as_str()) {
+                        new_props.insert(op_key.to_string(), prop.1);
+                    }
+                }
+
+                Ok(Self::S3 {
+                    scheme_str,
+                    props: new_props,
+                })
+            }
+            _ => Err(Error::new(
+                ErrorKind::FeatureUnsupported,
+                format!("Constructing file io from scheme: {scheme} not supported now",),
+            )),
+        }
+    }
+pub async fn metadata(&self) -> Result<FileMetadata> {
+        let meta = self.op.stat(&self.path[self.relative_path_pos..]).await?;
+
+        Ok(FileMetadata {
+            size: meta.content_length(),
+        })
+    }
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+async fn get_namespace(&self, namespace: &NamespaceIdent) -> Result<Namespace> {
+        let db_name = validate_namespace(namespace)?;
+
+        let builder = self.client.0.get_database().name(&db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+        match resp.database() {
+            Some(db) => {
+                let namespace = convert_to_namespace(db);
+                Ok(namespace)
+            }
+            None => Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} does not exist", db_name),
+            )),
+        }
+    }
+pub struct GlueCatalogConfig {
+    #[builder(default, setter(strip_option))]
+    uri: Option<String>,
+    #[builder(default, setter(strip_option))]
+    catalog_id: Option<String>,
+    warehouse: String,
+    #[builder(default)]
+    props: HashMap<String, String>,
+}
+pub struct NamespaceIdent(Vec<String>);
+------
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;

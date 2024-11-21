@@ -1,0 +1,65 @@
+<path>
+projects/deltachat-core/rust/contact.rs
+</path>
+<function>
+    pub async fn lookup_id_by_addr(
+        context: &Context,
+        addr: &str,
+        min_origin: Origin,
+    ) -> Result<Option<ContactId>> {
+        Self::lookup_id_by_addr_ex(context, addr, min_origin, Some(Blocked::Not)).await
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_contact.c
+</path>
+<function>
+ * Known and unblocked contacts will be returned by dc_get_contacts().
+ *
+ * To validate an e-mail address independently of the contact database
+ * use dc_may_be_valid_addr().
+ *
+ * @memberof dc_context_t
+ * @param context The context object as created by dc_context_new().
+ * @param addr The e-mail-address to check.
+ * @return 1=address is a contact in use, 0=address is not a contact in use.
+ */
+uint32_t dc_lookup_contact_id_by_addr(dc_context_t* context, const char* addr)
+{
+	int           contact_id = 0;
+	char*         addr_normalized = NULL;
+	char*         addr_self = NULL;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || addr==NULL || addr[0]==0) {
+		goto cleanup;
+	}
+
+	addr_normalized = dc_addr_normalize(addr);
+
+	addr_self = dc_sqlite3_get_config(context->sql, "configured_addr", "");
+	if (strcasecmp(addr_normalized, addr_self)==0) {
+		contact_id = DC_CONTACT_ID_SELF;
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT id FROM contacts"
+		" WHERE addr=?1 COLLATE NOCASE"
+		" AND id>?2 AND origin>=?3 AND blocked=0;");
+	sqlite3_bind_text(stmt, 1, (const char*)addr_normalized, -1, SQLITE_STATIC);
+	sqlite3_bind_int (stmt, 2, DC_CONTACT_ID_LAST_SPECIAL);
+	sqlite3_bind_int (stmt, 3, DC_ORIGIN_MIN_CONTACT_LIST);
+	if (sqlite3_step(stmt)==SQLITE_ROW) {
+		contact_id = sqlite3_column_int(stmt, 0);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	free(addr_normalized);
+	free(addr_self);
+	return contact_id;
+}
+</function>

@@ -1,0 +1,211 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def map(self, map_type: MapType, key_result: AvroType, value_result: AvroType) -> AvroType:
+        if isinstance(key_result, StringType):
+            # Avro Maps does not support other keys than a String,
+            return {
+                "type": "map",
+                "values": value_result,
+                "key-id": self.last_map_key_field_id,
+                "value-id": self.last_map_value_field_id,
+            }
+        else:
+            # Creates a logical map that's a list of schema's
+            # binary compatible
+            return {
+                "type": "array",
+                "items": {
+                    "type": "record",
+                    "name": f"k{self.last_map_key_field_id}_v{self.last_map_value_field_id}",
+                    "fields": [
+                        {"name": "key", "type": key_result, "field-id": self.last_map_key_field_id},
+                        {"name": "value", "type": value_result, "field-id": self.last_map_value_field_id},
+                    ],
+                },
+                "logicalType": "map",
+            }
+</python function>
+<rust function signature>
+fn map(
+        &mut self,
+        map: &MapType,
+        key_value: AvroSchemaOrField,
+        value: AvroSchemaOrField,
+    ) -> Result<AvroSchemaOrField> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn map(
+        &mut self,
+        map: &MapType,
+        key_value: AvroSchemaOrField,
+        value: AvroSchemaOrField,
+    ) -> Result<AvroSchemaOrField> {
+        let key_field_schema = key_value.unwrap_left();
+        let mut value_field_schema = value.unwrap_left();
+        if !map.value_field.required {
+            value_field_schema = avro_optional(value_field_schema)?;
+        }
+
+        if matches!(key_field_schema, AvroSchema::String) {
+            Ok(Either::Left(AvroSchema::Map(Box::new(value_field_schema))))
+        } else {
+            // Avro map requires that key must be string type. Here we convert it to array if key is
+            // not string type.
+            let key_field = {
+                let mut field = AvroRecordField {
+                    name: map.key_field.name.clone(),
+                    doc: None,
+                    aliases: None,
+                    default: None,
+                    schema: key_field_schema,
+                    order: RecordFieldOrder::Ascending,
+                    position: 0,
+                    custom_attributes: Default::default(),
+                };
+                field.custom_attributes.insert(
+                    FILED_ID_PROP.to_string(),
+                    Value::Number(Number::from(map.key_field.id)),
+                );
+                field
+            };
+
+            let value_field = {
+                let mut field = AvroRecordField {
+                    name: map.value_field.name.clone(),
+                    doc: None,
+                    aliases: None,
+                    default: None,
+                    schema: value_field_schema,
+                    order: RecordFieldOrder::Ignore,
+                    position: 0,
+                    custom_attributes: Default::default(),
+                };
+                field.custom_attributes.insert(
+                    FILED_ID_PROP.to_string(),
+                    Value::Number(Number::from(map.value_field.id)),
+                );
+                field
+            };
+
+            let fields = vec![key_field, value_field];
+            let item_avro_schema = avro_record_schema(
+                format!("k{}_v{}", map.key_field.id, map.value_field.id).as_str(),
+                fields,
+            )?;
+
+            Ok(Either::Left(AvroSchema::Array(item_avro_schema.into())))
+        }
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+fn map(
+    &mut self,
+    map: &MapType,
+    key_value: AvroSchemaOrField,
+    value: AvroSchemaOrField,
+) -> Result<AvroSchemaOrField> {
+    if let AvroSchemaOrField::String(key_result) = key_value {
+        // Avro Maps does not support other keys than a String,
+        Ok(AvroSchemaOrField::Map {
+            values: value,
+            key_id: self.last_map_key_field_id,
+            value_id: self.last_map_value_field_id,
+        })
+    } else {
+        // Creates a logical map that's a list of schema's
+        // binary compatible
+        Ok(AvroSchemaOrField::Array {
+            items: AvroSchemaOrField::Record {
+                name: format!("k{}_v{}", self.last_map_key_field_id, self.last_map_value_field_id),
+                fields: vec![
+                    AvroSchemaOrField::RecordField {
+                        name: "key".to_string(),
+                        type_: key_result,
+                        field_id: self.last_map_key_field_id,
+                    },
+                    AvroSchemaOrField::RecordField {
+                        name: "value".to_string(),
+                        type_: value,
+                        field_id: self.last_map_value_field_id,
+                    },
+                ],
+            },
+            logical_type: "map".to_string(),
+        })
+    }
+}
+```
+Note that I assumed `AvroSchemaOrField` is an enum with variants `String`, `Map`, and `Array`, and `RecordField` is a struct with fields `name`, `type_`, and `field_id`. I also assumed `self.last_map_key_field_id` and `self.last_map_value_field_id` are fields of the current struct. If these assumptions are incorrect, please let me know and I'll adjust the translation accordingly.</translated function>Here is the translated Rust function:
+```rust
+fn map(
+    &mut self,
+    map: &MapType,
+    key_value: AvroSchemaOrField,
+    value: AvroSchemaOrField,
+) -> Result<AvroSchemaOrField> {
+    if let AvroSchemaOrField::String(key_result) = key_value {
+        // Avro Maps does not support other keys than a String,
+        Ok(AvroSchemaOrField::Map {
+            values: value,
+            key_id: self.last_map_key_field_id,
+            value_id: self.last_map_value_field_id,
+        })
+    } else {
+        // Creates a logical map that's a list of schema's
+        // binary compatible
+        Ok(AvroSchemaOrField::Array {
+            items: AvroSchemaOrField::Record {
+                name: format!("k{}_v{}", self.last_map_key_field_id, self.last_map_value_field_id),
+                fields: vec![
+                    AvroSchemaOrField::RecordField {
+                        name: "key".to_string(),
+                        type_: key_result,
+                        field_id: self.last_map_key_field_id,
+                    },
+                    AvroSchemaOrField::RecordField {
+                        name: "value".to_string(),
+                        type_: value,
+                        field_id: self.last_map_value_field_id,
+                    },
+                ],
+            },
+            logical_type: "map".to_string(),
+        })
+    }
+}
+```
+Note that I assumed `AvroSchemaOrField` is an enum with variants `String`, `Map`, and `Array`, and `RecordField` is a struct with fields `name`, `type_`, and `field_id`. I also assumed `self.last_map_key_field_id` and `self.last_map_value_field_id` are fields of the current struct. If these assumptions are incorrect, please let me know and I'll adjust the translation accordingly.

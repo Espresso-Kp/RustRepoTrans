@@ -1,0 +1,123 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def read(self, n: int) -> bytes:
+        """Read n bytes."""
+        if n < 0:
+            raise ValueError(f"Requested {n} bytes to read, expected positive integer.")
+        data: List[bytes] = []
+
+        n_remaining = n
+        while n_remaining > 0:
+            data_read = self._input_stream.read(n_remaining)
+            read_len = len(data_read)
+            if read_len == n:
+                # If we read everything, we return directly
+                # otherwise we'll continue to fetch the rest
+                return data_read
+            elif read_len <= 0:
+                raise EOFError(f"EOF: read {read_len} bytes")
+            data.append(data_read)
+            n_remaining -= read_len
+
+        return b"".join(data)
+</python function>
+<rust function signature>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct InputFile {
+    op: Operator,
+    // Absolution path of file.
+    path: String,
+    // Relative path of file to uri, starts at [`relative_path_pos`]
+    relative_path_pos: usize,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+        Ok(opendal::Reader::read(self, range).await?.to_bytes())
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+    let n = range.end - range.start;
+    if n < 0 {
+        return Err(Error::new(ErrorKind::InvalidInput, format!("Requested {} bytes to read, expected positive integer.", n)));
+    }
+
+    let mut data = Vec::new();
+    let mut n_remaining = n;
+
+    while n_remaining > 0 {
+        let mut buffer = vec![0u8; n_remaining as usize];
+        let read_len = self.op.read(&self.path, range.start + (n - n_remaining), &mut buffer).await?;
+
+        if read_len == n as usize {
+            return Ok(Bytes::from(buffer));
+        } else if read_len == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, format!("EOF: read {} bytes", read_len)));
+        }
+
+        data.extend_from_slice(&buffer[..read_len]);
+        n_remaining -= read_len as u64;
+    }
+
+    Ok(Bytes::from(data))
+}
+```
+
+This Rust function follows the provided signature and uses the available dependencies and libraries. It reads the specified range of bytes from the file using the `Operator` from the `InputFile` struct. The function handles error cases, such as invalid input and unexpected EOF, and returns the result as `Result<Bytes>`.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+    let n = range.end - range.start;
+    if n < 0 {
+        return Err(Error::new(ErrorKind::InvalidInput, format!("Requested {} bytes to read, expected positive integer.", n)));
+    }
+
+    let mut data = Vec::new();
+    let mut n_remaining = n;
+
+    while n_remaining > 0 {
+        let mut buffer = vec![0u8; n_remaining as usize];
+        let read_len = self.op.read(&self.path, range.start + (n - n_remaining), &mut buffer).await?;
+
+        if read_len == n as usize {
+            return Ok(Bytes::from(buffer));
+        } else if read_len == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, format!("EOF: read {} bytes", read_len)));
+        }
+
+        data.extend_from_slice(&buffer[..read_len]);
+        n_remaining -= read_len as u64;
+    }
+
+    Ok(Bytes::from(data))
+}
+```
+
+This Rust function follows the provided signature and uses the available dependencies and libraries. It reads the specified range of bytes from the file using the `Operator` from the `InputFile` struct. The function handles error cases, such as invalid input and unexpected EOF, and returns the result as `Result<Bytes>`.

@@ -1,0 +1,147 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def read(self, n: int) -> bytes:
+        """Read n bytes."""
+        if n < 0:
+            raise ValueError(f"Requested {n} bytes to read, expected positive integer.")
+        data: List[bytes] = []
+
+        n_remaining = n
+        while n_remaining > 0:
+            data_read = self._input_stream.read(n_remaining)
+            read_len = len(data_read)
+            if read_len == n:
+                # If we read everything, we return directly
+                # otherwise we'll continue to fetch the rest
+                return data_read
+            elif read_len <= 0:
+                raise EOFError(f"EOF: read {read_len} bytes")
+            data.append(data_read)
+            n_remaining -= read_len
+
+        return b"".join(data)
+</python function>
+<rust function signature>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub struct InputFile {
+    op: Operator,
+    // Absolution path of file.
+    path: String,
+    // Relative path of file to uri, starts at [`relative_path_pos`]
+    relative_path_pos: usize,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+        Ok(opendal::Reader::read(self, range).await?.to_bytes())
+    }
+</function>
+<translated function>
+Here is your translated function:
+
+```rust
+async fn read(&self, range: Range<u64>) -> Result<Bytes, Error> {
+    if range.start < 0 {
+        return Err(Error::new(ErrorKind::InvalidData,
+            format!("Requested {} bytes to read, expected positive integer.", range.start))); 
+    }
+
+    let mut result = Bytes::new();
+    let mut remaining = range.end - range.start;
+    
+    while remaining > 0 {
+        let mut buffer = Bytes::new();
+
+        let read_len = self.op.read(range.start..range.end, &mut buffer).await?;
+        
+        if read_len as u64 == remaining {
+            // If we read everything, we return directly
+            // otherwise we'll continue to fetch the rest
+            return Ok(buffer);
+        } else if read_len == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof,
+                format!("EOF: read {} bytes", read_len)));
+        }
+        
+        result.extend(buffer);
+
+        remaining = remaining - read_len as u64;
+        range.start = range.start + read_len as u64;
+    }
+
+    Ok(result)
+}
+```
+               
+This function reads a range of bytes asynchronously from the underlying file of an InputFile struct in Rust. A `Bytes` struct is used to buffer the bytes read from the file. This struct is provided by the `bytes` crate, which is a utility for working with bytes in Rust.
+
+If the range to read from is negative, an error is returned. The bytes are read in a loop until all bytes in the range have been read. The number of bytes read is tracked with the `remaining` variable. If the number of bytes read is less than zero or if we have read all the requested bytes, the function exits early. Otherwise, the read bytes are appended to the result.
+
+It's important to note that the translated Rust function is asynchronous unlike the original Python function. This change reflects the rising popularity of asynchrony in Rust, especially for I/O operations. This allows the function to yield execution to other tasks during potentially blocking operations, improving the overall performance of programs using this function.
+
+Please note you may need to replace `self.op.read(range.start..range.end, &mut buffer).await?;` with an actual asynchronous read operation appropriate to your context.</translated function>Here is your translated function:
+
+```rust
+async fn read(&self, range: Range<u64>) -> Result<Bytes, Error> {
+    if range.start < 0 {
+        return Err(Error::new(ErrorKind::InvalidData,
+            format!("Requested {} bytes to read, expected positive integer.", range.start))); 
+    }
+
+    let mut result = Bytes::new();
+    let mut remaining = range.end - range.start;
+    
+    while remaining > 0 {
+        let mut buffer = Bytes::new();
+
+        let read_len = self.op.read(range.start..range.end, &mut buffer).await?;
+        
+        if read_len as u64 == remaining {
+            // If we read everything, we return directly
+            // otherwise we'll continue to fetch the rest
+            return Ok(buffer);
+        } else if read_len == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof,
+                format!("EOF: read {} bytes", read_len)));
+        }
+        
+        result.extend(buffer);
+
+        remaining = remaining - read_len as u64;
+        range.start = range.start + read_len as u64;
+    }
+
+    Ok(result)
+}
+```
+               
+This function reads a range of bytes asynchronously from the underlying file of an InputFile struct in Rust. A `Bytes` struct is used to buffer the bytes read from the file. This struct is provided by the `bytes` crate, which is a utility for working with bytes in Rust.
+
+If the range to read from is negative, an error is returned. The bytes are read in a loop until all bytes in the range have been read. The number of bytes read is tracked with the `remaining` variable. If the number of bytes read is less than zero or if we have read all the requested bytes, the function exits early. Otherwise, the read bytes are appended to the result.
+
+It's important to note that the translated Rust function is asynchronous unlike the original Python function. This change reflects the rising popularity of asynchrony in Rust, especially for I/O operations. This allows the function to yield execution to other tasks during potentially blocking operations, improving the overall performance of programs using this function.
+
+Please note you may need to replace `self.op.read(range.start..range.end, &mut buffer).await?;` with an actual asynchronous read operation appropriate to your context.

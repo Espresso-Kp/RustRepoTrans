@@ -1,0 +1,63 @@
+<path>
+projects/deltachat-core/rust/message.rs
+</path>
+<function>
+    pub async fn get_summary(&self, context: &Context, chat: Option<&Chat>) -> Result<Summary> {
+        let chat_loaded: Chat;
+        let chat = if let Some(chat) = chat {
+            chat
+        } else {
+            let chat = Chat::load_from_db(context, self.chat_id).await?;
+            chat_loaded = chat;
+            &chat_loaded
+        };
+
+        let contact = if self.from_id != ContactId::SELF {
+            match chat.typ {
+                Chattype::Group | Chattype::Broadcast | Chattype::Mailinglist => {
+                    Some(Contact::get_by_id(context, self.from_id).await?)
+                }
+                Chattype::Single => None,
+            }
+        } else {
+            None
+        };
+
+        Summary::new(context, self, chat, contact.as_ref()).await
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_msg.c
+</path>
+<function>
+dc_lot_t* dc_msg_get_summary(const dc_msg_t* msg, const dc_chat_t* chat)
+{
+	dc_lot_t*      ret = dc_lot_new();
+	dc_contact_t*  contact = NULL;
+	dc_chat_t*     chat_to_delete = NULL;
+
+	if (msg==NULL || msg->magic!=DC_MSG_MAGIC) {
+		goto cleanup;
+	}
+
+	if (chat==NULL) {
+		if ((chat_to_delete=dc_get_chat(msg->context, msg->chat_id))==NULL) {
+			goto cleanup;
+		}
+		chat = chat_to_delete;
+	}
+
+	if (msg->from_id!=DC_CONTACT_ID_SELF && DC_CHAT_TYPE_IS_MULTI(chat->type)) {
+		contact = dc_get_contact(chat->context, msg->from_id);
+	}
+
+	dc_lot_fill(ret, msg, chat, contact, msg->context);
+
+cleanup:
+	dc_contact_unref(contact);
+	dc_chat_unref(chat_to_delete);
+	return ret;
+}
+</function>

@@ -1,0 +1,391 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_KEY(int sha,byte[] G1,byte[] G2,int pin,byte[] R,byte[] X,byte[] H,byte[] wCID,byte[] CK)
+	{
+		byte[] t;
+
+		FP12 g1=FP12.fromBytes(G1);
+		FP12 g2=FP12.fromBytes(G2);
+		BIG z=BIG.fromBytes(R);
+		BIG x=BIG.fromBytes(X);
+		BIG h=BIG.fromBytes(H);
+
+		ECP W=ECP.fromBytes(wCID);
+		if (W.is_infinity()) return INVALID_POINT; 
+
+		W=PAIR.G1mul(W,x);
+
+//		FP2 f=new FP2(new BIG(ROM.Fra),new BIG(ROM.Frb));
+		BIG r=new BIG(ROM.CURVE_Order);
+//		BIG q=new BIG(ROM.Modulus);
+
+		z.add(h);	//new
+		z.mod(r);
+
+		g2.pinpow(pin,PBLEN);
+		g1.mul(g2);
+
+		FP4 c=g1.compow(z,r);
+/*
+		BIG m=new BIG(q);
+		m.mod(r);
+
+		BIG a=new BIG(z);
+		a.mod(m);
+
+		BIG b=new BIG(z);
+		b.div(m);
+
+
+		FP4 c=g1.trace();
+		g2.copy(g1);
+		g2.frob(f);
+		FP4 cp=g2.trace();
+		g1.conj();
+		g2.mul(g1);
+		FP4 cpm1=g2.trace();
+		g2.mul(g1);
+		FP4 cpm2=g2.trace();
+
+		c=c.xtr_pow2(cp,cpm1,cpm2,a,b);
+*/
+		t=mpin_hash(sha,c,W);
+
+		for (int i=0;i<ECP.AESKEY;i++) CK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+fn hash(sha: usize, c: &mut FP4, U: &mut ECP, r: &mut [u8]) -> bool {
+    let mut w: [u8; EFS] = [0; EFS];
+    let mut t: [u8; 6 * EFS] = [0; 6 * EFS];
+
+    c.geta().geta().to_bytes(&mut w);
+    for i in 0..EFS {
+        t[i] = w[i]
+    }
+    c.geta().getb().to_bytes(&mut w);
+    for i in EFS..2 * EFS {
+        t[i] = w[i - EFS]
+    }
+    c.getb().geta().to_bytes(&mut w);
+    for i in 2 * EFS..3 * EFS {
+        t[i] = w[i - 2 * EFS]
+    }
+    c.getb().getb().to_bytes(&mut w);
+    for i in 3 * EFS..4 * EFS {
+        t[i] = w[i - 3 * EFS]
+    }
+
+    U.getx().to_bytes(&mut w);
+    for i in 4 * EFS..5 * EFS {
+        t[i] = w[i - 4 * EFS]
+    }
+    U.gety().to_bytes(&mut w);
+    for i in 5 * EFS..6 * EFS {
+        t[i] = w[i - 5 * EFS]
+    }
+
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    return false;
+}
+pub const PBLEN: i32 = 14;
+pub const CURVE_ORDER: [Chunk; NLEN] = [
+    0xD,
+    0x800000000010A1,
+    0x8000000007FF9F,
+    0x40000001BA344D,
+    0x25236482,
+];
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP12::from_bytes(&g1);
+    let mut g2 = FP12::from_bytes(&g2);
+    let mut z = Big::from_bytes(&r);
+    let mut x = Big::from_bytes(&x);
+    let h = Big::from_bytes(&h);
+
+    let mut W = ECP::from_bytes(&wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    W = pair::g1mul(&W, &mut x);
+
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    z.add(&h); //new
+    z.rmod(&r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&g2);
+
+    let mut c = g1.compow(&z, &r);
+
+    hash(sha, &mut c, &mut W, ck);
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the Rust translation of the provided Java function:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let g1 = FP12::from_bytes(g1);
+    let g2 = FP12::from_bytes(g2);
+    let z = BIG::from_bytes(r);
+    let x = BIG::from_bytes(x);
+    let h = BIG::from_bytes(h);
+
+    let w = ECP::from_bytes(wcid);
+    if w.is_infinity() { return -1; }
+
+    w = PAIR::G1mul(w, x);
+
+    z.add(&h);
+    z.mod(&ROM::CURVE_Order);
+
+    g2.pinpow(pin, PBLEN);
+    g1.mul(&g2);
+
+    let c = g1.compow(z, ROM::CURVE_Order);
+    let mut t = [0; ECP::AESKEY];
+
+    hash(sha, &mut c, &mut w, &mut t);
+    ck.copy_from_slice(&t);
+
+    0
+}
+```
+
+Note that I've assumed that `FP12`, `FP`, `BIG`, `ECP`, `PAIR`, `ROM`, `HASH256`, `HASH384`, `HASH512`, `RAND`, `test_utils`, and `ecp` are all defined elsewhere in your codebase. If not, you'll need to add those definitions as well.</translated function>Here is the Rust translation of the provided Java function:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let g1 = FP12::from_bytes(g1);
+    let g2 = FP12::from_bytes(g2);
+    let z = BIG::from_bytes(r);
+    let x = BIG::from_bytes(x);
+    let h = BIG::from_bytes(h);
+
+    let w = ECP::from_bytes(wcid);
+    if w.is_infinity() { return -1; }
+
+    w = PAIR::G1mul(w, x);
+
+    z.add(&h);
+    z.mod(&ROM::CURVE_Order);
+
+    g2.pinpow(pin, PBLEN);
+    g1.mul(&g2);
+
+    let c = g1.compow(z, ROM::CURVE_Order);
+    let mut t = [0; ECP::AESKEY];
+
+    hash(sha, &mut c, &mut w, &mut t);
+    ck.copy_from_slice(&t);
+
+    0
+}
+```
+
+Note that I've assumed that `FP12`, `FP`, `BIG`, `ECP`, `PAIR`, `ROM`, `HASH256`, `HASH384`, `HASH512`, `RAND`, `test_utils`, and `ecp` are all defined elsewhere in your codebase. If not, you'll need to add those definitions as well.

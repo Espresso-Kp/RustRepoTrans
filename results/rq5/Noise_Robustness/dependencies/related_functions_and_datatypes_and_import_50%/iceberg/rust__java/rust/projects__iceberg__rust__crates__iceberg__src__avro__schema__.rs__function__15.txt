@@ -1,0 +1,90 @@
+struct SchemaToAvroSchema {
+    schema: String,
+}
+pub enum PrimitiveType {
+    /// True or False
+    Boolean,
+    /// 32-bit signed integer
+    Int,
+    /// 64-bit signed integer
+    Long,
+    /// 32-bit IEEE 754 floating point.
+    Float,
+    /// 64-bit IEEE 754 floating point.
+    Double,
+    /// Fixed point decimal
+    Decimal {
+        /// Precision, must be 38 or less
+        precision: u32,
+        /// Scale
+        scale: u32,
+    },
+    /// Calendar date without timezone or time.
+    Date,
+    /// Time of day in microsecond precision, without date or timezone.
+    Time,
+    /// Timestamp in microsecond precision, without timezone
+    Timestamp,
+    /// Timestamp in microsecond precision, with timezone
+    Timestamptz,
+    /// Arbitrary-length character sequences encoded in utf-8
+    String,
+    /// Universally Unique Identifiers, should use 16-byte fixed
+    Uuid,
+    /// Fixed length byte array
+    Fixed(u64),
+    /// Arbitrary-length byte array.
+    Binary,
+}
+pub enum Type {
+    /// Primitive types
+    Primitive(PrimitiveType),
+    /// Struct type
+    Struct(StructType),
+    /// List type.
+    List(ListType),
+    /// Map type
+    Map(MapType),
+}
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+const UUID_LOGICAL_TYPE: &str = "uuid";
+const LOGICAL_TYPE: &str = "logicalType";
+------
+
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;

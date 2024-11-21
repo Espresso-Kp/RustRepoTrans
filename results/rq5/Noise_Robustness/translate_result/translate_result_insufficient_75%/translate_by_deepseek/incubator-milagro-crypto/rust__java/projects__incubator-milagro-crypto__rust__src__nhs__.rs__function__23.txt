@@ -1,0 +1,285 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static void SERVER_1(RAND RNG,byte[] SB,byte[] S)
+	{
+		int i;
+		byte[] seed=new byte[32];
+		byte[] array=new byte[1792];
+
+		int[] s=new int[DEGREE];
+		int[] e=new int[DEGREE];
+		int[] b=new int[DEGREE];
+
+		for (i=0;i<32;i++)
+			seed[i]=(byte)RNG.getByte();
+
+		Parse(seed,b);
+
+		Error(RNG,e);
+		Error(RNG,s);
+
+		ntt(s);
+		ntt(e);
+		poly_mul(b,b,s);
+		poly_add(b,b,e);
+		poly_hard_reduce(b);
+
+		redc_it(b);
+		pack(b,array);
+		
+		for (i=0;i<32;i++)
+			SB[i]=seed[i];
+		for (i=0;i<1792;i++)
+			SB[i+32]=array[i];
+
+		poly_hard_reduce(s);
+
+		pack(s,array);
+
+		for (i=0;i<1792;i++)
+			S[i]=array[i];
+
+	}
+</java function>
+<rust function signature>
+pub fn server_1(mut rng: &mut RAND, sb: &mut [u8], ss: &mut [u8]) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+fn ntt(x: &mut [i32]) {
+    let mut t = DEGREE / 2;
+    let q = PRIME;
+
+    /* Convert to Montgomery form */
+    for j in 0..DEGREE {
+        x[j] = nres(x[j])
+    }
+    let mut m = 1;
+    while m < DEGREE {
+        let mut k = 0;
+        for i in 0..m {
+            let s = ROOTS[m + i];
+            for j in k..k + t {
+                let u = x[j];
+                let v = modmul(x[j + t], s);
+                x[j] = u + v;
+                x[j + t] = u + 2 * q - v;
+            }
+            k += 2 * t;
+        }
+        t /= 2;
+        m *= 2;
+    }
+}
+fn redc_it(p: &mut [i32]) {
+    for i in 0..DEGREE {
+        p[i] = redc(p[i] as u64);
+    }
+}
+fn error(rng: &mut RAND, poly: &mut [i32]) {
+    for i in 0..DEGREE {
+        let mut n1 = ((rng.getbyte() as i32) & 0xff) + (((rng.getbyte() as i32) & 0xff) << 8);
+        let mut n2 = ((rng.getbyte() as i32) & 0xff) + (((rng.getbyte() as i32) & 0xff) << 8);
+        let mut r = 0 as i32;
+        for _ in 0..16 {
+            r += (n1 & 1) - (n2 & 1);
+            n1 >>= 1;
+            n2 >>= 1;
+        }
+        poly[i] = r + PRIME;
+    }
+}
+fn poly_add(p1: &mut [i32], p3: &[i32]) {
+    for i in 0..DEGREE {
+        p1[i] = p1[i] + p3[i];
+    }
+}
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+fn nhs_pack(poly: &[i32], array: &mut [u8]) {
+    let mut j = 0;
+    let mut i = 0;
+    while i < DEGREE {
+        let a = poly[i];
+        let b = poly[i + 1];
+        let c = poly[i + 2];
+        let d = poly[i + 3];
+        i += 4;
+        array[j] = (a & 0xff) as u8;
+        array[j + 1] = (((a >> 8) | (b << 6)) & 0xff) as u8;
+        array[j + 2] = ((b >> 2) & 0xff) as u8;
+        array[j + 3] = (((b >> 10) | (c << 4)) & 0xff) as u8;
+        array[j + 4] = ((c >> 4) & 0xff) as u8;
+        array[j + 5] = (((c >> 12) | (d << 2)) & 0xff) as u8;
+        array[j + 6] = (d >> 6) as u8;
+        j += 7;
+    }
+}
+fn poly_mul(p1: &mut [i32], p3: &[i32]) {
+    for i in 0..DEGREE {
+        p1[i] = modmul(p1[i], p3[i]);
+    }
+}
+fn poly_hard_reduce(poly: &mut [i32]) {
+    for i in 0..DEGREE {
+        let mut e = modmul(poly[i], ONE);
+        e = e - PRIME;
+        poly[i] = e + ((e >> (WL - 1)) & PRIME);
+    }
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use crate::rand::RAND;
+use crate::sha3;
+use crate::sha3::SHA3;
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_1(mut rng: &mut RAND, sb: &mut [u8], ss: &mut [u8]) {
+    let mut seed: [u8; 32] = [0; 32];
+    let mut array: [u8; 1792] = [0; 1792];
+    let mut s: [i32; DEGREE] = [0; DEGREE];
+    let mut e: [i32; DEGREE] = [0; DEGREE];
+    let mut b: [i32; DEGREE] = [0; DEGREE];
+
+    for i in 0..32 {
+        seed[i] = rng.getbyte();
+    }
+
+    parse(&seed, &mut b);
+
+    error(&mut rng, &mut e);
+    error(&mut rng, &mut s);
+
+    ntt(&mut s);
+    ntt(&mut e);
+    poly_mul(&mut b, &s);
+    poly_add(&mut b, &e);
+    poly_hard_reduce(&mut b);
+
+    redc_it(&mut b);
+    nhs_pack(&b, &mut array);
+
+    for i in 0..32 {
+        sb[i] = seed[i];
+    }
+
+    for i in 0..1792 {
+        sb[i + 32] = array[i];
+    }
+
+    poly_hard_reduce(&mut s);
+    nhs_pack(&s, &mut array);
+
+    for i in 0..1792 {
+        ss[i] = array[i];
+    }
+}
+</function>
+<translated function>
+ ```rust
+use crate::rand::RAND;
+use crate::sha3;
+use crate::sha3::SHA3;
+use super::*;
+
+pub fn server_1(mut rng: &mut RAND, sb: &mut [u8], ss: &mut [u8]) {
+    let mut seed = [0u8; 32];
+    let mut array = [0u8; 1792];
+
+    let mut s = [0i32; DEGREE];
+    let mut e = [0i32; DEGREE];
+    let mut b = [0i32; DEGREE];
+
+    for i in 0..32 {
+        seed[i] = rng.getbyte();
+    }
+
+    Parse(&seed, &mut b);
+
+    error(rng, &mut e);
+    error(rng, &mut s);
+
+    ntt(&mut s);
+    ntt(&mut e);
+    poly_mul(&mut b, &s);
+    poly_add(&mut b, &e);
+    poly_hard_reduce(&mut b);
+
+    redc_it(&mut b);
+    nhs_pack(&b, &mut array);
+
+    for i in 0..32 {
+        sb[i] = seed[i];
+    }
+    for i in 0..1792 {
+        sb[i + 32] = array[i];
+    }
+
+    poly_hard_reduce(&mut s);
+
+    nhs_pack(&s, &mut array);
+
+    for i in 0..1792 {
+        ss[i] = array[i];
+    }
+}
+```</translated function> ```rust
+use crate::rand::RAND;
+use crate::sha3;
+use crate::sha3::SHA3;
+use super::*;
+
+pub fn server_1(mut rng: &mut RAND, sb: &mut [u8], ss: &mut [u8]) {
+    let mut seed = [0u8; 32];
+    let mut array = [0u8; 1792];
+
+    let mut s = [0i32; DEGREE];
+    let mut e = [0i32; DEGREE];
+    let mut b = [0i32; DEGREE];
+
+    for i in 0..32 {
+        seed[i] = rng.getbyte();
+    }
+
+    Parse(&seed, &mut b);
+
+    error(rng, &mut e);
+    error(rng, &mut s);
+
+    ntt(&mut s);
+    ntt(&mut e);
+    poly_mul(&mut b, &s);
+    poly_add(&mut b, &e);
+    poly_hard_reduce(&mut b);
+
+    redc_it(&mut b);
+    nhs_pack(&b, &mut array);
+
+    for i in 0..32 {
+        sb[i] = seed[i];
+    }
+    for i in 0..1792 {
+        sb[i + 32] = array[i];
+    }
+
+    poly_hard_reduce(&mut s);
+
+    nhs_pack(&s, &mut array);
+
+    for i in 0..1792 {
+        ss[i] = array[i];
+    }
+}
+```

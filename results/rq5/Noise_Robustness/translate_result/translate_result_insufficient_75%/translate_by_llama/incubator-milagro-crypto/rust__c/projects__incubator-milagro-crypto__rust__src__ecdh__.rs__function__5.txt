@@ -1,0 +1,208 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void PBKDF2(int sha,const octet *p,octet *s,int rep,int olen,octet *key)
+{
+    int len;
+    int d=ROUNDUP(olen,sha);
+    char f[64];
+    char u[64];
+    octet F= {0,sizeof(f),f};
+    octet U= {0,sizeof(u),u};
+    OCT_empty(key);
+
+    for (int i=1; i<=d; i++)
+    {
+        len=s->len;
+        OCT_jint(s,i,4);
+
+        HMAC(sha,s,p,sha,&F);
+
+        s->len=len;
+        OCT_copy(&U,&F);
+        for (int j=2; j<=rep; j++)
+        {
+            HMAC(sha,&U,p,sha,&U);
+            OCT_xor(&F,&U);
+        }
+
+        OCT_joctet(key,&F);
+    }
+
+    OCT_chop(key,NULL,olen);
+}
+</c function>
+<rust function signature>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn hmac(sha: usize, m: &[u8], k: &[u8], olen: usize, tag: &mut [u8]) -> bool {
+    // Input is from an octet m
+    // olen is requested output length in bytes. k is the key
+    // The output is the calculated tag
+    let mut b: [u8; 64] = [0; 64]; // Not good
+    let mut k0: [u8; 128] = [0; 128];
+
+    if olen < 4 {
+        return false;
+    }
+
+    let mut lb = 64;
+    if sha > 32 {
+        lb = 128
+    }
+
+    for i in 0..lb {
+        k0[i] = 0
+    }
+
+    if k.len() > lb {
+        hashit(sha, k, 0, None, 0, &mut b);
+        for i in 0..sha {
+            k0[i] = b[i]
+        }
+    } else {
+        for i in 0..k.len() {
+            k0[i] = k[i]
+        }
+    }
+
+    for i in 0..lb {
+        k0[i] ^= 0x36
+    }
+    hashit(sha, &k0[0..lb], 0, Some(m), 0, &mut b);
+
+    for i in 0..lb {
+        k0[i] ^= 0x6a
+    }
+    hashit(sha, &k0[0..lb], 0, Some(&b[0..sha]), olen, tag);
+
+    return true;
+}
+fn intto_bytes(n: usize, b: &mut [u8]) {
+    let mut i = b.len();
+    let mut m = n;
+    while m > 0 && i > 0 {
+        i -= 1;
+        b[i] = (m & 0xff) as u8;
+        m /= 256;
+    }
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut d = olen / sha;
+    if olen % sha != 0 {
+        d += 1
+    }
+    let mut f: [u8; 64] = [0; 64];
+    let mut u: [u8; 64] = [0; 64];
+    let mut ku: [u8; 64] = [0; 64];
+    let mut s: [u8; 36] = [0; 36]; // Maximum salt of 32 bytes + 4
+    let mut n: [u8; 4] = [0; 4];
+
+    let sl = salt.len();
+    let mut kp = 0;
+    for i in 0..d {
+        for j in 0..sl {
+            s[j] = salt[j]
+        }
+        intto_bytes(i + 1, &mut n);
+        for j in 0..4 {
+            s[sl + j] = n[j]
+        }
+
+        hmac(sha, &s[0..sl + 4], pass, sha, &mut f);
+
+        for j in 0..sha {
+            u[j] = f[j]
+        }
+        for _ in 1..rep {
+            hmac(sha, &u, pass, sha, &mut ku);
+            for k in 0..sha {
+                u[k] = ku[k];
+                f[k] ^= u[k]
+            }
+        }
+        for j in 0..EFS {
+            if kp < olen && kp < f.len() {
+                k[kp] = f[j]
+            }
+            kp += 1
+        }
+    }
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut len = salt.len();
+    let mut d = (olen + sha - 1) / sha;
+    let mut f = [0u8; 64];
+    let mut u = [0u8; 64];
+
+    for i in 1..=d {
+        intto_bytes(i, &mut f[0..4]);
+        hmac(sha, salt, pass, sha, &mut f);
+        salt.len = len;
+        OCT_copy(&mut u, &f);
+        for j in 2..=rep {
+            hmac(sha, &u, pass, sha, &mut u);
+            OCT_xor(&mut f, &u);
+        }
+        OCT_copy(k, &f);
+    }
+
+    OCT_chop(k, None, olen);
+}
+```
+Note that I've assumed that `OCT_copy`, `OCT_xor`, and `OCT_chop` are functions that are already defined elsewhere in the codebase, and that `intto_bytes` is the same as the one defined in the provided Rust code. If that's not the case, you'll need to modify the code accordingly.
+
+Also, I've used the `&mut` syntax to pass mutable references to the `hmac` function, as it seems to be the correct way to pass mutable buffers in Rust. If you need to modify the `hmac` function to accept immutable buffers instead, you'll need to make the necessary changes.</translated function>Here is the translated Rust function:
+```rust
+pub fn pbkdf2(sha: usize, pass: &[u8], salt: &[u8], rep: usize, olen: usize, k: &mut [u8]) {
+    let mut len = salt.len();
+    let mut d = (olen + sha - 1) / sha;
+    let mut f = [0u8; 64];
+    let mut u = [0u8; 64];
+
+    for i in 1..=d {
+        intto_bytes(i, &mut f[0..4]);
+        hmac(sha, salt, pass, sha, &mut f);
+        salt.len = len;
+        OCT_copy(&mut u, &f);
+        for j in 2..=rep {
+            hmac(sha, &u, pass, sha, &mut u);
+            OCT_xor(&mut f, &u);
+        }
+        OCT_copy(k, &f);
+    }
+
+    OCT_chop(k, None, olen);
+}
+```
+Note that I've assumed that `OCT_copy`, `OCT_xor`, and `OCT_chop` are functions that are already defined elsewhere in the codebase, and that `intto_bytes` is the same as the one defined in the provided Rust code. If that's not the case, you'll need to modify the code accordingly.
+
+Also, I've used the `&mut` syntax to pass mutable references to the `hmac` function, as it seems to be the correct way to pass mutable buffers in Rust. If you need to modify the `hmac` function to accept immutable buffers instead, you'll need to make the necessary changes.

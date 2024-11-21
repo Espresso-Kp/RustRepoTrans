@@ -1,0 +1,184 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void dc_apeerstate_apply_header(dc_apeerstate_t* peerstate, const dc_aheader_t* header, time_t message_time)
+{
+	if (peerstate==NULL || header==NULL
+	 || peerstate->addr==NULL
+	 || header->addr==NULL || header->public_key->binary==NULL
+	 || strcasecmp(peerstate->addr, header->addr)!=0) {
+		return;
+	}
+
+	if (message_time > peerstate->last_seen_autocrypt)
+	{
+		peerstate->last_seen           = message_time;
+		peerstate->last_seen_autocrypt = message_time;
+
+		if ((header->prefer_encrypt==DC_PE_MUTUAL || header->prefer_encrypt==DC_PE_NOPREFERENCE) /*this also switches from DC_PE_RESET to DC_PE_NOPREFERENCE, which is just fine as the function is only called _if_ the Autocrypt:-header is preset at all */
+		 &&  header->prefer_encrypt!=peerstate->prefer_encrypt)
+		{
+			peerstate->prefer_encrypt = header->prefer_encrypt;
+		}
+
+		if (peerstate->public_key==NULL) {
+			peerstate->public_key = dc_key_new();
+		}
+
+		if (!dc_key_equals(peerstate->public_key, header->public_key))
+		{
+			dc_key_set_from_key(peerstate->public_key, header->public_key);
+			dc_apeerstate_recalc_fingerprint(peerstate);
+		}
+	}
+}
+</c function>
+<rust function signature>
+pub fn apply_header(&mut self, header: &Aheader, message_time: i64) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::mem;
+use anyhow::{Context as _, Error, Result};
+use deltachat_contact_tools::{addr_cmp, ContactAddress};
+use num_traits::FromPrimitive;
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::chat::{self, Chat};
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::constants::Chattype;
+use crate::contact::{Contact, Origin};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{DcKey, Fingerprint, SignedPublicKey};
+use crate::message::Message;
+use crate::mimeparser::SystemMessage;
+use crate::sql::Sql;
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::test_utils::alice_keypair;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn apply_header(&mut self, header: &Aheader, message_time: i64) {
+        if !addr_cmp(&self.addr, &header.addr) {
+            return;
+        }
+
+        if message_time >= self.last_seen {
+            self.last_seen = message_time;
+            self.last_seen_autocrypt = message_time;
+            if (header.prefer_encrypt == EncryptPreference::Mutual
+                || header.prefer_encrypt == EncryptPreference::NoPreference)
+                && header.prefer_encrypt != self.prefer_encrypt
+            {
+                self.prefer_encrypt = header.prefer_encrypt;
+            }
+
+            if self.public_key.as_ref() != Some(&header.public_key) {
+                self.public_key = Some(header.public_key.clone());
+                self.recalc_fingerprint();
+            }
+        }
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub fn apply_header(&mut self, header: &Aheader, message_time: i64) -> Result<()> {
+    if self.peerstate.is_none() || header.is_none() {
+        return Ok(());
+    }
+
+    let peerstate = self.peerstate.as_mut().unwrap();
+    let header = header.as_ref().unwrap();
+
+    if peerstate.addr.is_none() || header.addr.is_none() || header.public_key.is_none() {
+        return Ok(());
+    }
+
+    let peer_addr = peerstate.addr.as_ref().unwrap();
+    let header_addr = header.addr.as_ref().unwrap();
+    if addr_cmp(peer_addr, header_addr)!= 0 {
+        return Ok(());
+    }
+
+    if message_time > peerstate.last_seen_autocrypt {
+        peerstate.last_seen = message_time;
+        peerstate.last_seen_autocrypt = message_time;
+
+        if (header.prefer_encrypt == EncryptPreference::Mutual || header.prefer_encrypt == EncryptPreference::NoPreference)
+            && header.prefer_encrypt!= peerstate.prefer_encrypt
+        {
+            peerstate.prefer_encrypt = header.prefer_encrypt;
+        }
+
+        if peerstate.public_key.is_none() {
+            peerstate.public_key = Some(DcKey::new());
+        }
+
+        if let Some(peer_key) = peerstate.public_key.as_ref() {
+            if!DcKey::equals(peer_key, header.public_key.as_ref().unwrap()) {
+                peerstate.public_key = Some(DcKey::set_from_key(peer_key, header.public_key.as_ref().unwrap()));
+                chatlist_events::recalc_fingerprint(peerstate);
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+Note that I've assumed that `self.peerstate` is an `Option<Apeerstate>` and `header` is an `Option<Aheader>`. I've also assumed that `Apeerstate` and `Aheader` are structs with the corresponding fields. If this is not the case, please let me know and I'll adjust the code accordingly.</translated function>Here is the translated Rust function:
+```rust
+pub fn apply_header(&mut self, header: &Aheader, message_time: i64) -> Result<()> {
+    if self.peerstate.is_none() || header.is_none() {
+        return Ok(());
+    }
+
+    let peerstate = self.peerstate.as_mut().unwrap();
+    let header = header.as_ref().unwrap();
+
+    if peerstate.addr.is_none() || header.addr.is_none() || header.public_key.is_none() {
+        return Ok(());
+    }
+
+    let peer_addr = peerstate.addr.as_ref().unwrap();
+    let header_addr = header.addr.as_ref().unwrap();
+    if addr_cmp(peer_addr, header_addr)!= 0 {
+        return Ok(());
+    }
+
+    if message_time > peerstate.last_seen_autocrypt {
+        peerstate.last_seen = message_time;
+        peerstate.last_seen_autocrypt = message_time;
+
+        if (header.prefer_encrypt == EncryptPreference::Mutual || header.prefer_encrypt == EncryptPreference::NoPreference)
+            && header.prefer_encrypt!= peerstate.prefer_encrypt
+        {
+            peerstate.prefer_encrypt = header.prefer_encrypt;
+        }
+
+        if peerstate.public_key.is_none() {
+            peerstate.public_key = Some(DcKey::new());
+        }
+
+        if let Some(peer_key) = peerstate.public_key.as_ref() {
+            if!DcKey::equals(peer_key, header.public_key.as_ref().unwrap()) {
+                peerstate.public_key = Some(DcKey::set_from_key(peer_key, header.public_key.as_ref().unwrap()));
+                chatlist_events::recalc_fingerprint(peerstate);
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+Note that I've assumed that `self.peerstate` is an `Option<Apeerstate>` and `header` is an `Option<Aheader>`. I've also assumed that `Apeerstate` and `Aheader` are structs with the corresponding fields. If this is not the case, please let me know and I'll adjust the code accordingly.

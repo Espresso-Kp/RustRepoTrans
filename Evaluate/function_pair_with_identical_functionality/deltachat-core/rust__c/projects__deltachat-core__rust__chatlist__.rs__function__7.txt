@@ -1,0 +1,91 @@
+<path>
+projects/deltachat-core/rust/chatlist.rs
+</path>
+<function>
+    pub async fn get_summary(
+        &self,
+        context: &Context,
+        index: usize,
+        chat: Option<&Chat>,
+    ) -> Result<Summary> {
+        // The summary is created by the chat, not by the last message.
+        // This is because we may want to display drafts here or stuff as
+        // "is typing".
+        // Also, sth. as "No messages" would not work if the summary comes from a message.
+        let (chat_id, lastmsg_id) = self
+            .ids
+            .get(index)
+            .context("chatlist index is out of range")?;
+        Chatlist::get_summary2(context, *chat_id, *lastmsg_id, chat).await
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chatlist.c
+</path>
+<function>
+dc_lot_t* dc_chatlist_get_summary(const dc_chatlist_t* chatlist, size_t index, dc_chat_t* chat /*may be NULL*/)
+{
+	/* The summary is created by the chat, not by the last message.
+	This is because we may want to display drafts here or stuff as
+	"is typing".
+	Also, sth. as "No messages" would not work if the summary comes from a
+	message. */
+
+	dc_lot_t*      ret = dc_lot_new(); /* the function never returns NULL */
+	uint32_t       lastmsg_id = 0;
+	dc_msg_t*      lastmsg = NULL;
+	dc_contact_t*  lastcontact = NULL;
+	dc_chat_t*     chat_to_delete = NULL;
+
+	if (chatlist==NULL || chatlist->magic!=DC_CHATLIST_MAGIC || index>=chatlist->cnt) {
+		ret->text2 = dc_strdup("ErrBadChatlistIndex");
+		goto cleanup;
+	}
+
+	lastmsg_id = dc_array_get_id(chatlist->chatNlastmsg_ids, index*DC_CHATLIST_IDS_PER_RESULT+1);
+
+	if (chat==NULL) {
+		chat = dc_chat_new(chatlist->context);
+		chat_to_delete = chat;
+		if (!dc_chat_load_from_db(chat, dc_array_get_id(chatlist->chatNlastmsg_ids, index*DC_CHATLIST_IDS_PER_RESULT))) {
+			ret->text2 = dc_strdup("ErrCannotReadChat");
+			goto cleanup;
+		}
+	}
+
+	if (lastmsg_id)
+	{
+		lastmsg = dc_msg_new_untyped(chatlist->context);
+		dc_msg_load_from_db(lastmsg, chatlist->context, lastmsg_id);
+
+		if (lastmsg->from_id!=DC_CONTACT_ID_SELF  &&  DC_CHAT_TYPE_IS_MULTI(chat->type))
+		{
+			lastcontact = dc_contact_new(chatlist->context);
+			dc_contact_load_from_db(lastcontact, chatlist->context->sql, lastmsg->from_id);
+		}
+	}
+
+	if (chat->id==DC_CHAT_ID_ARCHIVED_LINK)
+	{
+		ret->text2 = dc_strdup(NULL);
+	}
+	else if (lastmsg==NULL || lastmsg->from_id==0)
+	{
+		/* no messages */
+		ret->text2 = dc_stock_str(chatlist->context, DC_STR_NOMESSAGES);
+	}
+	else
+	{
+		/* show the last message */
+		dc_lot_fill(ret, lastmsg, chat, lastcontact, chatlist->context);
+	}
+
+cleanup:
+	dc_msg_unref(lastmsg);
+	dc_contact_unref(lastcontact);
+	dc_chat_unref(chat_to_delete);
+	return ret;
+}
+</function>

@@ -1,0 +1,220 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int SVDP_DH(byte[] S,byte[] WD,byte[] Z)    
+	{
+		BIG r,s,wx,wy,z;
+		int valid;
+		ECP W;
+		int res=0;
+		byte[] T=new byte[EFS];
+
+		s=BIG.fromBytes(S);
+
+		W=ECP.fromBytes(WD);
+		if (W.is_infinity()) res=ERROR;
+
+		if (res==0)
+		{
+			r=new BIG(ROM.CURVE_Order);
+			s.mod(r);
+
+			W=W.mul(s);
+			if (W.is_infinity()) res=ERROR; 
+			else 
+			{
+				W.getX().toBytes(T);
+				for (int i=0;i<EFS;i++) Z[i]=T[i];
+			}
+		}
+		return res;
+	}
+</java function>
+<rust function signature>
+pub fn ecpsvdp_dh(s: &[u8], wd: &[u8], z: &mut [u8]) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+pub const EFS: usize = big::MODBYTES as usize;
+pub const ERROR: isize = -3;
+pub const CURVE_ORDER: [Chunk; NLEN] = [
+    0xD,
+    0x800000000010A1,
+    0x8000000007FF9F,
+    0x40000001BA344D,
+    0x25236482,
+];
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn ecpsvdp_dh(s: &[u8], wd: &[u8], z: &mut [u8]) -> isize {
+    let mut res = 0;
+    let mut t: [u8; EFS] = [0; EFS];
+
+    let mut sc = Big::from_bytes(&s);
+
+    let mut W = ECP::from_bytes(&wd);
+    if W.is_infinity() {
+        res = ERROR
+    }
+
+    if res == 0 {
+        let r = Big::new_ints(&rom::CURVE_ORDER);
+        sc.rmod(&r);
+        W = W.mul(&sc);
+        if W.is_infinity() {
+            res = ERROR;
+        } else {
+            W.getx().to_bytes(&mut t);
+            for i in 0..EFS {
+                z[i] = t[i]
+            }
+        }
+    }
+    res
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and library imports:
+
+```rust
+pub fn ecpsvdp_dh(s: &[u8], wd: &[u8], z: &mut [u8]) -> isize {
+    let mut res = 0;
+    let mut t = [0u8; EFS];
+
+    let s_big = Big::from_bytes(s);
+
+    let w = ECP::from_bytes(wd);
+    if w.is_infinity() {
+        return ERROR;
+    }
+
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+    let mut s_mod = s_big;
+    s_mod.modulo(&r);
+
+    let w_mul = w.mul(&s_mod);
+    if w_mul.is_infinity() {
+        res = ERROR;
+    } else {
+        w_mul.getx().to_bytes(&mut t);
+        z.copy_from_slice(&t[..EFS]);
+    }
+
+    res
+}
+```
+
+This Rust function closely follows the structure and logic of the original Java function. It uses the provided dependencies and type declarations to implement the SVDP-DH (Secret Value Derivation Primitive - Diffie-Hellman) algorithm.
+
+Note that some minor adjustments were made to align with Rust's ownership and borrowing rules:
+
+1. The `s` and `wd` parameters are now borrowed slices (`&[u8]`) instead of arrays.
+2. The `z` parameter is a mutable slice (`&mut [u8]`) to allow in-place modification.
+3. The `W.mul(s)` operation in Java is replaced with `w.mul(&s_mod)` in Rust, passing a reference to `s_mod`.
+4. The `for` loop for copying bytes is replaced with the `copy_from_slice` method, which is more idiomatic in Rust.
+
+The function uses the imported types and functions from the provided dependencies and libraries to perform the necessary operations.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, dependencies, and library imports:
+
+```rust
+pub fn ecpsvdp_dh(s: &[u8], wd: &[u8], z: &mut [u8]) -> isize {
+    let mut res = 0;
+    let mut t = [0u8; EFS];
+
+    let s_big = Big::from_bytes(s);
+
+    let w = ECP::from_bytes(wd);
+    if w.is_infinity() {
+        return ERROR;
+    }
+
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+    let mut s_mod = s_big;
+    s_mod.modulo(&r);
+
+    let w_mul = w.mul(&s_mod);
+    if w_mul.is_infinity() {
+        res = ERROR;
+    } else {
+        w_mul.getx().to_bytes(&mut t);
+        z.copy_from_slice(&t[..EFS]);
+    }
+
+    res
+}
+```
+
+This Rust function closely follows the structure and logic of the original Java function. It uses the provided dependencies and type declarations to implement the SVDP-DH (Secret Value Derivation Primitive - Diffie-Hellman) algorithm.
+
+Note that some minor adjustments were made to align with Rust's ownership and borrowing rules:
+
+1. The `s` and `wd` parameters are now borrowed slices (`&[u8]`) instead of arrays.
+2. The `z` parameter is a mutable slice (`&mut [u8]`) to allow in-place modification.
+3. The `W.mul(s)` operation in Java is replaced with `w.mul(&s_mod)` in Rust, passing a reference to `s_mod`.
+4. The `for` loop for copying bytes is replaced with the `copy_from_slice` method, which is more idiomatic in Rust.
+
+The function uses the imported types and functions from the provided dependencies and libraries to perform the necessary operations.

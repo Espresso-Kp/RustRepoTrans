@@ -1,0 +1,182 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def merge_coherence_ratios(results: List[CoherenceMatches]) -> CoherenceMatches:
+    """
+    This function merge results previously given by the function coherence_ratio.
+    The return type is the same as coherence_ratio.
+    """
+    per_language_ratios: Dict[str, List[float]] = {}
+    for result in results:
+        for sub_result in result:
+            language, ratio = sub_result
+            if language not in per_language_ratios:
+                per_language_ratios[language] = [ratio]
+                continue
+            per_language_ratios[language].append(ratio)
+
+    merge = [
+        (
+            language,
+            round(
+                sum(per_language_ratios[language]) / len(per_language_ratios[language]),
+                4,
+            ),
+        )
+        for language in per_language_ratios
+    ]
+
+    return sorted(merge, key=lambda x: x[1], reverse=True)
+</python function>
+<rust function signature>
+pub(crate) fn merge_coherence_ratios(results: &Vec<CoherenceMatches>) -> CoherenceMatches 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn len(&self) -> usize {
+        self.items.len()
+    }
+pub struct CoherenceMatch {
+    pub language: &'static Language,
+    pub score: f32,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn merge_coherence_ratios(results: &Vec<CoherenceMatches>) -> CoherenceMatches {
+    let mut index: HashMap<&Language, Vec<f32>> = HashMap::with_capacity(results.len());
+    results
+        .iter()
+        .flatten()
+        .for_each(|result| index.entry(result.language).or_default().push(result.score));
+
+    let mut merge: Vec<CoherenceMatch> = index
+        .iter()
+        .map(|(&lang, scores)| CoherenceMatch {
+            language: lang,
+            score: scores.iter().sum::<f32>() / (scores.len() as f32),
+        })
+        .collect();
+
+    merge.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+    merge
+}
+</function>
+<translated function>
+Here is the translated Rust function for the provided Python function:
+
+```rust
+pub(crate) fn merge_coherence_ratios(results: &Vec<CoherenceMatches>) -> CoherenceMatches {
+    use std::collections::HashMap;
+    use ordered_float::OrderedFloat;
+    
+    let mut per_language_ratios: HashMap<&Language, Vec<f32>> = HashMap::new();
+
+    for coherence_match in results.iter().flatten() {
+        let language = coherence_match.language;
+        let ratio = coherence_match.score;
+
+        let ratios = per_language_ratios
+            .entry(language)
+            .or_insert_with(Vec::new);
+
+        ratios.push(ratio);
+    }
+
+    let mut merge: CoherenceMatches = per_language_ratios
+        .into_iter()
+        .map(|(language, ratios)| {
+            let sum: f32 = ratios.iter().sum();
+            let avg = sum / ratios.len() as f32;
+            // assuming that the f32::round function is enough to get 4 decimal places like in Python's round
+            CoherenceMatch {
+                language,
+                score: (avg * 10000.0).round() / 10000.0,
+            }
+        })
+        .collect();
+
+    merge.sort_by(|a, b| {
+        /* Order by descending score like Python's sorted in reverse; 
+        if a.score is less than b.score, we return Greater to have it sorted in reversed order */
+        OrderedFloat(b.score).cmp(&OrderedFloat(a.score)) 
+    });
+
+    merge
+}
+```
+
+Note:
+
+1. Rust uses integer division for integers and floating point division for floating point numbers. That's why `ratios.len() as f32` is used.
+2. This function depends heavily on the rest of your project's build so it may be necessary to adjust this translation to fit exactly into your program. I made a lot of assumptions about the rest of your code.
+3. This assumes that `CoherenceMatches` is `Vec<CoherenceMatch>`. If not, please substitute accordingly.
+4. There is no built-in Python's `round` function in Rust. For this function, I've assumed that `f32::round` after multiplying by `10000.0` and then dividing by `10000.0` again will give the same result. Please verify this assumption in the context of your program.</translated function>Here is the translated Rust function for the provided Python function:
+
+```rust
+pub(crate) fn merge_coherence_ratios(results: &Vec<CoherenceMatches>) -> CoherenceMatches {
+    use std::collections::HashMap;
+    use ordered_float::OrderedFloat;
+    
+    let mut per_language_ratios: HashMap<&Language, Vec<f32>> = HashMap::new();
+
+    for coherence_match in results.iter().flatten() {
+        let language = coherence_match.language;
+        let ratio = coherence_match.score;
+
+        let ratios = per_language_ratios
+            .entry(language)
+            .or_insert_with(Vec::new);
+
+        ratios.push(ratio);
+    }
+
+    let mut merge: CoherenceMatches = per_language_ratios
+        .into_iter()
+        .map(|(language, ratios)| {
+            let sum: f32 = ratios.iter().sum();
+            let avg = sum / ratios.len() as f32;
+            // assuming that the f32::round function is enough to get 4 decimal places like in Python's round
+            CoherenceMatch {
+                language,
+                score: (avg * 10000.0).round() / 10000.0,
+            }
+        })
+        .collect();
+
+    merge.sort_by(|a, b| {
+        /* Order by descending score like Python's sorted in reverse; 
+        if a.score is less than b.score, we return Greater to have it sorted in reversed order */
+        OrderedFloat(b.score).cmp(&OrderedFloat(a.score)) 
+    });
+
+    merge
+}
+```
+
+Note:
+
+1. Rust uses integer division for integers and floating point division for floating point numbers. That's why `ratios.len() as f32` is used.
+2. This function depends heavily on the rest of your project's build so it may be necessary to adjust this translation to fit exactly into your program. I made a lot of assumptions about the rest of your code.
+3. This assumes that `CoherenceMatches` is `Vec<CoherenceMatch>`. If not, please substitute accordingly.
+4. There is no built-in Python's `round` function in Rust. For this function, I've assumed that `f32::round` after multiplying by `10000.0` and then dividing by `10000.0` again will give the same result. Please verify this assumption in the context of your program.

@@ -1,0 +1,121 @@
+pub fn to_bytes(&self, b: &mut [u8]) {
+        self.to_byte_array(b, 0)
+    }
+
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+
+pub fn generator() -> ECP2 {
+        return ECP2::new_fp2s(
+            FP2::new_bigs(
+                Big::new_ints(&rom::CURVE_PXA),
+                Big::new_ints(&rom::CURVE_PXB),
+            ),
+            FP2::new_bigs(
+                Big::new_ints(&rom::CURVE_PYA),
+                Big::new_ints(&rom::CURVE_PYB),
+            ),
+        );
+    }
+
+pub fn randomnum(q: &Big, rng: &mut RAND) -> Big {
+        let mut d = DBig::new();
+        let mut j = 0;
+        let mut r: u8 = 0;
+        let t = q.clone();
+        for _ in 0..2 * t.nbits() {
+            if j == 0 {
+                r = rng.getbyte();
+            } else {
+                r >>= 1
+            }
+
+            let b = (r as Chunk) & 1;
+            d.shl(1);
+            d.w[0] += b;
+            j += 1;
+            j &= 7;
+        }
+        let m = d.dmod(q);
+        m
+    }  
+
+pub fn g2mul(P: &ECP2, e: &Big) -> ECP2 {
+    if rom::USE_GS_G2 {
+        let mut Q: [ECP2; 4] = [ECP2::new(), ECP2::new(), ECP2::new(), ECP2::new()];
+        let mut f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut u = gs(e);
+
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            f.inverse();
+            f.norm();
+        }
+
+        Q[0] = P.clone();
+        for i in 1..4 {
+            Q[i] = Q[i - 1].clone();
+            Q[i].frob(&f);
+        }
+        for i in 0..4 {
+            let np = u[i].nbits();
+            let t = Big::modneg(&u[i], &q);
+            let nn = t.nbits();
+            if nn < np {
+                u[i] = t;
+                Q[i].neg();
+            }
+            u[i].norm();
+        }
+
+        ECP2::mul4(&mut Q, &u)
+    } else {
+        P.mul(e)
+    }
+}
+
+pub const BLS_OK: isize = 0;
+pub const BLS_FAIL: isize = -1;
+
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+
+
+pub fn new_dcopy(y: &DBig) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = y.w[i]
+        }
+        s
+    }
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+------
+
+use super::big;
+use super::big::Big;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::pair;
+use super::rom;
+use crate::rand::RAND;
+use crate::sha3::SHA3;
+use crate::sha3::SHAKE256;
+use std::str;
+use super::*;
+use crate::test_utils::*;

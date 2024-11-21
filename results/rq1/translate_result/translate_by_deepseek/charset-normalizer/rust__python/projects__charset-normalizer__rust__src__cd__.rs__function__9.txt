@@ -1,0 +1,191 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def merge_coherence_ratios(results: List[CoherenceMatches]) -> CoherenceMatches:
+    """
+    This function merge results previously given by the function coherence_ratio.
+    The return type is the same as coherence_ratio.
+    """
+    per_language_ratios: Dict[str, List[float]] = {}
+    for result in results:
+        for sub_result in result:
+            language, ratio = sub_result
+            if language not in per_language_ratios:
+                per_language_ratios[language] = [ratio]
+                continue
+            per_language_ratios[language].append(ratio)
+
+    merge = [
+        (
+            language,
+            round(
+                sum(per_language_ratios[language]) / len(per_language_ratios[language]),
+                4,
+            ),
+        )
+        for language in per_language_ratios
+    ]
+
+    return sorted(merge, key=lambda x: x[1], reverse=True)
+</python function>
+<rust function signature>
+pub(crate) fn merge_coherence_ratios(results: &Vec<CoherenceMatches>) -> CoherenceMatches 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let mess_difference = (self.mean_mess_ratio - other.mean_mess_ratio).abs();
+        let coherence_a = self.coherence();
+        let coherence_b = other.coherence();
+        let coherence_difference = (coherence_a - coherence_b).abs();
+
+        // Below 1% difference --> Use Coherence
+        if mess_difference < 0.01 {
+            if coherence_difference > 0.02 {
+                return coherence_b.partial_cmp(&coherence_a);
+            }
+            let multibyte_usage_a = self.multi_byte_usage();
+            let multibyte_usage_b = other.multi_byte_usage();
+            let multibyte_usage_delta = (multibyte_usage_a - multibyte_usage_b).abs();
+            if multibyte_usage_delta > f32::EPSILON {
+                return multibyte_usage_b.partial_cmp(&multibyte_usage_a);
+            }
+        }
+        self.mean_mess_ratio.partial_cmp(&other.mean_mess_ratio)
+    }
+
+pub fn iter(&self) -> CharsetMatchesIter {
+        CharsetMatchesIter {
+            items: self.items.iter(),
+        }
+    }
+
+pub struct CoherenceMatch {
+    pub language: &'static Language,
+    pub score: f32,
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn merge_coherence_ratios(results: &Vec<CoherenceMatches>) -> CoherenceMatches {
+    let mut index: HashMap<&Language, Vec<f32>> = HashMap::with_capacity(results.len());
+    results
+        .iter()
+        .flatten()
+        .for_each(|result| index.entry(result.language).or_default().push(result.score));
+
+    let mut merge: Vec<CoherenceMatch> = index
+        .iter()
+        .map(|(&lang, scores)| CoherenceMatch {
+            language: lang,
+            score: scores.iter().sum::<f32>() / (scores.len() as f32),
+        })
+        .collect();
+
+    merge.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+    merge
+}
+</function>
+<translated function>
+ ```rust
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+pub(crate) fn merge_coherence_ratios(results: &Vec<CoherenceMatches>) -> CoherenceMatches {
+    let mut per_language_ratios: HashMap<&'static Language, Vec<f32>> = HashMap::new();
+
+    for result in results {
+        for sub_result in result.iter() {
+            let language = sub_result.language;
+            let ratio = sub_result.score;
+            let entry = per_language_ratios.entry(language).or_insert(Vec::new());
+            entry.push(ratio);
+        }
+    }
+
+    let mut merge: Vec<(&'static Language, f32)> = per_language_ratios
+        .into_iter()
+        .map(|(language, ratios)| {
+            let average_ratio = ratios.iter().sum::<f32>() / ratios.len() as f32;
+            (language, OrderedFloat::new(average_ratio).0)
+        })
+        .collect();
+
+    merge.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    merge
+}
+```</translated function> ```rust
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+pub(crate) fn merge_coherence_ratios(results: &Vec<CoherenceMatches>) -> CoherenceMatches {
+    let mut per_language_ratios: HashMap<&'static Language, Vec<f32>> = HashMap::new();
+
+    for result in results {
+        for sub_result in result.iter() {
+            let language = sub_result.language;
+            let ratio = sub_result.score;
+            let entry = per_language_ratios.entry(language).or_insert(Vec::new());
+            entry.push(ratio);
+        }
+    }
+
+    let mut merge: Vec<(&'static Language, f32)> = per_language_ratios
+        .into_iter()
+        .map(|(language, ratios)| {
+            let average_ratio = ratios.iter().sum::<f32>() / ratios.len() as f32;
+            (language, OrderedFloat::new(average_ratio).0)
+        })
+        .collect();
+
+    merge.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    merge
+}
+```

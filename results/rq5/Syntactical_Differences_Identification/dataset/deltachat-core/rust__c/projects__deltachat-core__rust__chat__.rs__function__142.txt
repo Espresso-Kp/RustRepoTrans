@@ -1,0 +1,58 @@
+<path>
+projects/deltachat-core/rust/chat.rs
+</path>
+<function>
+pub(crate) async fn get_chat_id_by_grpid(
+    context: &Context,
+    grpid: &str,
+) -> Result<Option<(ChatId, bool, Blocked)>> {
+    context
+        .sql
+        .query_row_optional(
+            "SELECT id, blocked, protected FROM chats WHERE grpid=?;",
+            (grpid,),
+            |row| {
+                let chat_id = row.get::<_, ChatId>(0)?;
+
+                let b = row.get::<_, Option<Blocked>>(1)?.unwrap_or_default();
+                let p = row
+                    .get::<_, Option<ProtectionStatus>>(2)?
+                    .unwrap_or_default();
+                Ok((chat_id, p == ProtectionStatus::Protected, b))
+            },
+        )
+        .await
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chat.c
+</path>
+<function>
+uint32_t dc_get_chat_id_by_grpid(dc_context_t* context, const char* grpid, int* ret_blocked, int* ret_verified)
+{
+	uint32_t      chat_id = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if(ret_blocked)  { *ret_blocked = 0;  }
+	if(ret_verified) { *ret_verified = 0; }
+
+	if (context==NULL || grpid==NULL) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT id, blocked, protected FROM chats WHERE grpid=?;");
+	sqlite3_bind_text (stmt, 1, grpid, -1, SQLITE_STATIC);
+	if (sqlite3_step(stmt)==SQLITE_ROW) {
+		                    chat_id      =  sqlite3_column_int(stmt, 0);
+		if(ret_blocked)  { *ret_blocked  =  sqlite3_column_int(stmt, 1); }
+		if(ret_verified) { *ret_verified = (sqlite3_column_int(stmt, 2)==DC_CHAT_PROTECTIONSTATUS_PROTECTED); }
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return chat_id;
+}
+</function>

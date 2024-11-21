@@ -1,0 +1,566 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_get_oauth2_access_token(dc_context_t* context, const char* addr,
+                                 const char* code, int flags)
+{
+	oauth2_t*   oauth2 = NULL;
+	char*       access_token = NULL;
+	char*       refresh_token = NULL;
+	char*       refresh_token_for = NULL;
+	char*       redirect_uri = NULL;
+	int         update_redirect_uri_on_success = 0;
+	char*       token_url = NULL;
+	time_t      expires_in = 0;
+	char*       error = NULL;
+	char*       error_description = NULL;
+	char*       json = NULL;
+	jsmn_parser parser;
+	jsmntok_t   tok[128]; // we do not expect nor read more tokens
+	int         tok_cnt = 0;
+	int         locked = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || code==NULL || code[0]==0) {
+		dc_log_warning(context, 0, "Internal OAuth2 error");
+		goto cleanup;
+	}
+
+	if ((oauth2=get_info(addr))==NULL) {
+		dc_log_warning(context, 0, "Internal OAuth2 error: 2");
+		goto cleanup;
+	}
+
+	pthread_mutex_lock(&context->oauth2_critical);
+	locked = 1;
+
+	// read generated token
+	if ( !(flags&DC_REGENERATE) && !is_expired(context) ) {
+		access_token = dc_sqlite3_get_config(context->sql, "oauth2_access_token", NULL);
+		if (access_token!=NULL) {
+			goto cleanup; // success
+		}
+	}
+
+	// generate new token: build & call auth url
+	refresh_token = dc_sqlite3_get_config(context->sql, "oauth2_refresh_token", NULL);
+	refresh_token_for = dc_sqlite3_get_config(context->sql, "oauth2_refresh_token_for", "unset");
+	if (refresh_token==NULL || strcmp(refresh_token_for, code)!=0)
+	{
+		dc_log_info(context, 0, "Generate OAuth2 refresh_token and access_token...");
+		redirect_uri = dc_sqlite3_get_config(context->sql, "oauth2_pending_redirect_uri", "unset");
+		update_redirect_uri_on_success = 1;
+		token_url = dc_strdup(oauth2->init_token);
+	}
+	else
+	{
+		dc_log_info(context, 0, "Regenerate OAuth2 access_token by refresh_token...");
+		redirect_uri = dc_sqlite3_get_config(context->sql, "oauth2_redirect_uri", "unset");
+		token_url = dc_strdup(oauth2->refresh_token);
+	}
+
+	replace_in_uri(&token_url, "$CLIENT_ID",     oauth2->client_id);
+	replace_in_uri(&token_url, "$REDIRECT_URI",  redirect_uri);
+	replace_in_uri(&token_url, "$CODE",          code);
+	replace_in_uri(&token_url, "$REFRESH_TOKEN", refresh_token);
+
+	json = (char*)context->cb(context, DC_EVENT_HTTP_POST, (uintptr_t)token_url, 0);
+	if (json==NULL) {
+		dc_log_warning(context, 0, "Error calling OAuth2 at %s", token_url);
+		goto cleanup;
+	}
+
+	// generate new token: parse returned json
+	jsmn_init(&parser);
+	tok_cnt = jsmn_parse(&parser, json, strlen(json), tok, sizeof(tok)/sizeof(tok[0]));
+	if (tok_cnt<2 || tok[0].type!=JSMN_OBJECT) {
+		dc_log_warning(context, 0, "Failed to parse OAuth2 json from %s", token_url);
+		goto cleanup;
+	}
+
+	for (int i = 1; i < tok_cnt; i++) {
+		if (access_token==NULL && jsoneq(json, &tok[i], "access_token")==0) {
+			access_token = jsondup(json, &tok[i+1]);
+		}
+		else if (refresh_token==NULL && jsoneq(json, &tok[i], "refresh_token")==0) {
+			refresh_token = jsondup(json, &tok[i+1]);
+		}
+		else if (jsoneq(json, &tok[i], "expires_in")==0) {
+			char* expires_in_str = jsondup(json, &tok[i+1]);
+			if (expires_in_str) {
+				time_t val = atol(expires_in_str);
+				// val should be reasonable, maybe between 20 seconds and 5 years.
+				// if out of range, we re-create when the token gets invalid,
+				// which may create some additional load and requests wrt threads.
+				if (val>20 && val<(60*60*24*365*5)) {
+					expires_in = val;
+				}
+				free(expires_in_str);
+			}
+		}
+		else if (error==NULL && jsoneq(json, &tok[i], "error")==0) {
+			error = jsondup(json, &tok[i+1]);
+		}
+		else if (error_description==NULL && jsoneq(json, &tok[i], "error_description")==0) {
+			error_description = jsondup(json, &tok[i+1]);
+		}
+	}
+
+	if (error || error_description) {
+		dc_log_warning(context, 0, "OAuth error: %s: %s",
+			error? error : "unknown",
+			error_description? error_description : "no details");
+		// continue, errors do not imply everything went wrong
+	}
+
+	// update refresh_token if given, typically on the first round, but we update it later as well.
+	if (refresh_token && refresh_token[0]) {
+		dc_sqlite3_set_config(context->sql, "oauth2_refresh_token", refresh_token);
+		dc_sqlite3_set_config(context->sql, "oauth2_refresh_token_for", code);
+	}
+
+	// after that, save the access token.
+	// if it's unset, we may get it in the next round as we have the refresh_token now.
+	if (access_token==NULL || access_token[0]==0) {
+		dc_log_warning(context, 0, "Failed to find OAuth2 access token");
+		goto cleanup;
+	}
+
+	dc_sqlite3_set_config(context->sql, "oauth2_access_token", access_token);
+	dc_sqlite3_set_config_int64(context->sql, "oauth2_timestamp_expires",
+		expires_in? time(NULL)+expires_in-5/*refresh a bet before*/ : 0);
+
+	if (update_redirect_uri_on_success) {
+		dc_sqlite3_set_config(context->sql, "oauth2_redirect_uri", redirect_uri);
+	}
+
+cleanup:
+	if (locked) { pthread_mutex_unlock(&context->oauth2_critical); }
+	free(refresh_token);
+	free(refresh_token_for);
+	free(redirect_uri);
+	free(token_url);
+	free(json);
+	free(error);
+	free(error_description);
+	free(oauth2);
+	return access_token? access_token : dc_strdup(NULL);
+}
+</c function>
+<rust function signature>
+pub(crate) async fn get_oauth2_access_token(
+    context: &Context,
+    addr: &str,
+    code: &str,
+    regenerate: bool,
+) -> Result<Option<String>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) async fn get_oauth2_access_token(
+    context: &Context,
+    addr: &str,
+    code: &str,
+    regenerate: bool,
+) -> Result<Option<String>> {
+    let socks5_enabled = context.get_config_bool(Config::Socks5Enabled).await?;
+    if let Some(oauth2) = Oauth2::from_address(context, addr, socks5_enabled).await {
+        let lock = context.oauth2_mutex.lock().await;
+
+        // read generated token
+        if !regenerate && !is_expired(context).await? {
+            let access_token = context.sql.get_raw_config("oauth2_access_token").await?;
+            if access_token.is_some() {
+                // success
+                return Ok(access_token);
+            }
+        }
+
+        // generate new token: build & call auth url
+        let refresh_token = context.sql.get_raw_config("oauth2_refresh_token").await?;
+        let refresh_token_for = context
+            .sql
+            .get_raw_config("oauth2_refresh_token_for")
+            .await?
+            .unwrap_or_else(|| "unset".into());
+
+        let (redirect_uri, token_url, update_redirect_uri_on_success) =
+            if refresh_token.is_none() || refresh_token_for != code {
+                info!(context, "Generate OAuth2 refresh_token and access_token...",);
+                (
+                    context
+                        .sql
+                        .get_raw_config("oauth2_pending_redirect_uri")
+                        .await?
+                        .unwrap_or_else(|| "unset".into()),
+                    oauth2.init_token,
+                    true,
+                )
+            } else {
+                info!(
+                    context,
+                    "Regenerate OAuth2 access_token by refresh_token...",
+                );
+                (
+                    context
+                        .sql
+                        .get_raw_config("oauth2_redirect_uri")
+                        .await?
+                        .unwrap_or_else(|| "unset".into()),
+                    oauth2.refresh_token,
+                    false,
+                )
+            };
+
+        // to allow easier specification of different configurations,
+        // token_url is in GET-method-format, sth. as <https://domain?param1=val1&param2=val2> -
+        // convert this to POST-format ...
+        let mut parts = token_url.splitn(2, '?');
+        let post_url = parts.next().unwrap_or_default();
+        let post_args = parts.next().unwrap_or_default();
+        let mut post_param = HashMap::new();
+        for key_value_pair in post_args.split('&') {
+            let mut parts = key_value_pair.splitn(2, '=');
+            let key = parts.next().unwrap_or_default();
+            let mut value = parts.next().unwrap_or_default();
+
+            if value == "$CLIENT_ID" {
+                value = oauth2.client_id;
+            } else if value == "$REDIRECT_URI" {
+                value = &redirect_uri;
+            } else if value == "$CODE" {
+                value = code;
+            } else if value == "$REFRESH_TOKEN" {
+                if let Some(refresh_token) = refresh_token.as_ref() {
+                    value = refresh_token;
+                }
+            }
+
+            post_param.insert(key, value);
+        }
+
+        // ... and POST
+        let socks5_config = Socks5Config::from_database(&context.sql).await?;
+        let client = crate::net::http::get_client(socks5_config)?;
+
+        let response: Response = match client.post(post_url).form(&post_param).send().await {
+            Ok(resp) => match resp.json().await {
+                Ok(response) => response,
+                Err(err) => {
+                    warn!(
+                        context,
+                        "Failed to parse OAuth2 JSON response from {}: error: {}", token_url, err
+                    );
+                    return Ok(None);
+                }
+            },
+            Err(err) => {
+                warn!(context, "Error calling OAuth2 at {}: {:?}", token_url, err);
+                return Ok(None);
+            }
+        };
+
+        // update refresh_token if given, typically on the first round, but we update it later as well.
+        if let Some(ref token) = response.refresh_token {
+            context
+                .sql
+                .set_raw_config("oauth2_refresh_token", Some(token))
+                .await?;
+            context
+                .sql
+                .set_raw_config("oauth2_refresh_token_for", Some(code))
+                .await?;
+        }
+
+        // after that, save the access token.
+        // if it's unset, we may get it in the next round as we have the refresh_token now.
+        if let Some(ref token) = response.access_token {
+            context
+                .sql
+                .set_raw_config("oauth2_access_token", Some(token))
+                .await?;
+            let expires_in = response
+                .expires_in
+                // refresh a bit before
+                .map(|t| time() + t as i64 - 5)
+                .unwrap_or_else(|| 0);
+            context
+                .sql
+                .set_raw_config_int64("oauth2_timestamp_expires", expires_in)
+                .await?;
+
+            if update_redirect_uri_on_success {
+                context
+                    .sql
+                    .set_raw_config("oauth2_redirect_uri", Some(redirect_uri.as_ref()))
+                    .await?;
+            }
+        } else {
+            warn!(context, "Failed to find OAuth2 access token");
+        }
+
+        drop(lock);
+
+        Ok(response.access_token)
+    } else {
+        warn!(context, "Internal OAuth2 error: 2");
+
+        Ok(None)
+    }
+}
+</function>
+<translated function>
+ ```rust
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+pub(crate) async fn get_oauth2_access_token(
+    context: &Context,
+    addr: &str,
+    code: &str,
+    regenerate: bool,
+) -> Result<Option<String>> {
+    let oauth2 = get_info(addr).ok_or_else(|| anyhow!("Failed to get OAuth2 info"))?;
+    let mut locked = false;
+
+    if context.magic != DC_CONTEXT_MAGIC || code.is_empty() {
+        dc_log_warning!(context, "Internal OAuth2 error");
+        return Ok(None);
+    }
+
+    if !regenerate && !is_expired(context) {
+        if let Some(access_token) = dc_sqlite3_get_config(context.sql, "oauth2_access_token", None) {
+            return Ok(Some(access_token));
+        }
+    }
+
+    let refresh_token = dc_sqlite3_get_config(context.sql, "oauth2_refresh_token", None);
+    let refresh_token_for = dc_sqlite3_get_config(context.sql, "oauth2_refresh_token_for", "unset");
+    let mut update_redirect_uri_on_success = false;
+    let token_url = if refresh_token.is_none() || refresh_token_for != code {
+        dc_log_info!(context, "Generate OAuth2 refresh_token and access_token...");
+        update_redirect_uri_on_success = true;
+        dc_strdup(&oauth2.init_token)
+    } else {
+        dc_log_info!(context, "Regenerate OAuth2 access_token by refresh_token...");
+        dc_strdup(&oauth2.refresh_token)
+    };
+
+    let mut replacements = HashMap::new();
+    replacements.insert("$CLIENT_ID", &oauth2.client_id);
+    replacements.insert("$REDIRECT_URI", &dc_sqlite3_get_config(context.sql, "oauth2_pending_redirect_uri", "unset"));
+    replacements.insert("$CODE", code);
+    replacements.insert("$REFRESH_TOKEN", refresh_token.as_deref().unwrap_or(""));
+    replace_in_uri(&mut token_url, &replacements);
+
+    let json = context.cb(context, DC_EVENT_HTTP_POST, token_url.as_ptr() as _, 0).ok_or_else(|| anyhow!("Error calling OAuth2"))?;
+    if json.is_null() {
+        dc_log_warning!(context, "Error calling OAuth2 at {}", token_url);
+        return Ok(None);
+    }
+
+    let mut parser = jsmn_parser { rj: 0, tok: [jsmntok_t { type_: 0, start: 0, end: 0 }; 128] };
+    let tok_cnt = jsmn_parse(&mut parser, json, json.len() as _);
+    if tok_cnt < 2 || parser.tok[0].typ != JSMN_OBJECT {
+        dc_log_warning!(context, "Failed to parse OAuth2 json from {}", token_url);
+        return Ok(None);
+    }
+
+    let mut access_token: Option<String> = None;
+    let mut refresh_token: Option<String> = None;
+    let mut expires_in: Option<i64> = None;
+    let mut error: Option<String> = None;
+    let mut error_description: Option<String> = None;
+
+    for i in 1..tok_cnt {
+        if access_token.is_none() && jsoneq(json, &parser.tok[i], "access_token") == 0 {
+            access_token = Some(jsondup(json, &parser.tok[i + 1]));
+        } else if refresh_token.is_none() && jsoneq(json, &parser.tok[i], "refresh_token") == 0 {
+            refresh_token = Some(jsondup(json, &parser.tok[i + 1]));
+        } else if expires_in.is_none() && jsoneq(json, &parser.tok[i], "expires_in") == 0 {
+            let expires_in_str = jsondup(json, &parser.tok[i + 1]);
+            if let Some(val) = expires_in_str.as_deref().and_then(|s| s.parse::<i64>().ok()) {
+                if val > 20 && val < (60 * 60 * 24 * 365 * 5) {
+                    expires_in = Some(val);
+                }
+            }
+            free(expires_in_str);
+        } else if error.is_none() && jsoneq(json, &parser.tok[i], "error") == 0 {
+            error = Some(jsondup(json, &parser.tok[i + 1]));
+        } else if error_description.is_none() && jsoneq(json, &parser.tok[i], "error_description") == 0 {
+            error_description = Some(jsondup(json, &parser.tok[i + 1]));
+        }
+    }
+
+    if error.is_some() || error_description.is_some() {
+        dc_log_warning!(context, "OAuth error: {} {}", error.as_deref().unwrap_or("unknown"), error_description.as_deref().unwrap_or("no details"));
+    }
+
+    if let Some(refresh_token) = refresh_token.as_deref() {
+        dc_sqlite3_set_config(context.sql, "oauth2_refresh_token", refresh_token);
+        dc_sqlite3_set_config(context.sql, "oauth2_refresh_token_for", code);
+    }
+
+    if access_token.is_none() || access_token.as_deref().unwrap_or("").is_empty() {
+        dc_log_warning!(context, "Failed to find OAuth2 access token");
+        return Ok(None);
+    }
+
+    dc_sqlite3_set_config(context.sql, "oauth2_access_token", access_token.as_deref().unwrap());
+    dc_sqlite3_set_config_int64(context.sql, "oauth2_timestamp_expires", expires_in.unwrap_or(0));
+
+    if update_redirect_uri_on_success {
+        dc_sqlite3_set_config(context.sql, "oauth2_redirect_uri", &dc_sqlite3_get_config(context.sql, "oauth2_pending_redirect_uri", "unset"));
+    }
+
+    Ok(access_token)
+}
+```</translated function> ```rust
+use std::collections::HashMap;
+use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
+use crate::config::Config;
+use crate::context::Context;
+use crate::provider;
+use crate::provider::Oauth2Authorizer;
+use crate::socks::Socks5Config;
+use crate::tools::time;
+use super::*;
+use crate::test_utils::TestContext;
+
+pub(crate) async fn get_oauth2_access_token(
+    context: &Context,
+    addr: &str,
+    code: &str,
+    regenerate: bool,
+) -> Result<Option<String>> {
+    let oauth2 = get_info(addr).ok_or_else(|| anyhow!("Failed to get OAuth2 info"))?;
+    let mut locked = false;
+
+    if context.magic != DC_CONTEXT_MAGIC || code.is_empty() {
+        dc_log_warning!(context, "Internal OAuth2 error");
+        return Ok(None);
+    }
+
+    if !regenerate && !is_expired(context) {
+        if let Some(access_token) = dc_sqlite3_get_config(context.sql, "oauth2_access_token", None) {
+            return Ok(Some(access_token));
+        }
+    }
+
+    let refresh_token = dc_sqlite3_get_config(context.sql, "oauth2_refresh_token", None);
+    let refresh_token_for = dc_sqlite3_get_config(context.sql, "oauth2_refresh_token_for", "unset");
+    let mut update_redirect_uri_on_success = false;
+    let token_url = if refresh_token.is_none() || refresh_token_for != code {
+        dc_log_info!(context, "Generate OAuth2 refresh_token and access_token...");
+        update_redirect_uri_on_success = true;
+        dc_strdup(&oauth2.init_token)
+    } else {
+        dc_log_info!(context, "Regenerate OAuth2 access_token by refresh_token...");
+        dc_strdup(&oauth2.refresh_token)
+    };
+
+    let mut replacements = HashMap::new();
+    replacements.insert("$CLIENT_ID", &oauth2.client_id);
+    replacements.insert("$REDIRECT_URI", &dc_sqlite3_get_config(context.sql, "oauth2_pending_redirect_uri", "unset"));
+    replacements.insert("$CODE", code);
+    replacements.insert("$REFRESH_TOKEN", refresh_token.as_deref().unwrap_or(""));
+    replace_in_uri(&mut token_url, &replacements);
+
+    let json = context.cb(context, DC_EVENT_HTTP_POST, token_url.as_ptr() as _, 0).ok_or_else(|| anyhow!("Error calling OAuth2"))?;
+    if json.is_null() {
+        dc_log_warning!(context, "Error calling OAuth2 at {}", token_url);
+        return Ok(None);
+    }
+
+    let mut parser = jsmn_parser { rj: 0, tok: [jsmntok_t { type_: 0, start: 0, end: 0 }; 128] };
+    let tok_cnt = jsmn_parse(&mut parser, json, json.len() as _);
+    if tok_cnt < 2 || parser.tok[0].typ != JSMN_OBJECT {
+        dc_log_warning!(context, "Failed to parse OAuth2 json from {}", token_url);
+        return Ok(None);
+    }
+
+    let mut access_token: Option<String> = None;
+    let mut refresh_token: Option<String> = None;
+    let mut expires_in: Option<i64> = None;
+    let mut error: Option<String> = None;
+    let mut error_description: Option<String> = None;
+
+    for i in 1..tok_cnt {
+        if access_token.is_none() && jsoneq(json, &parser.tok[i], "access_token") == 0 {
+            access_token = Some(jsondup(json, &parser.tok[i + 1]));
+        } else if refresh_token.is_none() && jsoneq(json, &parser.tok[i], "refresh_token") == 0 {
+            refresh_token = Some(jsondup(json, &parser.tok[i + 1]));
+        } else if expires_in.is_none() && jsoneq(json, &parser.tok[i], "expires_in") == 0 {
+            let expires_in_str = jsondup(json, &parser.tok[i + 1]);
+            if let Some(val) = expires_in_str.as_deref().and_then(|s| s.parse::<i64>().ok()) {
+                if val > 20 && val < (60 * 60 * 24 * 365 * 5) {
+                    expires_in = Some(val);
+                }
+            }
+            free(expires_in_str);
+        } else if error.is_none() && jsoneq(json, &parser.tok[i], "error") == 0 {
+            error = Some(jsondup(json, &parser.tok[i + 1]));
+        } else if error_description.is_none() && jsoneq(json, &parser.tok[i], "error_description") == 0 {
+            error_description = Some(jsondup(json, &parser.tok[i + 1]));
+        }
+    }
+
+    if error.is_some() || error_description.is_some() {
+        dc_log_warning!(context, "OAuth error: {} {}", error.as_deref().unwrap_or("unknown"), error_description.as_deref().unwrap_or("no details"));
+    }
+
+    if let Some(refresh_token) = refresh_token.as_deref() {
+        dc_sqlite3_set_config(context.sql, "oauth2_refresh_token", refresh_token);
+        dc_sqlite3_set_config(context.sql, "oauth2_refresh_token_for", code);
+    }
+
+    if access_token.is_none() || access_token.as_deref().unwrap_or("").is_empty() {
+        dc_log_warning!(context, "Failed to find OAuth2 access token");
+        return Ok(None);
+    }
+
+    dc_sqlite3_set_config(context.sql, "oauth2_access_token", access_token.as_deref().unwrap());
+    dc_sqlite3_set_config_int64(context.sql, "oauth2_timestamp_expires", expires_in.unwrap_or(0));
+
+    if update_redirect_uri_on_success {
+        dc_sqlite3_set_config(context.sql, "oauth2_redirect_uri", &dc_sqlite3_get_config(context.sql, "oauth2_pending_redirect_uri", "unset"));
+    }
+
+    Ok(access_token)
+}
+```

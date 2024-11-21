@@ -1,0 +1,255 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def alpha_unicode_split(decoded_sequence: str) -> List[str]:
+    """
+    Given a decoded text sequence, return a list of str. Unicode range / alphabet separation.
+    Ex. a text containing English/Latin with a bit a Hebrew will return two items in the resulting list;
+    One containing the latin letters and the other hebrew.
+    """
+    layers: Dict[str, str] = {}
+
+    for character in decoded_sequence:
+        if character.isalpha() is False:
+            continue
+
+        character_range: Optional[str] = unicode_range(character)
+
+        if character_range is None:
+            continue
+
+        layer_target_range: Optional[str] = None
+
+        for discovered_range in layers:
+            if (
+                is_suspiciously_successive_range(discovered_range, character_range)
+                is False
+            ):
+                layer_target_range = discovered_range
+                break
+
+        if layer_target_range is None:
+            layer_target_range = character_range
+
+        if layer_target_range not in layers:
+            layers[layer_target_range] = character.lower()
+            continue
+
+        layers[layer_target_range] += character.lower()
+
+    return list(layers.values())
+</python function>
+<rust function signature>
+pub(crate) fn alpha_unicode_split(decoded_sequence: &str) -> Vec<String> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) fn is_suspiciously_successive_range(
+    range_a: Option<&'static str>,
+    range_b: Option<&'static str>,
+) -> bool {
+    if let (Some(range_a), Some(range_b)) = (range_a, range_b) {
+        if range_a == range_b
+            || [range_a, range_b].iter().all(|x| x.contains("Latin"))
+            || [range_a, range_b].iter().any(|x| x.contains("Emoticons"))
+        {
+            return false;
+        }
+
+        // Latin characters can be accompanied with a combining diacritical mark
+        // eg. Vietnamese.
+        if [range_a, range_b].iter().any(|x| x.contains("Latin"))
+            && [range_a, range_b].iter().any(|x| x.contains("Combining"))
+        {
+            return false;
+        }
+
+        // keywords intersection
+        let set_a: HashSet<_> = range_a.split_whitespace().collect();
+        let set_b: HashSet<_> = range_b.split_whitespace().collect();
+
+        if set_a
+            .intersection(&set_b)
+            .any(|elem| !UNICODE_SECONDARY_RANGE_KEYWORD.contains(elem))
+        {
+            return false;
+        }
+
+        // Japanese exception
+        let jp_ranges = ["Hiragana", "Katakana"];
+        match (
+            jp_ranges.contains(&range_a),                            // has_jp_a
+            jp_ranges.contains(&range_b),                            // has_jp_b
+            [range_a, range_b].iter().any(|x| x.contains("CJK")),    // has_cjk
+            [range_a, range_b].iter().any(|x| x.contains("Hangul")), // has_hangul
+            [range_a, range_b]
+                .iter()
+                .any(|x| x.contains("Punctuation") || x.contains("Forms")), // has_punct_or_forms
+            [range_a, range_b].iter().any(|&x| x == "Basic Latin"),  // is_any_basic_latin
+        ) {
+            (true, true, _, _, _, _) // both are japanese
+            | (true, _, true, _, _, _) | (_, true, true, _, _, _) //either is japanese and either contains CJK
+            | (_, _, true, true, _, _) // either has both CJK and Hanguls
+            | (_, _, true, _, true, _) // either has chinese and dedicated punctuation and separators 
+            | (_, _, _, true, _, true) // either has hangul and basic latin 
+            => return false,
+            _ => {} // All other combinations
+        }
+    }
+    true // if either range is none or edge cases never triggers, return true
+}
+
+pub(crate) fn unicode_range(character: char) -> Option<&'static str> {
+    let char_code = character as u32;
+    UNICODE_RANGES_COMBINED
+        .iter()
+        .find(|&(_, range)| range.contains(&char_code))
+        .map(|(name, _)| *name)
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn alpha_unicode_split(decoded_sequence: &str) -> Vec<String> {
+    let mut layers: HashMap<&str, String> = HashMap::new();
+
+    for ch in decoded_sequence.chars().filter(|c| c.is_alphabetic()) {
+        if let Some(character_range) = unicode_range(ch) {
+            let layer_key: &str = layers
+                .keys()
+                .find(|key| !is_suspiciously_successive_range(Some(key), Some(character_range)))
+                .copied()
+                .unwrap_or(character_range);
+            let layer = layers.entry(layer_key).or_default();
+            layer.extend(ch.to_lowercase());
+        }
+    }
+    layers.into_values().collect()
+}
+</function>
+<translated function>
+ ```rust
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+pub(crate) fn alpha_unicode_split(decoded_sequence: &str) -> Vec<String> {
+    let mut layers: HashMap<String, String> = HashMap::new();
+
+    for character in decoded_sequence.chars() {
+        if !character.is_alphabetic() {
+            continue;
+        }
+
+        let character_range = unicode_range(character);
+
+        if character_range.is_none() {
+            continue;
+        }
+
+        let character_range = character_range.unwrap();
+        let mut layer_target_range: Option<&str> = None;
+
+        for discovered_range in layers.keys() {
+            if !is_suspiciously_successive_range(Some(discovered_range), Some(character_range)) {
+                layer_target_range = Some(discovered_range);
+                break;
+            }
+        }
+
+        let layer_target_range = layer_target_range.unwrap_or(character_range);
+
+        if !layers.contains_key(layer_target_range) {
+            layers.insert(layer_target_range.to_string(), character.to_lowercase().to_string());
+            continue;
+        }
+
+        let entry = layers.get_mut(layer_target_range).unwrap();
+        entry.push_str(&character.to_lowercase().to_string());
+    }
+
+    layers.values().cloned().collect()
+}
+```</translated function> ```rust
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+pub(crate) fn alpha_unicode_split(decoded_sequence: &str) -> Vec<String> {
+    let mut layers: HashMap<String, String> = HashMap::new();
+
+    for character in decoded_sequence.chars() {
+        if !character.is_alphabetic() {
+            continue;
+        }
+
+        let character_range = unicode_range(character);
+
+        if character_range.is_none() {
+            continue;
+        }
+
+        let character_range = character_range.unwrap();
+        let mut layer_target_range: Option<&str> = None;
+
+        for discovered_range in layers.keys() {
+            if !is_suspiciously_successive_range(Some(discovered_range), Some(character_range)) {
+                layer_target_range = Some(discovered_range);
+                break;
+            }
+        }
+
+        let layer_target_range = layer_target_range.unwrap_or(character_range);
+
+        if !layers.contains_key(layer_target_range) {
+            layers.insert(layer_target_range.to_string(), character.to_lowercase().to_string());
+            continue;
+        }
+
+        let entry = layers.get_mut(layer_target_range).unwrap();
+        entry.push_str(&character.to_lowercase().to_string());
+    }
+
+    layers.values().cloned().collect()
+}
+```

@@ -1,0 +1,42 @@
+<path>
+projects/deltachat-core/rust/chat.rs
+</path>
+<function>
+pub async fn prepare_msg(context: &Context, chat_id: ChatId, msg: &mut Message) -> Result<MsgId> {
+    ensure!(
+        !chat_id.is_special(),
+        "Cannot prepare message for special chat"
+    );
+
+    let msg_id = prepare_msg_common(context, chat_id, msg, MessageState::OutPreparing).await?;
+    context.emit_msgs_changed(msg.chat_id, msg.id);
+
+    Ok(msg_id)
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chat.c
+</path>
+<function>
+ *     so you have to free it using dc_msg_unref() as usual.
+ * @return The ID of the message that is being prepared.
+ */
+uint32_t dc_prepare_msg(dc_context_t* context, uint32_t chat_id, dc_msg_t* msg)
+{
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || msg==NULL || chat_id<=DC_CHAT_ID_LAST_SPECIAL) {
+		return 0;
+	}
+
+	msg->state = DC_STATE_OUT_PREPARING;
+	uint32_t msg_id = prepare_msg_common(context, chat_id, msg);
+
+	context->cb(context, DC_EVENT_MSGS_CHANGED, msg->chat_id, msg->id);
+	if (dc_param_exists(msg->param, DC_PARAM_SET_LATITUDE)) {
+		context->cb(context, DC_EVENT_LOCATION_CHANGED, DC_CONTACT_ID_SELF, 0);
+	}
+
+	return msg_id;
+}
+</function>

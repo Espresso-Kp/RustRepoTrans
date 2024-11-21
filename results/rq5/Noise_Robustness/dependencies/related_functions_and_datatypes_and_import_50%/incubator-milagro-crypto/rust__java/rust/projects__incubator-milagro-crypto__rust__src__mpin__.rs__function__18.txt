@@ -1,0 +1,128 @@
+pub fn is_infinity(&self) -> bool {
+        match CURVETYPE {
+            CurveType::Edwards => self.x.is_zilch() && self.y.equals(&self.z),
+            CurveType::Weierstrass => self.x.is_zilch() && self.z.is_zilch(),
+            CurveType::Montgomery => self.z.is_zilch(),
+        }
+    }
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub fn ate(P1: &ECP2, Q1: &ECP) -> FP12 {
+    let mut f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+    let mut n = Big::new();
+    let mut n3 = Big::new();
+
+    if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            f.inverse();
+            f.norm();
+        }
+    }
+
+    let mut P = P1.clone();
+    P.affine();
+    let mut Q = Q1.clone();
+    Q.affine();
+
+    let qx = Q.getpx();
+    let qy = Q.getpy();
+
+    let mut A = P.clone();
+    let mut NP = P.clone();
+    NP.neg();
+
+    let nb = lbits(&mut n3, &mut n);
+
+    let mut r = FP12::new_int(1);
+    for i in (1..nb - 1).rev() {
+        r.sqr();
+        let mut lv = linedbl(&mut A, &qx, &qy);
+        let bt = n3.bit(i) - n.bit(i);
+        if bt == 1 {
+            let lv2 = lineadd(&mut A, &P, &qx, &qy);
+            lv.smul(&lv2);
+        }
+        if bt == -1 {
+            let lv2 = lineadd(&mut A, &NP, &qx, &qy);
+            lv.smul(&lv2);
+        }
+        r.ssmul(&lv);
+    }
+
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        r.conj();
+    }
+
+    /* R-ate fixup required for BN curves */
+
+    if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            A.neg();
+        }
+
+        let mut K = P.clone();
+        K.frob(&f);
+
+        let mut lv = lineadd(&mut A, &K, &qx, &qy);
+        K.frob(&f);
+        K.neg();
+        let lv2 = lineadd(&mut A, &K, &qx, &qy);
+        lv.smul(&lv2);
+        r.ssmul(&lv);
+    }
+
+    return r;
+}
+pub const INVALID_POINT: isize = -14;
+------
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

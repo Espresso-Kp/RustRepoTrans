@@ -1,0 +1,352 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def visit_starts_with(self, term: BoundTerm[L], literal: Literal[L]) -> bool:
+        field = term.ref().field
+        field_id: int = field.field_id
+
+        if self._contains_nulls_only(field_id):
+            return ROWS_CANNOT_MATCH
+
+        if not isinstance(field.field_type, PrimitiveType):
+            raise ValueError(f"Expected PrimitiveType: {field.field_type}")
+
+        prefix = str(literal.value)
+        len_prefix = len(prefix)
+
+        if lower_bound_bytes := self.lower_bounds.get(field_id):
+            lower_bound = str(from_bytes(field.field_type, lower_bound_bytes))
+
+            # truncate lower bound so that its length is not greater than the length of prefix
+            if lower_bound and lower_bound[:len_prefix] > prefix:
+                return ROWS_CANNOT_MATCH
+
+        if upper_bound_bytes := self.upper_bounds.get(field_id):
+            upper_bound = str(from_bytes(field.field_type, upper_bound_bytes))
+
+            # truncate upper bound so that its length is not greater than the length of prefix
+            if upper_bound is not None and upper_bound[:len_prefix] < prefix:
+                return ROWS_CANNOT_MATCH
+
+        return ROWS_MIGHT_MATCH
+</python function>
+<rust function signature>
+fn starts_with(
+        &mut self,
+        reference: &BoundReference,
+        datum: &Datum,
+        _predicate: &BoundPredicate,
+    ) -> crate::Result<bool> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+fn contains_nulls_only(&self, field_id: i32) -> bool {
+        let null_count = self.null_count(field_id);
+        let value_count = self.value_count(field_id);
+
+        null_count.is_some() && null_count == value_count
+    }
+
+fn lower_bound(&self, field_id: i32) -> Option<&Datum> {
+        self.data_file.lower_bounds.get(&field_id)
+    }
+
+pub(crate) fn literal(&self) -> &Datum {
+        &self.literal
+    }
+
+fn upper_bound(&self, field_id: i32) -> Option<&Datum> {
+        self.data_file.upper_bounds.get(&field_id)
+    }
+
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+
+pub(crate) struct InclusiveMetricsEvaluator<'a> {
+    data_file: &'a DataFile,
+}
+
+pub struct BoundReference {
+    // This maybe different from [`name`] filed in [`NestedField`] since this contains full path.
+    // For example, if the field is `a.b.c`, then `field.name` is `c`, but `original_name` is `a.b.c`.
+    column_name: String,
+    field: NestedFieldRef,
+    accessor: StructAccessorRef,
+}
+
+pub fn field(&self) -> &NestedField {
+    &self.field
+}
+
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+
+pub enum PrimitiveLiteral {
+    /// 0x00 for false, non-zero byte for true
+    Boolean(bool),
+    /// Stored as 4-byte little-endian
+    Int(i32),
+    /// Stored as 8-byte little-endian
+    Long(i64),
+    /// Stored as 4-byte little-endian
+    Float(OrderedFloat<f32>),
+    /// Stored as 8-byte little-endian
+    Double(OrderedFloat<f64>),
+    /// Stores days from the 1970-01-01 in an 4-byte little-endian int
+    Date(i32),
+    /// Stores microseconds from midnight in an 8-byte little-endian long
+    Time(i64),
+    /// Timestamp without timezone
+    Timestamp(i64),
+    /// Timestamp with timezone
+    Timestamptz(i64),
+    /// UTF-8 bytes (without length)
+    String(String),
+    /// 16-byte big-endian value
+    UUID(Uuid),
+    /// Binary value
+    Fixed(Vec<u8>),
+    /// Binary value (without length)
+    Binary(Vec<u8>),
+    /// Stores unscaled value as big int. According to iceberg spec, the precision must less than 38(`MAX_DECIMAL_PRECISION`) , so i128 is suit here.
+    Decimal(i128),
+}
+
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+
+pub struct NestedField {
+    /// Id unique in table schema
+    pub id: i32,
+    /// Field Name
+    pub name: String,
+    /// Optional or required
+    pub required: bool,
+    /// Datatype
+    pub field_type: Box<Type>,
+    /// Fields may have an optional comment or doc string.
+    pub doc: Option<String>,
+    /// Used to populate the field’s value for all records that were written before the field was added to the schema
+    pub initial_default: Option<Literal>,
+    /// Used to populate the field’s value for any records written after the field was added to the schema, if the writer does not supply the field’s value
+    pub write_default: Option<Literal>,
+}
+
+const ROWS_MIGHT_MATCH: crate::Result<bool> = Ok(true);
+
+const ROWS_CANNOT_MATCH: crate::Result<bool> = Ok(false);
+
+
+pub fn field(&self) -> &NestedField {
+        &self.field
+    }
+pub(crate) struct InclusiveMetricsEvaluator<'a> {
+    data_file: &'a DataFile,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::spec::{DataFile, Datum, PrimitiveLiteral};
+use crate::{Error, ErrorKind};
+use fnv::FnvHashSet;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::PredicateOperator::{
+        Eq, GreaterThan, GreaterThanOrEq, In, IsNan, IsNull, LessThan, LessThanOrEq, NotEq, NotIn,
+        NotNan, NotNull, NotStartsWith, StartsWith,
+    };
+use crate::expr::{
+        BinaryExpression, Bind, BoundPredicate, Predicate, Reference, SetExpression,
+        UnaryExpression,
+    };
+use crate::spec::{
+        DataContentType, DataFile, DataFileFormat, Datum, NestedField, PartitionField,
+        PartitionSpec, PrimitiveType, Schema, Struct, Transform, Type,
+    };
+use fnv::FnvHashSet;
+use std::collections::HashMap;
+use std::ops::Not;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn starts_with(
+        &mut self,
+        reference: &BoundReference,
+        datum: &Datum,
+        _predicate: &BoundPredicate,
+    ) -> crate::Result<bool> {
+        let field_id = reference.field().id;
+
+        if self.contains_nulls_only(field_id) {
+            return ROWS_CANNOT_MATCH;
+        }
+
+        let PrimitiveLiteral::String(datum) = datum.literal() else {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                "Cannot use StartsWith operator on non-string values",
+            ));
+        };
+
+        if let Some(lower_bound) = self.lower_bound(field_id) {
+            let PrimitiveLiteral::String(lower_bound) = lower_bound.literal() else {
+                return Err(Error::new(
+                    ErrorKind::Unexpected,
+                    "Cannot use StartsWith operator on non-string lower_bound value",
+                ));
+            };
+
+            let prefix_length = lower_bound.chars().count().min(datum.chars().count());
+
+            // truncate lower bound so that its length
+            // is not greater than the length of prefix
+            let truncated_lower_bound = lower_bound.chars().take(prefix_length).collect::<String>();
+            if datum < &truncated_lower_bound {
+                return ROWS_CANNOT_MATCH;
+            }
+        }
+
+        if let Some(upper_bound) = self.upper_bound(field_id) {
+            let PrimitiveLiteral::String(upper_bound) = upper_bound.literal() else {
+                return Err(Error::new(
+                    ErrorKind::Unexpected,
+                    "Cannot use StartsWith operator on non-string upper_bound value",
+                ));
+            };
+
+            let prefix_length = upper_bound.chars().count().min(datum.chars().count());
+
+            // truncate upper bound so that its length
+            // is not greater than the length of prefix
+            let truncated_upper_bound = upper_bound.chars().take(prefix_length).collect::<String>();
+            if datum > &truncated_upper_bound {
+                return ROWS_CANNOT_MATCH;
+            }
+        }
+
+        ROWS_MIGHT_MATCH
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+fn starts_with(
+    &mut self,
+    reference: &BoundReference,
+    datum: &Datum,
+    _predicate: &BoundPredicate,
+) -> crate::Result<bool> {
+    let field = reference.field();
+    let field_id: i32 = field.id();
+
+    if self.contains_nulls_only(field_id) {
+        return ROWS_CANNOT_MATCH;
+    }
+
+    if!matches!(field.field_type(), Type::Primitive(_)) {
+        return Err(Error::new(
+            ErrorKind::Unexpected,
+            format!("Expected PrimitiveType: {:?}", field.field_type()),
+        ));
+    }
+
+    let prefix = datum.literal().to_string();
+    let len_prefix = prefix.len();
+
+    if let Some(lower_bound) = self.lower_bound(field_id) {
+        let lower_bound_str = lower_bound.literal().to_string();
+        if lower_bound_str.len() > len_prefix && &lower_bound_str[..len_prefix] > &prefix {
+            return ROWS_CANNOT_MATCH;
+        }
+    }
+
+    if let Some(upper_bound) = self.upper_bound(field_id) {
+        let upper_bound_str = upper_bound.literal().to_string();
+        if upper_bound_str.len() > len_prefix && &upper_bound_str[..len_prefix] < &prefix {
+            return ROWS_CANNOT_MATCH;
+        }
+    }
+
+    Ok(true)
+}
+```
+Note that I've assumed that the `visit_starts_with` function is a method on a struct, and that the `self` parameter is a reference to that struct. I've also assumed that the `BoundReference` and `Datum` types have methods `field` and `literal` respectively, which return the corresponding values. Additionally, I've used the `matches!` macro to check if the `field.field_type()` is a `PrimitiveType`, and the `format!` macro to create an error message.</translated function>Here is the translated Rust function:
+```rust
+fn starts_with(
+    &mut self,
+    reference: &BoundReference,
+    datum: &Datum,
+    _predicate: &BoundPredicate,
+) -> crate::Result<bool> {
+    let field = reference.field();
+    let field_id: i32 = field.id();
+
+    if self.contains_nulls_only(field_id) {
+        return ROWS_CANNOT_MATCH;
+    }
+
+    if!matches!(field.field_type(), Type::Primitive(_)) {
+        return Err(Error::new(
+            ErrorKind::Unexpected,
+            format!("Expected PrimitiveType: {:?}", field.field_type()),
+        ));
+    }
+
+    let prefix = datum.literal().to_string();
+    let len_prefix = prefix.len();
+
+    if let Some(lower_bound) = self.lower_bound(field_id) {
+        let lower_bound_str = lower_bound.literal().to_string();
+        if lower_bound_str.len() > len_prefix && &lower_bound_str[..len_prefix] > &prefix {
+            return ROWS_CANNOT_MATCH;
+        }
+    }
+
+    if let Some(upper_bound) = self.upper_bound(field_id) {
+        let upper_bound_str = upper_bound.literal().to_string();
+        if upper_bound_str.len() > len_prefix && &upper_bound_str[..len_prefix] < &prefix {
+            return ROWS_CANNOT_MATCH;
+        }
+    }
+
+    Ok(true)
+}
+```
+Note that I've assumed that the `visit_starts_with` function is a method on a struct, and that the `self` parameter is a reference to that struct. I've also assumed that the `BoundReference` and `Datum` types have methods `field` and `literal` respectively, which return the corresponding values. Additionally, I've used the `matches!` macro to check if the `field.field_type()` is a `PrimitiveType`, and the `format!` macro to create an error message.

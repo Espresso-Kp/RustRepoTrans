@@ -1,0 +1,169 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public <T> Boolean isNaN(BoundReference<T> ref) {
+      int id = ref.fieldId();
+
+      Long valueCount = valueCounts.get(id);
+      if (valueCount == null) {
+        // the column is not present and is all nulls
+        return ROWS_CANNOT_MATCH;
+      }
+
+      Statistics<?> colStats = stats.get(id);
+      if (colStats != null && valueCount - colStats.getNumNulls() == 0) {
+        // (num nulls == value count) => all values are null => no nan values
+        return ROWS_CANNOT_MATCH;
+      }
+
+      return ROWS_MIGHT_MATCH;
+    }
+</java function>
+<rust function signature>
+fn is_nan(
+        &mut self,
+        reference: &BoundReference,
+        _predicate: &BoundPredicate,
+    ) -> crate::Result<bool> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn contains_nulls_only(&self, field_id: i32) -> bool {
+        let null_count = self.null_count(field_id);
+        let value_count = self.value_count(field_id);
+
+        null_count.is_some() && null_count == value_count
+    }
+
+fn nan_count(&self, field_id: i32) -> Option<&u64> {
+        self.data_file.nan_value_counts.get(&field_id)
+    }
+
+pub(crate) struct InclusiveMetricsEvaluator<'a> {
+    data_file: &'a DataFile,
+}
+
+pub struct BoundReference {
+    // This maybe different from [`name`] filed in [`NestedField`] since this contains full path.
+    // For example, if the field is `a.b.c`, then `field.name` is `c`, but `original_name` is `a.b.c`.
+    column_name: String,
+    field: NestedFieldRef,
+    accessor: StructAccessorRef,
+}
+
+pub fn field(&self) -> &NestedField {
+    &self.field
+}
+
+pub struct NestedField {
+    /// Id unique in table schema
+    pub id: i32,
+    /// Field Name
+    pub name: String,
+    /// Optional or required
+    pub required: bool,
+    /// Datatype
+    pub field_type: Box<Type>,
+    /// Fields may have an optional comment or doc string.
+    pub doc: Option<String>,
+    /// Used to populate the field’s value for all records that were written before the field was added to the schema
+    pub initial_default: Option<Literal>,
+    /// Used to populate the field’s value for any records written after the field was added to the schema, if the writer does not supply the field’s value
+    pub write_default: Option<Literal>,
+}
+
+const ROWS_MIGHT_MATCH: crate::Result<bool> = Ok(true);
+
+const ROWS_CANNOT_MATCH: crate::Result<bool> = Ok(false);
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::spec::{DataFile, Datum, PrimitiveLiteral};
+use crate::{Error, ErrorKind};
+use fnv::FnvHashSet;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::PredicateOperator::{
+        Eq, GreaterThan, GreaterThanOrEq, In, IsNan, IsNull, LessThan, LessThanOrEq, NotEq, NotIn,
+        NotNan, NotNull, NotStartsWith, StartsWith,
+    };
+use crate::expr::{
+        BinaryExpression, Bind, BoundPredicate, Predicate, Reference, SetExpression,
+        UnaryExpression,
+    };
+use crate::spec::{
+        DataContentType, DataFile, DataFileFormat, Datum, NestedField, PartitionField,
+        PartitionSpec, PrimitiveType, Schema, Struct, Transform, Type,
+    };
+use fnv::FnvHashSet;
+use std::collections::HashMap;
+use std::ops::Not;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn is_nan(
+        &mut self,
+        reference: &BoundReference,
+        _predicate: &BoundPredicate,
+    ) -> crate::Result<bool> {
+        let field_id = reference.field().id;
+
+        match self.nan_count(field_id) {
+            Some(&0) => ROWS_CANNOT_MATCH,
+            _ if self.contains_nulls_only(field_id) => ROWS_CANNOT_MATCH,
+            _ => ROWS_MIGHT_MATCH,
+        }
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+fn is_nan(
+    &mut self,
+    reference: &BoundReference,
+    _predicate: &BoundPredicate,
+) -> crate::Result<bool> {
+    let field_id = reference.field().id;
+    let value_count = self.nan_count(field_id);
+    if value_count.is_none() {
+        // the column is not present and is all nulls
+        return ROWS_CANNOT_MATCH;
+    }
+
+    let null_count = self.contains_nulls_only(field_id);
+    if null_count && value_count.unwrap() == null_count {
+        // (num nulls == value count) => all values are null => no nan values
+        return ROWS_CANNOT_MATCH;
+    }
+
+    ROWS_MIGHT_MATCH
+}
+```
+Note that I've assumed that `self` is an instance of `InclusiveMetricsEvaluator`, and that `reference` is a `BoundReference` instance. I've also assumed that `field_id` is an `i32` value, and that `value_count` and `null_count` are `Option<&u64>` and `bool` values, respectively. Let me know if these assumptions are incorrect!</translated function>Here is the translated Rust function:
+```rust
+fn is_nan(
+    &mut self,
+    reference: &BoundReference,
+    _predicate: &BoundPredicate,
+) -> crate::Result<bool> {
+    let field_id = reference.field().id;
+    let value_count = self.nan_count(field_id);
+    if value_count.is_none() {
+        // the column is not present and is all nulls
+        return ROWS_CANNOT_MATCH;
+    }
+
+    let null_count = self.contains_nulls_only(field_id);
+    if null_count && value_count.unwrap() == null_count {
+        // (num nulls == value count) => all values are null => no nan values
+        return ROWS_CANNOT_MATCH;
+    }
+
+    ROWS_MIGHT_MATCH
+}
+```
+Note that I've assumed that `self` is an instance of `InclusiveMetricsEvaluator`, and that `reference` is a `BoundReference` instance. I've also assumed that `field_id` is an `i32` value, and that `value_count` and `null_count` are `Option<&u64>` and `bool` values, respectively. Let me know if these assumptions are incorrect!

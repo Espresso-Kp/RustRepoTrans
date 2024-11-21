@@ -1,0 +1,161 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def __new__(cls, left: BooleanExpression, right: BooleanExpression) -> BooleanExpression:  # type: ignore
+        if left is AlwaysFalse() or right is AlwaysFalse():
+            return AlwaysFalse()
+        elif left is AlwaysTrue():
+            return right
+        elif right is AlwaysTrue():
+            return left
+        else:
+            obj = super().__new__(cls)
+            obj.left = left
+            obj.right = right
+            return obj
+</python function>
+<rust function signature>
+fn and(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+struct PredicateConverter<'a> {
+    /// The Parquet schema descriptor.
+    pub parquet_schema: &'a SchemaDescriptor,
+    /// The map between field id and leaf column index in Parquet schema.
+    pub column_map: &'a HashMap<i32, usize>,
+    /// The required column indices in Parquet schema for the predicates.
+    pub column_indices: &'a Vec<usize>,
+}
+
+type PredicateResult =
+    dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, ArrowError> + Send + 'static;
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use crate::error::Result;
+use arrow_arith::boolean::{and, is_not_null, is_null, not, or};
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
+use arrow_ord::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
+use arrow_schema::{ArrowError, DataType, SchemaRef as ArrowSchemaRef};
+use async_stream::try_stream;
+use bytes::Bytes;
+use fnv::FnvHashSet;
+use futures::future::BoxFuture;
+use futures::stream::StreamExt;
+use futures::{try_join, TryFutureExt};
+use parquet::arrow::arrow_reader::{ArrowPredicateFn, RowFilter};
+use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, PARQUET_FIELD_ID_META_KEY};
+use parquet::file::metadata::ParquetMetaData;
+use parquet::schema::types::{SchemaDescriptor, Type as ParquetType};
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::str::FromStr;
+use std::sync::Arc;
+use crate::arrow::{arrow_schema_to_schema, get_arrow_datum};
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::io::{FileIO, FileMetadata, FileRead};
+use crate::scan::{ArrowRecordBatchStream, FileScanTaskStream};
+use crate::spec::{Datum, SchemaRef};
+use crate::{Error, ErrorKind};
+use crate::arrow::reader::CollectFieldIdVisitor;
+use crate::expr::visitors::bound_predicate_visitor::visit;
+use crate::expr::{Bind, Reference};
+use crate::spec::{NestedField, PrimitiveType, Schema, SchemaRef, Type};
+use std::collections::HashSet;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn and(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> {
+        Ok(Box::new(move |batch| {
+            let left = lhs(batch.clone())?;
+            let right = rhs(batch)?;
+            and(&left, &right)
+        }))
+    }
+</function>
+<translated function>
+In order to translate the given Python function to Rust, given the provided function signature, related variables, functions, and data type declarations, and the relevant dependency libraries, the Rust implementation might look like this:
+
+```rust
+fn and(
+    &mut self,
+    mut lhs: Box<PredicateResult>,
+    mut rhs: Box<PredicateResult>,
+) -> Result<Box<PredicateResult>> {
+    if let Ok(lhs_val) = lhs(RecordBatch::new()) { 
+        if let Ok(rhs_val) = rhs(RecordBatch::new()) { 
+            if !lhs_val.value() || !rhs_val.value() {
+                return Ok(Box::new(|_batch: RecordBatch| Ok(BooleanArray::from(vec![false]))));
+            } else if lhs_val.value() {
+                return Ok(rhs);
+            } else if rhs_val.value() {
+                return Ok(lhs);
+            } else {
+                Ok(Box::new(move |batch: RecordBatch| {
+                    lhs(batch.clone())
+                        .and_then(|lhs_array| {
+                            rhs(batch)
+                                .map(|rhs_array| and(&lhs_array, &rhs_array))
+                        })
+                }))
+            }
+        } else {
+            Err(ArrowError::from("rhs failed to execute"))
+        }
+    } else {
+        Err(ArrowError::from("lhs failed to execute"))
+    }
+}
+```
+This function takes two Boxes that contain PredicateResults, which are functions that take a RecordBatch and return a BooleanArray wrapped in a ArrowError Result. The function initially evaluates both PredicateResults and checks whether any of them are always false (i.e., their BooleanArray is always [false]). If one of them is always false, it returns a PredicateResult that always gives false. Otherwise, if either is always true, it returns the other.
+
+Please be noted that the function in Rust version checks the values by calling function instead of directly checking their identity as Python version does. This is because the PredicateResult here is a anonymous function wrapped inside a box, which means it needs to be called to get its result. It would be more accurate if we could check whether the PredicateResult provided is always true or always false, but this may need more context from the actual use case.</translated function>In order to translate the given Python function to Rust, given the provided function signature, related variables, functions, and data type declarations, and the relevant dependency libraries, the Rust implementation might look like this:
+
+```rust
+fn and(
+    &mut self,
+    mut lhs: Box<PredicateResult>,
+    mut rhs: Box<PredicateResult>,
+) -> Result<Box<PredicateResult>> {
+    if let Ok(lhs_val) = lhs(RecordBatch::new()) { 
+        if let Ok(rhs_val) = rhs(RecordBatch::new()) { 
+            if !lhs_val.value() || !rhs_val.value() {
+                return Ok(Box::new(|_batch: RecordBatch| Ok(BooleanArray::from(vec![false]))));
+            } else if lhs_val.value() {
+                return Ok(rhs);
+            } else if rhs_val.value() {
+                return Ok(lhs);
+            } else {
+                Ok(Box::new(move |batch: RecordBatch| {
+                    lhs(batch.clone())
+                        .and_then(|lhs_array| {
+                            rhs(batch)
+                                .map(|rhs_array| and(&lhs_array, &rhs_array))
+                        })
+                }))
+            }
+        } else {
+            Err(ArrowError::from("rhs failed to execute"))
+        }
+    } else {
+        Err(ArrowError::from("lhs failed to execute"))
+    }
+}
+```
+This function takes two Boxes that contain PredicateResults, which are functions that take a RecordBatch and return a BooleanArray wrapped in a ArrowError Result. The function initially evaluates both PredicateResults and checks whether any of them are always false (i.e., their BooleanArray is always [false]). If one of them is always false, it returns a PredicateResult that always gives false. Otherwise, if either is always true, it returns the other.
+
+Please be noted that the function in Rust version checks the values by calling function instead of directly checking their identity as Python version does. This is because the PredicateResult here is a anonymous function wrapped inside a box, which means it needs to be called to get its result. It would be more accurate if we could check whether the PredicateResult provided is always true or always false, but this may need more context from the actual use case.

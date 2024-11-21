@@ -1,0 +1,75 @@
+<path>
+projects/iceberg/rust/crates/catalog/glue/src/catalog.rs
+</path>
+<function>
+    async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let db_name = validate_namespace(namespace)?;
+
+        let mut table_list: Vec<TableIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self
+                    .client
+                    .0
+                    .get_tables()
+                    .database_name(&db_name)
+                    .next_token(token),
+                None => self.client.0.get_tables().database_name(&db_name),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let tables: Vec<_> = resp
+                .table_list()
+                .iter()
+                .map(|tbl| TableIdent::new(namespace.clone(), tbl.name().to_string()))
+                .collect();
+
+            table_list.extend(tables);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(table_list)
+    }
+</function>
+------
+
+<path>
+projects/iceberg/java/aws/src/main/java/org/apache/iceberg/aws/glue/GlueCatalog.java
+</path>
+<function>
+  public List<TableIdentifier> listTables(Namespace namespace) {
+    namespaceExists(namespace);
+    // should be safe to list all before returning the list, instead of dynamically load the list.
+    String nextToken = null;
+    List<TableIdentifier> results = Lists.newArrayList();
+    do {
+      GetTablesResponse response =
+          glue.getTables(
+              GetTablesRequest.builder()
+                  .catalogId(awsProperties.glueCatalogId())
+                  .databaseName(
+                      IcebergToGlueConverter.toDatabaseName(
+                          namespace, awsProperties.glueCatalogSkipNameValidation()))
+                  .nextToken(nextToken)
+                  .build());
+      nextToken = response.nextToken();
+      if (response.hasTableList()) {
+        results.addAll(
+            response.tableList().stream()
+                .filter(this::isGlueIcebergTable)
+                .map(GlueToIcebergConverter::toTableId)
+                .collect(Collectors.toList()));
+      }
+    } while (nextToken != null);
+
+    LOG.debug("Listing of namespace: {} resulted in the following tables: {}", namespace, results);
+    return results;
+  }
+</function>

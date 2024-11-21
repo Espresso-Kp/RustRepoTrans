@@ -1,0 +1,163 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public List<TableIdentifier> listTables(Namespace namespace) {
+    namespaceExists(namespace);
+    // should be safe to list all before returning the list, instead of dynamically load the list.
+    String nextToken = null;
+    List<TableIdentifier> results = Lists.newArrayList();
+    do {
+      GetTablesResponse response =
+          glue.getTables(
+              GetTablesRequest.builder()
+                  .catalogId(awsProperties.glueCatalogId())
+                  .databaseName(
+                      IcebergToGlueConverter.toDatabaseName(
+                          namespace, awsProperties.glueCatalogSkipNameValidation()))
+                  .nextToken(nextToken)
+                  .build());
+      nextToken = response.nextToken();
+      if (response.hasTableList()) {
+        results.addAll(
+            response.tableList().stream()
+                .filter(this::isGlueIcebergTable)
+                .map(GlueToIcebergConverter::toTableId)
+                .collect(Collectors.toList()));
+      }
+    } while (nextToken != null);
+
+    LOG.debug("Listing of namespace: {} resulted in the following tables: {}", namespace, results);
+    return results;
+  }
+</java function>
+<rust function signature>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+        let db_name = validate_namespace(namespace)?;
+
+        let mut table_list: Vec<TableIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self
+                    .client
+                    .0
+                    .get_tables()
+                    .database_name(&db_name)
+                    .next_token(token),
+                None => self.client.0.get_tables().database_name(&db_name),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let tables: Vec<_> = resp
+                .table_list()
+                .iter()
+                .map(|tbl| TableIdent::new(namespace.clone(), tbl.name().to_string()))
+                .collect();
+
+            table_list.extend(tables);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(table_list)
+    }
+</function>
+<translated function>
+ ```rust
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+    validate_namespace(namespace)?;
+    let mut results = Vec::new();
+    let mut next_token: Option<&str> = None;
+
+    loop {
+        let response = self.glue.get_tables()
+            .catalog_id(self.aws_properties.glue_catalog_id())
+            .database_name(convert_to_database(namespace, self.aws_properties.glue_catalog_skip_name_validation()))
+            .next_token(next_token.as_deref())
+            .send()
+            .await?;
+
+        next_token = response.next_token();
+        if let Some(table_list) = response.table_list() {
+            results.extend(table_list.iter()
+                .filter(|table| self.is_glue_iceberg_table(table))
+                .map(|table| GlueToIcebergConverter::to_table_id(table))
+                .collect::<Vec<TableIdent>>());
+        }
+
+        if next_token.is_none() {
+            break;
+        }
+    }
+
+    log::debug!("Listing of namespace: {:?} resulted in the following tables: {:?}", namespace, results);
+    Ok(results)
+}
+```</translated function> ```rust
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+    validate_namespace(namespace)?;
+    let mut results = Vec::new();
+    let mut next_token: Option<&str> = None;
+
+    loop {
+        let response = self.glue.get_tables()
+            .catalog_id(self.aws_properties.glue_catalog_id())
+            .database_name(convert_to_database(namespace, self.aws_properties.glue_catalog_skip_name_validation()))
+            .next_token(next_token.as_deref())
+            .send()
+            .await?;
+
+        next_token = response.next_token();
+        if let Some(table_list) = response.table_list() {
+            results.extend(table_list.iter()
+                .filter(|table| self.is_glue_iceberg_table(table))
+                .map(|table| GlueToIcebergConverter::to_table_id(table))
+                .collect::<Vec<TableIdent>>());
+        }
+
+        if next_token.is_none() {
+            break;
+        }
+    }
+
+    log::debug!("Listing of namespace: {:?} resulted in the following tables: {:?}", namespace, results);
+    Ok(results)
+}
+```

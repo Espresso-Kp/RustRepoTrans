@@ -1,0 +1,241 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public ObjectInspector primitive(Type.PrimitiveType primitiveType) {
+    final PrimitiveTypeInfo primitiveTypeInfo;
+
+    switch (primitiveType.typeId()) {
+      case BINARY:
+        return IcebergBinaryObjectInspector.get();
+      case BOOLEAN:
+        primitiveTypeInfo = TypeInfoFactory.booleanTypeInfo;
+        break;
+      case DATE:
+        return DATE_INSPECTOR;
+      case DECIMAL:
+        Types.DecimalType type = (Types.DecimalType) primitiveType;
+        return IcebergDecimalObjectInspector.get(type.precision(), type.scale());
+      case DOUBLE:
+        primitiveTypeInfo = TypeInfoFactory.doubleTypeInfo;
+        break;
+      case FIXED:
+        return IcebergFixedObjectInspector.get();
+      case FLOAT:
+        primitiveTypeInfo = TypeInfoFactory.floatTypeInfo;
+        break;
+      case INTEGER:
+        primitiveTypeInfo = TypeInfoFactory.intTypeInfo;
+        break;
+      case LONG:
+        primitiveTypeInfo = TypeInfoFactory.longTypeInfo;
+        break;
+      case STRING:
+        primitiveTypeInfo = TypeInfoFactory.stringTypeInfo;
+        break;
+      case UUID:
+        return IcebergUUIDObjectInspector.get();
+      case TIMESTAMP:
+        boolean adjustToUTC = ((Types.TimestampType) primitiveType).shouldAdjustToUTC();
+        return adjustToUTC ? TIMESTAMP_INSPECTOR_WITH_TZ : TIMESTAMP_INSPECTOR;
+      case TIME:
+        return IcebergTimeObjectInspector.get();
+      default:
+        throw new IllegalArgumentException(primitiveType.typeId() + " type is not supported");
+    }
+
+    return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(primitiveTypeInfo);
+  }
+</java function>
+<rust function signature>
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+struct SchemaToAvroSchema {
+    schema: String,
+}
+type AvroSchemaOrField = Either<AvroSchema, AvroRecordField>;
+pub enum Schema {
+    /// A `null` Avro schema.
+    Null,
+    /// A `boolean` Avro schema.
+    Boolean,
+    /// An `int` Avro schema.
+    Int,
+    /// A `long` Avro schema.
+    Long,
+    /// A `float` Avro schema.
+    Float,
+    /// A `double` Avro schema.
+    Double,
+    /// A `bytes` Avro schema.
+    /// `Bytes` represents a sequence of 8-bit unsigned bytes.
+    Bytes,
+    /// A `string` Avro schema.
+    /// `String` represents a unicode character sequence.
+    String,
+    /// A `array` Avro schema. Avro arrays are required to have the same type for each element.
+    /// This variant holds the `Schema` for the array element type.
+    Array(Box<Schema>),
+    /// A `map` Avro schema.
+    /// `Map` holds a pointer to the `Schema` of its values, which must all be the same schema.
+    /// `Map` keys are assumed to be `string`.
+    Map(Box<Schema>),
+    /// A `union` Avro schema.
+    Union(UnionSchema),
+    /// A `record` Avro schema.
+    Record(RecordSchema),
+    /// An `enum` Avro schema.
+    Enum(EnumSchema),
+    /// A `fixed` Avro schema.
+    Fixed(FixedSchema),
+    /// Logical type which represents `Decimal` values. The underlying type is serialized and
+    /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
+    Decimal(DecimalSchema),
+    /// A universally unique identifier, annotating a string.
+    Uuid,
+    /// Logical type which represents the number of days since the unix epoch.
+    /// Serialization format is `Schema::Int`.
+    Date,
+    /// The time of day in number of milliseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMillis,
+    /// The time of day in number of microseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMicros,
+    /// An instant in time represented as the number of milliseconds after the UNIX epoch.
+    TimestampMillis,
+    /// An instant in time represented as the number of microseconds after the UNIX epoch.
+    TimestampMicros,
+    /// An instant in localtime represented as the number of milliseconds after the UNIX epoch.
+    LocalTimestampMillis,
+    /// An instant in local time represented as the number of microseconds after the UNIX epoch.
+    LocalTimestampMicros,
+    /// An amount of time defined by a number of months, days and milliseconds.
+    Duration,
+    /// A reference to another schema.
+    Ref { name: Name },
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+        let avro_schema = match p {
+            PrimitiveType::Boolean => AvroSchema::Boolean,
+            PrimitiveType::Int => AvroSchema::Int,
+            PrimitiveType::Long => AvroSchema::Long,
+            PrimitiveType::Float => AvroSchema::Float,
+            PrimitiveType::Double => AvroSchema::Double,
+            PrimitiveType::Date => AvroSchema::Date,
+            PrimitiveType::Time => AvroSchema::TimeMicros,
+            PrimitiveType::Timestamp => AvroSchema::TimestampMicros,
+            PrimitiveType::Timestamptz => AvroSchema::TimestampMicros,
+            PrimitiveType::String => AvroSchema::String,
+            PrimitiveType::Uuid => avro_fixed_schema(UUID_BYTES, Some(UUID_LOGICAL_TYPE))?,
+            PrimitiveType::Fixed(len) => avro_fixed_schema((*len) as usize, None)?,
+            PrimitiveType::Binary => AvroSchema::Bytes,
+            PrimitiveType::Decimal { precision, scale } => {
+                avro_decimal_schema(*precision as usize, *scale as usize)?
+            }
+        };
+        Ok(Either::Left(avro_schema))
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+    match p.type_id() {
+        TypeId::BINARY => Ok(AvroSchemaOrField::Left(AvroSchema::Bytes)),
+        TypeId::BOOLEAN => Ok(AvroSchemaOrField::Left(AvroSchema::Boolean)),
+        TypeId::DATE => Ok(AvroSchemaOrField::Left(AvroSchema::Date)),
+        TypeId::DECIMAL => {
+            let decimal_type = p.downcast_ref::<DecimalType>().unwrap();
+            Ok(AvroSchemaOrField::Left(AvroSchema::Decimal(DecimalSchema {
+                precision: decimal_type.precision(),
+                scale: decimal_type.scale(),
+            })))
+        }
+        TypeId::DOUBLE => Ok(AvroSchemaOrField::Left(AvroSchema::Double)),
+        TypeId::FLOAT => Ok(AvroSchemaOrField::Left(AvroSchema::Float)),
+        TypeId::INTEGER => Ok(AvroSchemaOrField::Left(AvroSchema::Int)),
+        TypeId::LONG => Ok(AvroSchemaOrField::Left(AvroSchema::Long)),
+        TypeId::STRING => Ok(AvroSchemaOrField::Left(AvroSchema::String)),
+        TypeId::UUID => Ok(AvroSchemaOrField::Left(AvroSchema::Uuid)),
+        TypeId::TIMESTAMP => {
+            let timestamp_type = p.downcast_ref::<TimestampType>().unwrap();
+            let adjust_to_utc = timestamp_type.should_adjust_to_utc();
+            let timestamp_schema = if adjust_to_utc {
+                AvroSchema::TimestampMillis
+            } else {
+                AvroSchema::TimestampMillis
+            };
+            Ok(AvroSchemaOrField::Left(timestamp_schema))
+        }
+        TypeId::TIME => Ok(AvroSchemaOrField::Left(AvroSchema::TimeMillis)),
+        _ => Err(Error::new(ErrorKind::UnsupportedType, format!("Unsupported type: {}", p.type_id()))),
+    }
+}
+```
+Note that I've assumed that the `TypeId` enum is defined elsewhere in the codebase, and that the `PrimitiveType` enum has a `type_id()` method that returns a `TypeId` value. I've also assumed that the `DecimalType` and `TimestampType` enums have `precision()`, `scale()`, and `should_adjust_to_utc()` methods, respectively.</translated function>Here is the translated Rust function:
+```rust
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+    match p.type_id() {
+        TypeId::BINARY => Ok(AvroSchemaOrField::Left(AvroSchema::Bytes)),
+        TypeId::BOOLEAN => Ok(AvroSchemaOrField::Left(AvroSchema::Boolean)),
+        TypeId::DATE => Ok(AvroSchemaOrField::Left(AvroSchema::Date)),
+        TypeId::DECIMAL => {
+            let decimal_type = p.downcast_ref::<DecimalType>().unwrap();
+            Ok(AvroSchemaOrField::Left(AvroSchema::Decimal(DecimalSchema {
+                precision: decimal_type.precision(),
+                scale: decimal_type.scale(),
+            })))
+        }
+        TypeId::DOUBLE => Ok(AvroSchemaOrField::Left(AvroSchema::Double)),
+        TypeId::FLOAT => Ok(AvroSchemaOrField::Left(AvroSchema::Float)),
+        TypeId::INTEGER => Ok(AvroSchemaOrField::Left(AvroSchema::Int)),
+        TypeId::LONG => Ok(AvroSchemaOrField::Left(AvroSchema::Long)),
+        TypeId::STRING => Ok(AvroSchemaOrField::Left(AvroSchema::String)),
+        TypeId::UUID => Ok(AvroSchemaOrField::Left(AvroSchema::Uuid)),
+        TypeId::TIMESTAMP => {
+            let timestamp_type = p.downcast_ref::<TimestampType>().unwrap();
+            let adjust_to_utc = timestamp_type.should_adjust_to_utc();
+            let timestamp_schema = if adjust_to_utc {
+                AvroSchema::TimestampMillis
+            } else {
+                AvroSchema::TimestampMillis
+            };
+            Ok(AvroSchemaOrField::Left(timestamp_schema))
+        }
+        TypeId::TIME => Ok(AvroSchemaOrField::Left(AvroSchema::TimeMillis)),
+        _ => Err(Error::new(ErrorKind::UnsupportedType, format!("Unsupported type: {}", p.type_id()))),
+    }
+}
+```
+Note that I've assumed that the `TypeId` enum is defined elsewhere in the codebase, and that the `PrimitiveType` enum has a `type_id()` method that returns a `TypeId` value. I've also assumed that the `DecimalType` and `TimestampType` enums have `precision()`, `scale()`, and `should_adjust_to_utc()` methods, respectively.

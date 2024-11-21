@@ -1,0 +1,285 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+* See also dc_send_msg().
+ *
+ * @memberof dc_context_t
+ * @param context The context object as returned from dc_context_new().
+ * @param chat_id Chat ID to send the text message to.
+ * @param text_to_send Text to send to the chat defined by the chat ID.
+ *     Passing an empty text here causes an empty text to be sent,
+ *     it's up to the caller to handle this if undesired.
+ *     Passing NULL as the text causes the function to return 0.
+ * @return The ID of the message that is about being sent.
+ */
+uint32_t dc_send_text_msg(dc_context_t* context, uint32_t chat_id, const char* text_to_send)
+{
+	dc_msg_t* msg = dc_msg_new(context, DC_MSG_TEXT);
+	uint32_t  ret = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || chat_id<=DC_CHAT_ID_LAST_SPECIAL || text_to_send==NULL) {
+		goto cleanup;
+	}
+
+	msg->text = dc_strdup(text_to_send);
+
+	ret = dc_send_msg(context, chat_id, msg);
+
+cleanup:
+	dc_msg_unref(msg);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn send_text_msg(
+    context: &Context,
+    chat_id: ChatId,
+    text_to_send: String,
+) -> Result<MsgId> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub async fn send_msg(context: &Context, chat_id: ChatId, msg: &mut Message) -> Result<MsgId> {
+    if chat_id.is_unset() {
+        let forwards = msg.param.get(Param::PrepForwards);
+        if let Some(forwards) = forwards {
+            for forward in forwards.split(' ') {
+                if let Ok(msg_id) = forward.parse::<u32>().map(MsgId::new) {
+                    if let Ok(mut msg) = Message::load_from_db(context, msg_id).await {
+                        send_msg_inner(context, chat_id, &mut msg).await?;
+                    };
+                }
+            }
+            msg.param.remove(Param::PrepForwards);
+            msg.update_param(context).await?;
+        }
+        return send_msg_inner(context, chat_id, msg).await;
+    }
+
+    if msg.state != MessageState::Undefined && msg.state != MessageState::OutPreparing {
+        msg.param.remove(Param::GuaranteeE2ee);
+        msg.param.remove(Param::ForcePlaintext);
+        msg.update_param(context).await?;
+    }
+    send_msg_inner(context, chat_id, msg).await
+}
+
+pub fn is_special(self) -> bool {
+        (0..=DC_CHAT_ID_LAST_SPECIAL.0).contains(&self.0)
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct MsgId(u32);
+
+pub struct ChatId(u32);
+
+impl Message {
+    /// Creates a new message with given view type.
+    pub fn new(viewtype: Viewtype) -> Self {
+        Message {
+            viewtype,
+            ..Default::default()
+        }
+    }
+}
+
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+
+pub fn is_special(self) -> bool {
+        self.0 <= DC_MSG_ID_LAST_SPECIAL
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn send_text_msg(
+    context: &Context,
+    chat_id: ChatId,
+    text_to_send: String,
+) -> Result<MsgId> {
+    ensure!(
+        !chat_id.is_special(),
+        "bad chat_id, can not be a special chat: {}",
+        chat_id
+    );
+
+    let mut msg = Message::new(Viewtype::Text);
+    msg.text = text_to_send;
+    send_msg(context, chat_id, &mut msg).await
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub async fn send_text_msg(
+    context: &Context,
+    chat_id: ChatId,
+    text_to_send: String,
+) -> Result<MsgId> {
+    if context.is_none() || context.inner.magic!= DC_CONTEXT_MAGIC || chat_id.is_special() || text_to_send.is_empty() {
+        return Err(anyhow!("Invalid context or chat ID"));
+    }
+
+    let msg = Message::new(Viewtype::Text);
+    msg.text = text_to_send.clone();
+
+    let ret = send_msg(context, chat_id, &mut msg).await?;
+
+    Ok(ret)
+}
+```
+Note that I've assumed that the `dc_msg_new` function is equivalent to creating a new `Message` instance, and that the `dc_msg_set_text` function is equivalent to setting the `text` field of the `Message` instance. I've also assumed that the `dc_msg_unref` function is equivalent to dropping the `Message` instance.
+
+Also, I've used the `anyhow` crate to handle errors, and the `tokio` crate for async functions.
+
+Please let me know if this is correct or if I need to make any changes.</translated function>Here is the translated Rust function:
+```rust
+pub async fn send_text_msg(
+    context: &Context,
+    chat_id: ChatId,
+    text_to_send: String,
+) -> Result<MsgId> {
+    if context.is_none() || context.inner.magic!= DC_CONTEXT_MAGIC || chat_id.is_special() || text_to_send.is_empty() {
+        return Err(anyhow!("Invalid context or chat ID"));
+    }
+
+    let msg = Message::new(Viewtype::Text);
+    msg.text = text_to_send.clone();
+
+    let ret = send_msg(context, chat_id, &mut msg).await?;
+
+    Ok(ret)
+}
+```
+Note that I've assumed that the `dc_msg_new` function is equivalent to creating a new `Message` instance, and that the `dc_msg_set_text` function is equivalent to setting the `text` field of the `Message` instance. I've also assumed that the `dc_msg_unref` function is equivalent to dropping the `Message` instance.
+
+Also, I've used the `anyhow` crate to handle errors, and the `tokio` crate for async functions.
+
+Please let me know if this is correct or if I need to make any changes.

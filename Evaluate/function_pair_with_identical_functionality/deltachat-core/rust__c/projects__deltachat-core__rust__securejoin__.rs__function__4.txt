@@ -1,0 +1,108 @@
+<path>
+projects/deltachat-core/rust/securejoin.rs
+</path>
+<function>
+pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> {
+    securejoin(context, qr).await.map_err(|err| {
+        warn!(context, "Fatal joiner error: {:#}", err);
+        // The user just scanned this QR code so has context on what failed.
+        error!(context, "QR process failed");
+        err
+    })
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_securejoin.c
+</path>
+<function> 
+uint32_t dc_join_securejoin(dc_context_t* context, const char* qr)
+{
+	/* ==========================================================
+	   ====             Bob - the joiner's side             =====
+	   ====   Step 2 in "Setup verified contact" protocol   =====
+	   ========================================================== */
+
+	int       ret_chat_id = 0;
+	int       ongoing_allocated = 0;
+	uint32_t  contact_chat_id = 0;
+	int       join_vg = 0;
+	dc_lot_t* qr_scan = NULL;
+	int       qr_locked = 0;
+	#define   LOCK_QR    { pthread_mutex_lock(&context->bobs_qr_critical); qr_locked = 1; }
+	#define   UNLOCK_QR  if (qr_locked) { pthread_mutex_unlock(&context->bobs_qr_critical); qr_locked = 0; }
+	#define   CHECK_EXIT if (context->shall_stop_ongoing) { goto cleanup; }
+
+	dc_log_info(context, 0, "Requesting secure-join ...");
+
+	dc_ensure_secret_key_exists(context);
+
+	if ((ongoing_allocated=dc_alloc_ongoing(context))==0) {
+		goto cleanup;
+	}
+
+	if (((qr_scan=dc_check_qr(context, qr))==NULL)
+	 || (qr_scan->state!=DC_QR_ASK_VERIFYCONTACT && qr_scan->state!=DC_QR_ASK_VERIFYGROUP)) {
+		dc_log_error(context, 0, "Unknown QR code.");
+		goto cleanup;
+	}
+
+	if ((contact_chat_id=dc_create_chat_by_contact_id(context, qr_scan->id))==0) {
+		dc_log_error(context, 0, "Unknown contact.");
+		goto cleanup;
+	}
+
+	CHECK_EXIT
+
+	join_vg = (qr_scan->state==DC_QR_ASK_VERIFYGROUP);
+
+	context->bobs_status = 0;
+	LOCK_QR
+		context->bobs_qr_scan = qr_scan;
+	UNLOCK_QR
+
+	if (fingerprint_equals_sender(context, qr_scan->fingerprint, contact_chat_id)) {
+		// the scanned fingerprint matches Alice's key, we can proceed to step 4b) directly and save two mails
+		dc_log_info(context, 0, "Taking protocol shortcut.");
+		context->bob_expects = DC_VC_CONTACT_CONFIRM;
+		context->cb(context, DC_EVENT_SECUREJOIN_JOINER_PROGRESS, chat_id_2_contact_id(context, contact_chat_id), 400);
+		char* own_fingerprint = get_self_fingerprint(context);
+		send_handshake_msg(context, contact_chat_id, join_vg? "vg-request-with-auth" : "vc-request-with-auth",
+			qr_scan->auth, own_fingerprint, join_vg? qr_scan->text2 : NULL); // Bob -> Alice
+		free(own_fingerprint);
+	}
+	else {
+		context->bob_expects = DC_VC_AUTH_REQUIRED;
+		send_handshake_msg(context, contact_chat_id, join_vg? "vg-request" : "vc-request",
+			qr_scan->invitenumber, NULL, NULL); // Bob -> Alice
+	}
+
+	while (1) {
+		CHECK_EXIT
+
+		usleep(300*1000); // 0.3 seconds
+	}
+
+cleanup:
+	context->bob_expects = 0;
+
+	if (context->bobs_status==DC_BOB_SUCCESS) {
+		if (join_vg) {
+			ret_chat_id = dc_get_chat_id_by_grpid(context, qr_scan->text2, NULL, NULL);
+		}
+		else {
+			ret_chat_id = contact_chat_id;
+		}
+	}
+
+	LOCK_QR
+		context->bobs_qr_scan = NULL;
+	UNLOCK_QR
+
+	dc_lot_unref(qr_scan);
+
+	if (ongoing_allocated) { dc_free_ongoing(context); }
+	return ret_chat_id;
+}
+</function>

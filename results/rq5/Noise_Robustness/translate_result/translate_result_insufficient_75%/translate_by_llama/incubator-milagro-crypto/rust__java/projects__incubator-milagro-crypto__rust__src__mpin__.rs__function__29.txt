@@ -1,0 +1,729 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int SERVER_KEY(int sha,byte[] Z,byte[] SST,byte[] W,byte[] H,byte[] HID,byte[] xID,byte[] xCID,byte[] SK)
+	{
+		byte[] t;
+
+		ECP2 sQ=ECP2.fromBytes(SST);
+		if (sQ.is_infinity()) return INVALID_POINT; 
+		ECP R=ECP.fromBytes(Z);
+		if (R.is_infinity()) return INVALID_POINT; 
+		ECP A=ECP.fromBytes(HID);
+		if (A.is_infinity()) return INVALID_POINT; 
+
+		ECP U;
+		if (xCID!=null)
+			U=ECP.fromBytes(xCID);
+		else
+			U=ECP.fromBytes(xID);
+		if (U.is_infinity()) return INVALID_POINT; 
+
+		BIG w=BIG.fromBytes(W);
+		BIG h=BIG.fromBytes(H);
+		A=PAIR.G1mul(A,h);	// new
+		R.add(A); //R.affine();
+
+		U=PAIR.G1mul(U,w);
+		FP12 g=PAIR.ate(sQ,R);
+		g=PAIR.fexp(g);
+
+		FP4 c=g.trace();
+
+		t=mpin_hash(sha,c,U);
+
+		for (int i=0;i<ECP.AESKEY;i++) SK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+fn hash(sha: usize, c: &mut FP4, U: &mut ECP, r: &mut [u8]) -> bool {
+    let mut w: [u8; EFS] = [0; EFS];
+    let mut t: [u8; 6 * EFS] = [0; 6 * EFS];
+
+    c.geta().geta().to_bytes(&mut w);
+    for i in 0..EFS {
+        t[i] = w[i]
+    }
+    c.geta().getb().to_bytes(&mut w);
+    for i in EFS..2 * EFS {
+        t[i] = w[i - EFS]
+    }
+    c.getb().geta().to_bytes(&mut w);
+    for i in 2 * EFS..3 * EFS {
+        t[i] = w[i - 2 * EFS]
+    }
+    c.getb().getb().to_bytes(&mut w);
+    for i in 3 * EFS..4 * EFS {
+        t[i] = w[i - 3 * EFS]
+    }
+
+    U.getx().to_bytes(&mut w);
+    for i in 4 * EFS..5 * EFS {
+        t[i] = w[i - 4 * EFS]
+    }
+    U.gety().to_bytes(&mut w);
+    for i in 5 * EFS..6 * EFS {
+        t[i] = w[i - 5 * EFS]
+    }
+
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    return false;
+}
+pub fn trace(&mut self) -> FP4 {
+        let mut t = self.geta();
+        t.imul(3);
+        t.reduce();
+        return t;
+    }
+pub fn is_infinity(&self) -> bool {
+        self.x.is_zilch() && self.z.is_zilch()
+    }
+pub fn from_bytes(w: &[u8]) -> FP12 {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+
+        for i in 0..mb {
+            t[i] = w[i]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 2 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 3 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let e = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 4 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 5 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 6 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 7 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let f = FP4::new_fp2s(c, d);
+
+        for i in 0..mb {
+            t[i] = w[i + 8 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 9 * mb]
+        }
+        let b = Big::from_bytes(&t);
+
+        let c = FP2::new_bigs(a, b);
+
+        for i in 0..mb {
+            t[i] = w[i + 10 * mb]
+        }
+        let a = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = w[i + 11 * mb]
+        }
+        let b = Big::from_bytes(&t);
+        let d = FP2::new_bigs(a, b);
+
+        let g = FP4::new_fp2s(c, d);
+
+        FP12::new_fp4s(e, f, g)
+    }
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+pub fn ate(P1: &ECP2, Q1: &ECP) -> FP12 {
+    let mut f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+    let mut n = Big::new();
+    let mut n3 = Big::new();
+
+    if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            f.inverse();
+            f.norm();
+        }
+    }
+
+    let mut P = P1.clone();
+    P.affine();
+    let mut Q = Q1.clone();
+    Q.affine();
+
+    let qx = Q.getpx();
+    let qy = Q.getpy();
+
+    let mut A = P.clone();
+    let mut NP = P.clone();
+    NP.neg();
+
+    let nb = lbits(&mut n3, &mut n);
+
+    let mut r = FP12::new_int(1);
+    for i in (1..nb - 1).rev() {
+        r.sqr();
+        let mut lv = linedbl(&mut A, &qx, &qy);
+        let bt = n3.bit(i) - n.bit(i);
+        if bt == 1 {
+            let lv2 = lineadd(&mut A, &P, &qx, &qy);
+            lv.smul(&lv2);
+        }
+        if bt == -1 {
+            let lv2 = lineadd(&mut A, &NP, &qx, &qy);
+            lv.smul(&lv2);
+        }
+        r.ssmul(&lv);
+    }
+
+    if ecp::SIGN_OF_X == SignOfX::NegativeX {
+        r.conj();
+    }
+
+    /* R-ate fixup required for BN curves */
+
+    if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            A.neg();
+        }
+
+        let mut K = P.clone();
+        K.frob(&f);
+
+        let mut lv = lineadd(&mut A, &K, &qx, &qy);
+        K.frob(&f);
+        K.neg();
+        let lv2 = lineadd(&mut A, &K, &qx, &qy);
+        lv.smul(&lv2);
+        r.ssmul(&lv);
+    }
+
+    return r;
+}
+pub fn fexp(m: &FP12) -> FP12 {
+    let f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+    let mut x = Big::new_ints(&rom::CURVE_BNX);
+    let mut r = m.clone();
+
+    // Easy part of final exp
+    let mut lv = r.clone();
+    lv.inverse();
+    r.conj();
+
+    r.mul(&lv);
+    lv = r.clone();
+    r.frob(&f);
+    r.frob(&f);
+    r.mul(&lv);
+    //    if r.is_unity() {
+    //	r.zero();
+    //	return r;
+    //    }
+
+    /* Hard part of final exp */
+    if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        lv = r.clone();
+        lv.frob(&f);
+        let mut x0 = lv.clone();
+        x0.frob(&f);
+        lv.mul(&r);
+        x0.mul(&lv);
+        x0.frob(&f);
+        let mut x1 = r.clone();
+        x1.conj();
+        let mut x4 = r.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::PositiveX {
+            x4.conj();
+        }
+
+        let mut x3 = x4.clone();
+        x3.frob(&f);
+
+        let mut x2 = x4.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::PositiveX {
+            x2.conj();
+        }
+        let mut x5 = x2.clone();
+        x5.conj();
+        lv = x2.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::PositiveX {
+            lv.conj();
+        }
+        x2.frob(&f);
+        r = x2.clone();
+        r.conj();
+
+        x4.mul(&r);
+        x2.frob(&f);
+
+        r = lv.clone();
+        r.frob(&f);
+        lv.mul(&r);
+
+        lv.usqr();
+        lv.mul(&x4);
+        lv.mul(&x5);
+        r = x3.clone();
+        r.mul(&x5);
+        r.mul(&lv);
+        lv.mul(&x2);
+        r.usqr();
+        r.mul(&lv);
+        r.usqr();
+        lv = r.clone();
+        lv.mul(&x1);
+        r.mul(&x0);
+        lv.usqr();
+        r.mul(&lv);
+        r.reduce();
+    } else {
+        // Ghamman & Fouotsa Method
+
+        let mut y0 = r.clone();
+        y0.usqr();
+        let mut y1 = y0.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y1.conj();
+        }
+        x.fshr(1);
+        let mut y2 = y1.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y2.conj();
+        }
+        x.fshl(1);
+        let mut y3 = r.clone();
+        y3.conj();
+        y1.mul(&y3);
+
+        y1.conj();
+        y1.mul(&y2);
+
+        y2 = y1.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y2.conj();
+        }
+        y3 = y2.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y3.conj();
+        }
+        y1.conj();
+        y3.mul(&y1);
+
+        y1.conj();
+        y1.frob(&f);
+        y1.frob(&f);
+        y1.frob(&f);
+        y2.frob(&f);
+        y2.frob(&f);
+        y1.mul(&y2);
+
+        y2 = y3.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y2.conj();
+        }
+        y2.mul(&y0);
+        y2.mul(&r);
+
+        y1.mul(&y2);
+        y2 = y3;
+        y2.frob(&f);
+        y1.mul(&y2);
+        r = y1;
+        r.reduce();
+    }
+    return r;
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let sQ = ECP2::from_bytes(&sst);
+    if sQ.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut R = ECP::from_bytes(&z);
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut A = ECP::from_bytes(&hid);
+    if A.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut U = if let Some(rxcid) = xcid {
+        ECP::from_bytes(&rxcid)
+    } else {
+        ECP::from_bytes(&xid)
+    };
+
+    if U.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut w = Big::from_bytes(&w);
+    let mut h = Big::from_bytes(&h);
+    A = pair::g1mul(&A, &mut h); // new
+    R.add(&A);
+
+    U = pair::g1mul(&U, &mut w);
+    let mut g = pair::ate(&sQ, &R);
+    g = pair::fexp(&g);
+
+    let mut c = g.trace();
+
+    hash(sha, &mut c, &mut U, sk);
+
+    0
+}
+</function>
+<translated function>
+Here is the Java function translated to Rust:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[&[&u8]>>,
+    sk: &mut [u8],
+) -> isize {
+    let mut t: [u8; 6 * EFS] = [0; 6 * EFS];
+
+    let mut sQ = ECP2::from_bytes(sst);
+    if sQ.is_infinity() return INVALID_POINT;
+    let R = ECP::from_bytes(Z);
+    if R.is_infinity() return INVALID_POINT;
+    let A = ECP::from_bytes(HID);
+ if A.is_infinity() return INVALID_POINT;
+
+    let U;
+ if xCID!= None
+    U = ECP::from_bytes(xCID);
+ else
+ U = ECP::from_bytes(xID);
+ if U.is_infinity() return INVALID_POINT;
+
+    let w = BIG::from_bytes(W);
+ let h = BIG::from_bytes(H);
+ A = G1mul(A, h);
+ R.add(A);
+    U = G1mul(U, w);
+ let mut g = ate(sQ, R);
+ g = fexp(g);
+
+ let c = g.trace();
+ t = hash(sha, c, U, &mut t);
+ for i 0..ECP::AESKEY i sk[i] = t[i];
+
+ return 0;
+}
+```
+
+Note that I have assumed that `INVALID_POINT` and `ECP`AESKEY` are defined elsewhere in the code.</translated function>Here is the Java function translated to Rust:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[&[&u8]>>,
+    sk: &mut [u8],
+) -> isize {
+    let mut t: [u8; 6 * EFS] = [0; 6 * EFS];
+
+    let mut sQ = ECP2::from_bytes(sst);
+    if sQ.is_infinity() return INVALID_POINT;
+    let R = ECP::from_bytes(Z);
+    if R.is_infinity() return INVALID_POINT;
+    let A = ECP::from_bytes(HID);
+ if A.is_infinity() return INVALID_POINT;
+
+    let U;
+ if xCID!= None
+    U = ECP::from_bytes(xCID);
+ else
+ U = ECP::from_bytes(xID);
+ if U.is_infinity() return INVALID_POINT;
+
+    let w = BIG::from_bytes(W);
+ let h = BIG::from_bytes(H);
+ A = G1mul(A, h);
+ R.add(A);
+    U = G1mul(U, w);
+ let mut g = ate(sQ, R);
+ g = fexp(g);
+
+ let c = g.trace();
+ t = hash(sha, c, U, &mut t);
+ for i 0..ECP::AESKEY i sk[i] = t[i];
+
+ return 0;
+}
+```
+
+Note that I have assumed that `INVALID_POINT` and `ECP`AESKEY` are defined elsewhere in the code.

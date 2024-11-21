@@ -1,0 +1,117 @@
+fn decode_backup(qr: &str) -> Result<Qr> {
+    let payload = qr
+        .strip_prefix(DCBACKUP_SCHEME)
+        .ok_or_else(|| anyhow!("invalid DCBACKUP scheme"))?;
+    let ticket: iroh::provider::Ticket = payload.parse().context("invalid DCBACKUP payload")?;
+    Ok(Qr::Backup { ticket })
+}
+async fn decode_matmsg(context: &Context, qr: &str) -> Result<Qr> {
+    // Does not work when the text `TO:` is used in subject/body _and_ TO: is not the first field.
+    // we ignore this case.
+    let addr = if let Some(to_index) = qr.find("TO:") {
+        let addr = qr[to_index + 3..].trim();
+        if let Some(semi_index) = addr.find(';') {
+            addr[..semi_index].trim()
+        } else {
+            addr
+        }
+    } else {
+        bail!("Invalid MATMSG found");
+    };
+
+    let addr = normalize_address(addr)?;
+    let name = "";
+    Qr::from_address(context, name, &addr, None).await
+}
+async fn decode_smtp(context: &Context, qr: &str) -> Result<Qr> {
+    let payload = &qr[SMTP_SCHEME.len()..];
+
+    let addr = if let Some(query_index) = payload.find(':') {
+        &payload[..query_index]
+    } else {
+        bail!("Invalid SMTP found");
+    };
+
+    let addr = normalize_address(addr)?;
+    let name = "";
+    Qr::from_address(context, name, &addr, None).await
+}
+async fn decode_vcard(context: &Context, qr: &str) -> Result<Qr> {
+    let name = VCARD_NAME_RE
+        .captures(qr)
+        .and_then(|caps| {
+            let last_name = caps.get(1)?.as_str().trim();
+            let first_name = caps.get(2)?.as_str().trim();
+
+            Some(format!("{first_name} {last_name}"))
+        })
+        .unwrap_or_default();
+
+    let addr = if let Some(caps) = VCARD_EMAIL_RE.captures(qr) {
+        normalize_address(caps[2].trim())?
+    } else {
+        bail!("Bad e-mail address");
+    };
+
+    Qr::from_address(context, &name, &addr, None).await
+}
+fn starts_with_ignore_case(string: &str, pattern: &str) -> bool {
+    string.to_lowercase().starts_with(&pattern.to_lowercase())
+}
+fn decode_webrtc_instance(_context: &Context, qr: &str) -> Result<Qr> {
+    let payload = qr
+        .get(DCWEBRTC_SCHEME.len()..)
+        .context("invalid DCWEBRTC payload")?;
+
+    let (_type, url) = Message::parse_webrtc_instance(payload);
+    let url = url::Url::parse(&url).context("Invalid WebRTC instance")?;
+
+    if url.scheme() == "http" || url.scheme() == "https" {
+        Ok(Qr::WebrtcInstance {
+            domain: url
+                .host_str()
+                .context("can't extract WebRTC instance domain")?
+                .to_string(),
+            instance_pattern: payload.to_string(),
+        })
+    } else {
+        bail!("Bad URL scheme for WebRTC instance: {:?}", url.scheme());
+    }
+}
+// yes: uppercase
+const IDELTACHAT_SCHEME: &str = "https://i.delta.chat/#";
+const IDELTACHAT_NOSLASH_SCHEME: &str = "https://i.delta.chat#";
+const DCACCOUNT_SCHEME: &str = "DCACCOUNT:";
+pub(super) const DCLOGIN_SCHEME: &str = "DCLOGIN:";
+const HTTP_SCHEME: &str = "http://";
+const HTTPS_SCHEME: &str = "https://";
+------
+
+
+use std::collections::BTreeMap;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use dclogin_scheme::LoginOptions;
+use deltachat_contact_tools::{addr_normalize, may_be_valid_addr, ContactAddress};
+use once_cell::sync::Lazy;
+use percent_encoding::percent_decode_str;
+use serde::Deserialize;
+use self::dclogin_scheme::configure_from_login_qr;
+use crate::chat::{get_chat_id_by_grpid, ChatIdBlocked};
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::Fingerprint;
+use crate::message::Message;
+use crate::peerstate::Peerstate;
+use crate::socks::Socks5Config;
+use crate::token;
+use crate::tools::validate_id;
+use iroh_old as iroh;
+use super::*;
+use crate::aheader::EncryptPreference;
+use crate::chat::{create_group_chat, ProtectionStatus};
+use crate::key::DcKey;
+use crate::securejoin::get_securejoin_qr;
+use crate::test_utils::{alice_keypair, TestContext};

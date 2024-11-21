@@ -1,0 +1,364 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_msg_get_summarytext_by_raw(int type, const char* text, dc_param_t* param, int approx_characters, dc_context_t* context)
+{
+	/* get a summary text, result must be free()'d, never returns NULL. */
+	char* ret = NULL;
+	char* prefix = NULL;
+	char* pathNfilename = NULL;
+	char* label = NULL;
+	char* value = NULL;
+	int   append_text = 1;
+
+	switch (type) {
+		case DC_MSG_IMAGE:
+			prefix = dc_stock_str(context, DC_STR_IMAGE);
+			break;
+
+		case DC_MSG_GIF:
+			prefix = dc_stock_str(context, DC_STR_GIF);
+			break;
+
+		case DC_MSG_VIDEO:
+			prefix = dc_stock_str(context, DC_STR_VIDEO);
+			break;
+
+		case DC_MSG_VOICE:
+			prefix = dc_stock_str(context, DC_STR_VOICEMESSAGE);
+			break;
+
+		case DC_MSG_AUDIO:
+		case DC_MSG_FILE:
+			if (dc_param_get_int(param, DC_PARAM_CMD, 0)==DC_CMD_AUTOCRYPT_SETUP_MESSAGE) {
+				prefix = dc_stock_str(context, DC_STR_AC_SETUP_MSG_SUBJECT);
+				append_text = 0;
+			}
+			else {
+				pathNfilename = dc_param_get(param, DC_PARAM_FILE, "ErrFilename");
+				value = dc_get_filename(pathNfilename);
+				label = dc_stock_str(context, type==DC_MSG_AUDIO? DC_STR_AUDIO : DC_STR_FILE);
+				prefix = dc_mprintf("%s " DC_NDASH " %s", label, value);
+			}
+			break;
+
+		default:
+			if (dc_param_get_int(param, DC_PARAM_CMD, 0)==DC_CMD_LOCATION_ONLY) {
+				prefix = dc_stock_str(context, DC_STR_LOCATION);
+				append_text = 0;
+			}
+			break;
+	}
+
+	if (append_text && prefix && text && text[0]) {
+		ret = dc_mprintf("%s " DC_NDASH " %s", prefix, text);
+		dc_truncate_n_unwrap_str(ret, approx_characters, 1/*unwrap*/);
+	}
+	else if (append_text && text && text[0]) {
+		ret = dc_strdup(text);
+		dc_truncate_n_unwrap_str(ret, approx_characters, 1/*unwrap*/);
+	}
+	else {
+		ret = prefix;
+		prefix = NULL;
+	}
+
+	/* cleanup */
+	free(prefix);
+	free(pathNfilename);
+	free(label);
+	free(value);
+	if (ret==NULL) {
+		ret = dc_strdup(NULL);
+	}
+	return ret;
+}
+</c function>
+<rust function signature>
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::borrow::Cow;
+use std::fmt;
+use std::str;
+use crate::chat::Chat;
+use crate::constants::Chattype;
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::message::{Message, MessageState, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::stock_str;
+use crate::stock_str::msg_reacted;
+use crate::tools::truncate;
+use anyhow::Result;
+use super::*;
+use crate::param::Param;
+use crate::test_utils as test;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String {
+        let (emoji, type_name, type_file, append_text);
+        match self.viewtype {
+            Viewtype::Image => {
+                emoji = Some("📷");
+                type_name = Some(stock_str::image(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Gif => {
+                emoji = None;
+                type_name = Some(stock_str::gif(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Sticker => {
+                emoji = None;
+                type_name = Some(stock_str::sticker(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Video => {
+                emoji = Some("🎥");
+                type_name = Some(stock_str::video(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Voice => {
+                emoji = Some("🎤");
+                type_name = Some(stock_str::voice_message(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Audio => {
+                emoji = Some("🎵");
+                type_name = Some(stock_str::audio(context).await);
+                type_file = self.get_filename();
+                append_text = true
+            }
+            Viewtype::File => {
+                if self.param.get_cmd() == SystemMessage::AutocryptSetupMessage {
+                    emoji = None;
+                    type_name = Some(stock_str::ac_setup_msg_subject(context).await);
+                    type_file = None;
+                    append_text = false;
+                } else {
+                    emoji = Some("📎");
+                    type_name = Some(stock_str::file(context).await);
+                    type_file = self.get_filename();
+                    append_text = true
+                }
+            }
+            Viewtype::VideochatInvitation => {
+                emoji = None;
+                type_name = Some(stock_str::videochat_invitation(context).await);
+                type_file = None;
+                append_text = false;
+            }
+            Viewtype::Webxdc => {
+                emoji = None;
+                type_name = None;
+                type_file = Some(
+                    self.get_webxdc_info(context)
+                        .await
+                        .map(|info| info.name)
+                        .unwrap_or_else(|_| "ErrWebxdcName".to_string()),
+                );
+                append_text = true;
+            }
+            Viewtype::Vcard => {
+                emoji = Some("👤");
+                type_name = Some(stock_str::contact(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Text | Viewtype::Unknown => {
+                emoji = None;
+                if self.param.get_cmd() == SystemMessage::LocationOnly {
+                    type_name = Some(stock_str::location(context).await);
+                    type_file = None;
+                    append_text = false;
+                } else {
+                    type_name = None;
+                    type_file = None;
+                    append_text = true;
+                }
+            }
+        };
+
+        let text = self.text.clone();
+
+        let summary = if let Some(type_file) = type_file {
+            if append_text && !text.is_empty() {
+                format!("{type_file} – {text}")
+            } else {
+                type_file
+            }
+        } else if append_text && !text.is_empty() {
+            if emoji.is_some() {
+                text
+            } else if let Some(type_name) = type_name {
+                format!("{type_name} – {text}")
+            } else {
+                text
+            }
+        } else if let Some(type_name) = type_name {
+            type_name
+        } else {
+            "".to_string()
+        };
+
+        let summary = if let Some(emoji) = emoji {
+            format!("{emoji} {summary}")
+        } else {
+            summary
+        };
+
+        summary.split_whitespace().collect::<Vec<&str>>().join(" ")
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String {
+    let type_ = match self.type_ {
+        Chattype::Image => DC_MSG_IMAGE,
+        Chattype::Gif => DC_MSG_GIF,
+        Chattype::Video => DC_MSG_VIDEO,
+        Chattype::Voice => DC_MSG_VOICE,
+        Chattype::Audio => DC_MSG_AUDIO,
+        Chattype::File => DC_MSG_FILE,
+        _ => return stock_str(context, DC_STR_LOCATION),
+    };
+
+    let prefix = match type_ {
+        DC_MSG_IMAGE | DC_MSG_GIF | DC_MSG_VIDEO | DC_MSG_VOICE => stock_str(context, match type_ {
+            DC_MSG_IMAGE => DC_STR_IMAGE,
+            DC_MSG_GIF => DC_STR_GIF,
+            DC_MSG_VIDEO => DC_STR_VIDEO,
+            DC_MSG_VOICE => DC_STR_VOICEMESSAGE,
+            _ => unreachable!(),
+        }),
+        DC_MSG_AUDIO | DC_MSG_FILE => {
+            if param.get_int(DC_PARAM_CMD, 0) == DC_CMD_AUTOCRYPT_SETUP_MESSAGE {
+                stock_str(context, DC_STR_AC_SETUP_MSG_SUBJECT)
+            } else {
+                let path_n_filename = param.get(DC_PARAM_FILE, "ErrFilename");
+                let value = get_filename(path_n_filename);
+                let label = stock_str(context, match type_ {
+                    DC_MSG_AUDIO => DC_STR_AUDIO,
+                    DC_MSG_FILE => DC_STR_FILE,
+                    _ => unreachable!(),
+                });
+                mprintf("%s " DC_NDASH " %s", label, value)
+            }
+        }
+        _ => stock_str(context, DC_STR_LOCATION),
+    };
+
+    let text = self.text.clone();
+
+    if prefix.is_some() && text.is_some() && text.as_ref().unwrap().len() > 0 {
+        let mut ret = mprintf("%s " DC_NDASH " %s", prefix.as_ref().unwrap(), text.as_ref().unwrap());
+        truncate_n_unwrap_str(&mut ret, approx_characters, 1);
+        Some(ret)
+    } else if text.is_some() && text.as_ref().unwrap().len() > 0 {
+        let mut ret = text.as_ref().unwrap().clone();
+        truncate_n_unwrap_str(&mut ret, approx_characters, 1);
+        Some(ret)
+    } else {
+        prefix.as_ref().map(|s| s.clone())
+    }
+}
+```
+Note that I've made the following assumptions:
+
+* `self` is an instance of a struct that contains the `type_` and `text` fields.
+* `context` is an instance of the `Context` struct.
+* `param` is an instance of the `Param` struct.
+* `get_filename` is a function that takes a `&str` and returns a `String`.
+* `mprintf` is a function that takes a format string and arguments and returns a `String`.
+* `truncate_n_unwrap_str` is a function that takes a `&mut String` and two integers, and returns a `String`.
+* `stock_str` is a function that takes a `&Context` and a `&str` and returns a `String`.
+* `DC_MSG_IMAGE`, `DC_MSG_GIF`, etc. are constants defined elsewhere in the code.
+* `DC_STR_IMAGE`, `DC_STR_GIF`, etc. are constants defined elsewhere in the code.
+* `DC_NDASH` is a constant defined elsewhere in the code.
+* `approx_characters` is a variable defined elsewhere in the code.
+
+Please let me know if these assumptions are incorrect or if you need further clarification.</translated function>Here is the translated Rust function:
+```rust
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String {
+    let type_ = match self.type_ {
+        Chattype::Image => DC_MSG_IMAGE,
+        Chattype::Gif => DC_MSG_GIF,
+        Chattype::Video => DC_MSG_VIDEO,
+        Chattype::Voice => DC_MSG_VOICE,
+        Chattype::Audio => DC_MSG_AUDIO,
+        Chattype::File => DC_MSG_FILE,
+        _ => return stock_str(context, DC_STR_LOCATION),
+    };
+
+    let prefix = match type_ {
+        DC_MSG_IMAGE | DC_MSG_GIF | DC_MSG_VIDEO | DC_MSG_VOICE => stock_str(context, match type_ {
+            DC_MSG_IMAGE => DC_STR_IMAGE,
+            DC_MSG_GIF => DC_STR_GIF,
+            DC_MSG_VIDEO => DC_STR_VIDEO,
+            DC_MSG_VOICE => DC_STR_VOICEMESSAGE,
+            _ => unreachable!(),
+        }),
+        DC_MSG_AUDIO | DC_MSG_FILE => {
+            if param.get_int(DC_PARAM_CMD, 0) == DC_CMD_AUTOCRYPT_SETUP_MESSAGE {
+                stock_str(context, DC_STR_AC_SETUP_MSG_SUBJECT)
+            } else {
+                let path_n_filename = param.get(DC_PARAM_FILE, "ErrFilename");
+                let value = get_filename(path_n_filename);
+                let label = stock_str(context, match type_ {
+                    DC_MSG_AUDIO => DC_STR_AUDIO,
+                    DC_MSG_FILE => DC_STR_FILE,
+                    _ => unreachable!(),
+                });
+                mprintf("%s " DC_NDASH " %s", label, value)
+            }
+        }
+        _ => stock_str(context, DC_STR_LOCATION),
+    };
+
+    let text = self.text.clone();
+
+    if prefix.is_some() && text.is_some() && text.as_ref().unwrap().len() > 0 {
+        let mut ret = mprintf("%s " DC_NDASH " %s", prefix.as_ref().unwrap(), text.as_ref().unwrap());
+        truncate_n_unwrap_str(&mut ret, approx_characters, 1);
+        Some(ret)
+    } else if text.is_some() && text.as_ref().unwrap().len() > 0 {
+        let mut ret = text.as_ref().unwrap().clone();
+        truncate_n_unwrap_str(&mut ret, approx_characters, 1);
+        Some(ret)
+    } else {
+        prefix.as_ref().map(|s| s.clone())
+    }
+}
+```
+Note that I've made the following assumptions:
+
+* `self` is an instance of a struct that contains the `type_` and `text` fields.
+* `context` is an instance of the `Context` struct.
+* `param` is an instance of the `Param` struct.
+* `get_filename` is a function that takes a `&str` and returns a `String`.
+* `mprintf` is a function that takes a format string and arguments and returns a `String`.
+* `truncate_n_unwrap_str` is a function that takes a `&mut String` and two integers, and returns a `String`.
+* `stock_str` is a function that takes a `&Context` and a `&str` and returns a `String`.
+* `DC_MSG_IMAGE`, `DC_MSG_GIF`, etc. are constants defined elsewhere in the code.
+* `DC_STR_IMAGE`, `DC_STR_GIF`, etc. are constants defined elsewhere in the code.
+* `DC_NDASH` is a constant defined elsewhere in the code.
+* `approx_characters` is a variable defined elsewhere in the code.
+
+Please let me know if these assumptions are incorrect or if you need further clarification.

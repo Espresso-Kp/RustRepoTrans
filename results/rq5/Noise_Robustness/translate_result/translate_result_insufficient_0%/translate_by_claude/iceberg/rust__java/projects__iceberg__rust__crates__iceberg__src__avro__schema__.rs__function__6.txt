@@ -1,0 +1,195 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public ObjectInspector primitive(Type.PrimitiveType primitiveType) {
+    final PrimitiveTypeInfo primitiveTypeInfo;
+
+    switch (primitiveType.typeId()) {
+      case BINARY:
+        return IcebergBinaryObjectInspector.get();
+      case BOOLEAN:
+        primitiveTypeInfo = TypeInfoFactory.booleanTypeInfo;
+        break;
+      case DATE:
+        return DATE_INSPECTOR;
+      case DECIMAL:
+        Types.DecimalType type = (Types.DecimalType) primitiveType;
+        return IcebergDecimalObjectInspector.get(type.precision(), type.scale());
+      case DOUBLE:
+        primitiveTypeInfo = TypeInfoFactory.doubleTypeInfo;
+        break;
+      case FIXED:
+        return IcebergFixedObjectInspector.get();
+      case FLOAT:
+        primitiveTypeInfo = TypeInfoFactory.floatTypeInfo;
+        break;
+      case INTEGER:
+        primitiveTypeInfo = TypeInfoFactory.intTypeInfo;
+        break;
+      case LONG:
+        primitiveTypeInfo = TypeInfoFactory.longTypeInfo;
+        break;
+      case STRING:
+        primitiveTypeInfo = TypeInfoFactory.stringTypeInfo;
+        break;
+      case UUID:
+        return IcebergUUIDObjectInspector.get();
+      case TIMESTAMP:
+        boolean adjustToUTC = ((Types.TimestampType) primitiveType).shouldAdjustToUTC();
+        return adjustToUTC ? TIMESTAMP_INSPECTOR_WITH_TZ : TIMESTAMP_INSPECTOR;
+      case TIME:
+        return IcebergTimeObjectInspector.get();
+      default:
+        throw new IllegalArgumentException(primitiveType.typeId() + " type is not supported");
+    }
+
+    return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(primitiveTypeInfo);
+  }
+</java function>
+<rust function signature>
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::BTreeMap;
+use crate::spec::{
+    visit_schema, ListType, MapType, NestedField, NestedFieldRef, PrimitiveType, Schema,
+    SchemaVisitor, StructType, Type,
+};
+use crate::{ensure_data_valid, Error, ErrorKind, Result};
+use apache_avro::schema::{
+    DecimalSchema, FixedSchema, Name, RecordField as AvroRecordField, RecordFieldOrder,
+    RecordSchema, UnionSchema,
+};
+use apache_avro::Schema as AvroSchema;
+use itertools::{Either, Itertools};
+use serde_json::{Number, Value};
+use super::*;
+use crate::avro::schema::AvroSchemaToSchema;
+use crate::spec::{ListType, MapType, NestedField, PrimitiveType, Schema, StructType, Type};
+use apache_avro::schema::{Namespace, UnionSchema};
+use apache_avro::Schema as AvroSchema;
+use std::fs::read_to_string;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+        let avro_schema = match p {
+            PrimitiveType::Boolean => AvroSchema::Boolean,
+            PrimitiveType::Int => AvroSchema::Int,
+            PrimitiveType::Long => AvroSchema::Long,
+            PrimitiveType::Float => AvroSchema::Float,
+            PrimitiveType::Double => AvroSchema::Double,
+            PrimitiveType::Date => AvroSchema::Date,
+            PrimitiveType::Time => AvroSchema::TimeMicros,
+            PrimitiveType::Timestamp => AvroSchema::TimestampMicros,
+            PrimitiveType::Timestamptz => AvroSchema::TimestampMicros,
+            PrimitiveType::String => AvroSchema::String,
+            PrimitiveType::Uuid => avro_fixed_schema(UUID_BYTES, Some(UUID_LOGICAL_TYPE))?,
+            PrimitiveType::Fixed(len) => avro_fixed_schema((*len) as usize, None)?,
+            PrimitiveType::Binary => AvroSchema::Bytes,
+            PrimitiveType::Decimal { precision, scale } => {
+                avro_decimal_schema(*precision as usize, *scale as usize)?
+            }
+        };
+        Ok(Either::Left(avro_schema))
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+    match p.type_id() {
+        TypeId::Binary => Ok(AvroSchemaOrField::Schema(AvroSchema::Bytes)),
+        TypeId::Boolean => Ok(AvroSchemaOrField::Schema(AvroSchema::Boolean)),
+        TypeId::Date => Ok(AvroSchemaOrField::Schema(AvroSchema::Int)),
+        TypeId::Decimal => {
+            let decimal_type = p.as_decimal().ok_or_else(|| Error::new(ErrorKind::DataInvalid, "Expected decimal type"))?;
+            Ok(AvroSchemaOrField::Schema(AvroSchema::Decimal(DecimalSchema {
+                precision: decimal_type.precision() as usize,
+                scale: decimal_type.scale() as usize,
+            })))
+        },
+        TypeId::Double => Ok(AvroSchemaOrField::Schema(AvroSchema::Double)),
+        TypeId::Fixed => {
+            let fixed_type = p.as_fixed().ok_or_else(|| Error::new(ErrorKind::DataInvalid, "Expected fixed type"))?;
+            Ok(AvroSchemaOrField::Schema(AvroSchema::Fixed(FixedSchema {
+                name: Name::new("fixed"),
+                aliases: None,
+                doc: None,
+                size: fixed_type.length() as usize,
+            })))
+        },
+        TypeId::Float => Ok(AvroSchemaOrField::Schema(AvroSchema::Float)),
+        TypeId::Integer => Ok(AvroSchemaOrField::Schema(AvroSchema::Int)),
+        TypeId::Long => Ok(AvroSchemaOrField::Schema(AvroSchema::Long)),
+        TypeId::String => Ok(AvroSchemaOrField::Schema(AvroSchema::String)),
+        TypeId::Uuid => Ok(AvroSchemaOrField::Schema(AvroSchema::String)),
+        TypeId::Timestamp => {
+            let timestamp_type = p.as_timestamp().ok_or_else(|| Error::new(ErrorKind::DataInvalid, "Expected timestamp type"))?;
+            if timestamp_type.should_adjust_to_utc() {
+                Ok(AvroSchemaOrField::Schema(AvroSchema::Long))
+            } else {
+                Ok(AvroSchemaOrField::Schema(AvroSchema::Long))
+            }
+        },
+        TypeId::Time => Ok(AvroSchemaOrField::Schema(AvroSchema::Long)),
+        _ => Err(Error::new(ErrorKind::DataInvalid, format!("{:?} type is not supported", p.type_id()))),
+    }
+}
+```
+
+This Rust function translates the Java function to match the provided Rust function signature and uses the available dependencies. It handles the different primitive types and returns the corresponding Avro schema or field. Note that some adjustments were made to fit Rust's syntax and error handling patterns.</translated function>Here's the translated Rust function based on the provided Java function, Rust function signature, and dependencies:
+
+```rust
+fn primitive(&mut self, p: &PrimitiveType) -> Result<AvroSchemaOrField> {
+    match p.type_id() {
+        TypeId::Binary => Ok(AvroSchemaOrField::Schema(AvroSchema::Bytes)),
+        TypeId::Boolean => Ok(AvroSchemaOrField::Schema(AvroSchema::Boolean)),
+        TypeId::Date => Ok(AvroSchemaOrField::Schema(AvroSchema::Int)),
+        TypeId::Decimal => {
+            let decimal_type = p.as_decimal().ok_or_else(|| Error::new(ErrorKind::DataInvalid, "Expected decimal type"))?;
+            Ok(AvroSchemaOrField::Schema(AvroSchema::Decimal(DecimalSchema {
+                precision: decimal_type.precision() as usize,
+                scale: decimal_type.scale() as usize,
+            })))
+        },
+        TypeId::Double => Ok(AvroSchemaOrField::Schema(AvroSchema::Double)),
+        TypeId::Fixed => {
+            let fixed_type = p.as_fixed().ok_or_else(|| Error::new(ErrorKind::DataInvalid, "Expected fixed type"))?;
+            Ok(AvroSchemaOrField::Schema(AvroSchema::Fixed(FixedSchema {
+                name: Name::new("fixed"),
+                aliases: None,
+                doc: None,
+                size: fixed_type.length() as usize,
+            })))
+        },
+        TypeId::Float => Ok(AvroSchemaOrField::Schema(AvroSchema::Float)),
+        TypeId::Integer => Ok(AvroSchemaOrField::Schema(AvroSchema::Int)),
+        TypeId::Long => Ok(AvroSchemaOrField::Schema(AvroSchema::Long)),
+        TypeId::String => Ok(AvroSchemaOrField::Schema(AvroSchema::String)),
+        TypeId::Uuid => Ok(AvroSchemaOrField::Schema(AvroSchema::String)),
+        TypeId::Timestamp => {
+            let timestamp_type = p.as_timestamp().ok_or_else(|| Error::new(ErrorKind::DataInvalid, "Expected timestamp type"))?;
+            if timestamp_type.should_adjust_to_utc() {
+                Ok(AvroSchemaOrField::Schema(AvroSchema::Long))
+            } else {
+                Ok(AvroSchemaOrField::Schema(AvroSchema::Long))
+            }
+        },
+        TypeId::Time => Ok(AvroSchemaOrField::Schema(AvroSchema::Long)),
+        _ => Err(Error::new(ErrorKind::DataInvalid, format!("{:?} type is not supported", p.type_id()))),
+    }
+}
+```
+
+This Rust function translates the Java function to match the provided Rust function signature and uses the available dependencies. It handles the different primitive types and returns the corresponding Avro schema or field. Note that some adjustments were made to fit Rust's syntax and error handling patterns.

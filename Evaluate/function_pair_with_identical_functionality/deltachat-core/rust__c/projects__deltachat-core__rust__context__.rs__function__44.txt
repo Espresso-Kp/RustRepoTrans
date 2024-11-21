@@ -1,0 +1,78 @@
+<path>
+projects/deltachat-core/rust/context.rs
+</path>
+<function>
+    pub async fn get_fresh_msgs(&self) -> Result<Vec<MsgId>> {
+        let list = self
+            .sql
+            .query_map(
+                concat!(
+                    "SELECT m.id",
+                    " FROM msgs m",
+                    " LEFT JOIN contacts ct",
+                    "        ON m.from_id=ct.id",
+                    " LEFT JOIN chats c",
+                    "        ON m.chat_id=c.id",
+                    " WHERE m.state=?",
+                    "   AND m.hidden=0",
+                    "   AND m.chat_id>9",
+                    "   AND ct.blocked=0",
+                    "   AND c.blocked=0",
+                    "   AND NOT(c.muted_until=-1 OR c.muted_until>?)",
+                    " ORDER BY m.timestamp DESC,m.id DESC;"
+                ),
+                (MessageState::InFresh, time()),
+                |row| row.get::<_, MsgId>(0),
+                |rows| {
+                    let mut list = Vec::new();
+                    for row in rows {
+                        list.push(row?);
+                    }
+                    Ok(list)
+                },
+            )
+            .await?;
+        Ok(list)
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_context.c
+</path>
+<function>
+dc_array_t* dc_get_fresh_msgs(dc_context_t* context)
+{
+	int           show_deaddrop = 0;
+	dc_array_t*   ret = dc_array_new(context, 128);
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || ret==NULL) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT m.id"
+		" FROM msgs m"
+		" LEFT JOIN contacts ct ON m.from_id=ct.id"
+		" LEFT JOIN chats c ON m.chat_id=c.id"
+		" WHERE m.state=?"
+		"   AND m.hidden=0"
+		"   AND m.chat_id>?"
+		"   AND ct.blocked=0"
+        "   AND c.blocked=0"
+		"   AND NOT(c.muted_until=-1 OR c.muted_until>?)"
+		" ORDER BY m.timestamp DESC,m.id DESC;");
+	sqlite3_bind_int(stmt, 1, DC_STATE_IN_FRESH);
+	sqlite3_bind_int(stmt, 2, DC_CHAT_ID_LAST_SPECIAL);
+	sqlite3_bind_int(stmt, 3, show_deaddrop? DC_CHAT_DEADDROP_BLOCKED : 0);
+
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</function>

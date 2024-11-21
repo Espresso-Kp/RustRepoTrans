@@ -1,0 +1,142 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def create_namespace(self, namespace: Union[str, Identifier], properties: Properties = EMPTY_DICT) -> None:
+        """Create a namespace in the catalog.
+
+        Args:
+            namespace: Namespace identifier.
+            properties: A string dictionary of properties for the given namespace.
+
+        Raises:
+            ValueError: If the identifier is invalid.
+            AlreadyExistsError: If a namespace with the given name already exists.
+        """
+        database_name = self.identifier_to_database(namespace)
+        try:
+            self.glue.create_database(DatabaseInput=_construct_database_input(database_name, properties))
+        except self.glue.exceptions.AlreadyExistsException as e:
+            raise NamespaceAlreadyExistsError(f"Database {database_name} already exists") from e
+</python function>
+<rust function signature>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let db_input = convert_to_database(namespace, &properties)?;
+
+        let builder = self.client.0.create_database().database_input(db_input);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(Namespace::with_properties(namespace.clone(), properties))
+    }
+</function>
+<translated function>
+Here is the translated Rust function based on your requirements:
+
+```rust
+#[async_trait]
+impl GlueCatalog {
+    async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let database_name = convert_to_database(namespace);
+
+        let input = _construct_database_input(database_name, properties);
+        match self.client.create_database(input).await {
+            Ok(_) => Ok(convert_to_namespace(database_name)),
+            Err(err) => {
+                if let aws_sdk_glue::error::CreateDatabaseError::AlreadyExists(_) = err {
+                    Err(NamespaceAlreadyExistsError::new(format!(
+                        "Database {} already exists",
+                        database_name
+                    )))
+                } else {
+                    Err(from_aws_sdk_error(err))
+                }
+            }
+        }
+    }
+}
+```
+
+This function first converts its namespace identifier parameter to a database name. It then attempts to create a database using this name as well as the properties passed in. If successful, the function returns the namespace, otherwise, it checks if the error received was because the database already exists - in which case it returns an appropriate error - otherwise, the original error is returned.
+
+The `_construct_database_input` function is not provided. This function should take a `String` for the database name and a `HashMap<String, String>` for the properties to create a `DatabaseInput`.</translated function>Here is the translated Rust function based on your requirements:
+
+```rust
+#[async_trait]
+impl GlueCatalog {
+    async fn create_namespace(
+        &self,
+        namespace: &NamespaceIdent,
+        properties: HashMap<String, String>,
+    ) -> Result<Namespace> {
+        let database_name = convert_to_database(namespace);
+
+        let input = _construct_database_input(database_name, properties);
+        match self.client.create_database(input).await {
+            Ok(_) => Ok(convert_to_namespace(database_name)),
+            Err(err) => {
+                if let aws_sdk_glue::error::CreateDatabaseError::AlreadyExists(_) = err {
+                    Err(NamespaceAlreadyExistsError::new(format!(
+                        "Database {} already exists",
+                        database_name
+                    )))
+                } else {
+                    Err(from_aws_sdk_error(err))
+                }
+            }
+        }
+    }
+}
+```
+
+This function first converts its namespace identifier parameter to a database name. It then attempts to create a database using this name as well as the properties passed in. If successful, the function returns the namespace, otherwise, it checks if the error received was because the database already exists - in which case it returns an appropriate error - otherwise, the original error is returned.
+
+The `_construct_database_input` function is not provided. This function should take a `String` for the database name and a `HashMap<String, String>` for the properties to create a `DatabaseInput`.

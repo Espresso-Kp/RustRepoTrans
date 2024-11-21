@@ -1,0 +1,500 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static void CLIENT(RAND RNG,byte[] SB,byte[] UC,byte[] KEY)
+	{
+		int i;
+		SHA3 sh=new SHA3(SHA3.HASH256);
+
+		byte[] seed=new byte[32];
+		byte[] array=new byte[1792];
+		byte[] key=new byte[32];
+		byte[] cc=new byte[384];
+
+		int[] sd=new int[DEGREE];
+		int[] ed=new int[DEGREE];
+		int[] u=new int[DEGREE];
+		int[] k=new int[DEGREE];
+		int[] c=new int[DEGREE];
+		
+		Error(RNG,sd);
+		Error(RNG,ed);
+
+		ntt(sd);
+		ntt(ed);
+
+		for (i=0;i<32;i++)
+			seed[i]=SB[i];
+
+		for (i=0;i<1792;i++)
+			array[i]=SB[i+32];
+
+		Parse(seed,u);
+
+		poly_mul(u,u,sd);
+		poly_add(u,u,ed);
+		poly_hard_reduce(u);
+
+		for (i=0;i<32;i++)
+			key[i]=(byte)RNG.getByte();
+
+		for (i=0;i<32;i++)
+			sh.process(key[i]);
+		sh.hash(key);
+
+		Encode(key,k);
+
+		unpack(array,c);
+		nres_it(c);
+
+		poly_mul(c,c,sd);
+		intt(c);
+		Error(RNG,ed);
+		poly_add(c,c,ed);
+		poly_add(c,c,k);
+
+		Compress(c,cc);
+
+		sh.init(SHA3.HASH256);
+		for (i=0;i<32;i++)
+			sh.process(key[i]);
+		sh.hash(key);
+
+		for (i=0;i<32;i++)
+			KEY[i]=key[i];
+
+		redc_it(u);
+		pack(u,array);
+
+		for (i=0;i<1792;i++)
+			UC[i]=array[i];
+		for (i=0;i<384;i++)
+			UC[i+1792]=cc[i];
+
+	}
+</java function>
+<rust function signature>
+pub fn client(mut rng: &mut RAND, sb: &[u8], uc: &mut [u8], okey: &mut [u8]) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn new(olen: usize) -> SHA3 {
+        let mut nh = SHA3 {
+            length: 0,
+            rate: 0,
+            len: 0,
+            s: [[0; 5]; 5],
+        };
+        nh.init(olen);
+        return nh;
+    }
+fn compress(poly: &[i32], array: &mut [u8]) {
+    let mut col = 0 as i32;
+    let mut j = 0;
+    let mut i = 0;
+    while i < DEGREE {
+        for _ in 0..8 {
+            let b = round(poly[i] * 8, PRIME) & 7;
+            col = (col << 3) + b;
+            i += 1;
+        }
+        array[j] = (col & 0xff) as u8;
+        array[j + 1] = ((col >> 8) & 0xff) as u8;
+        array[j + 2] = ((col >> 16) & 0xff) as u8;
+        j += 3;
+        col = 0;
+    }
+}
+fn nhs_unpack(array: &[u8], poly: &mut [i32]) {
+    let mut j = 0;
+    let mut i = 0;
+    while i < DEGREE {
+        let a = ((array[j]) & 0xff) as i32;
+        let b = ((array[j + 1]) & 0xff) as i32;
+        let c = ((array[j + 2]) & 0xff) as i32;
+        let d = ((array[j + 3]) & 0xff) as i32;
+        let e = ((array[j + 4]) & 0xff) as i32;
+        let f = ((array[j + 5]) & 0xff) as i32;
+        let g = ((array[j + 6]) & 0xff) as i32;
+        j += 7;
+        poly[i] = a | ((b & 0x3f) << 8);
+        poly[i + 1] = (b >> 6) | (c << 2) | ((d & 0xf) << 10);
+        poly[i + 2] = (d >> 4) | (e << 4) | ((f & 3) << 12);
+        poly[i + 3] = (f >> 2) | (g << 6);
+        i += 4;
+    }
+}
+pub fn hash(&mut self, digest: &mut [u8]) {
+        /* pad message and finish - supply digest */
+        let q = self.rate - (self.length % (self.rate as u64)) as usize;
+        if q == 1 {
+            self.process(0x86);
+        } else {
+            self.process(0x06);
+            while (self.length % (self.rate as u64)) as usize != self.rate - 1 {
+                self.process(0x00)
+            }
+            self.process(0x80);
+        }
+        let hlen = self.len as usize;
+        self.squeeze(digest, hlen);
+    }
+fn redc_it(p: &mut [i32]) {
+    for i in 0..DEGREE {
+        p[i] = redc(p[i] as u64);
+    }
+}
+fn error(rng: &mut RAND, poly: &mut [i32]) {
+    for i in 0..DEGREE {
+        let mut n1 = ((rng.getbyte() as i32) & 0xff) + (((rng.getbyte() as i32) & 0xff) << 8);
+        let mut n2 = ((rng.getbyte() as i32) & 0xff) + (((rng.getbyte() as i32) & 0xff) << 8);
+        let mut r = 0 as i32;
+        for _ in 0..16 {
+            r += (n1 & 1) - (n2 & 1);
+            n1 >>= 1;
+            n2 >>= 1;
+        }
+        poly[i] = r + PRIME;
+    }
+}
+fn poly_add(p1: &mut [i32], p3: &[i32]) {
+    for i in 0..DEGREE {
+        p1[i] = p1[i] + p3[i];
+    }
+}
+fn parse(seed: &[u8], poly: &mut [i32]) {
+    let mut hash: [u8; 4 * DEGREE] = [0; 4 * DEGREE];
+    let mut sh = SHA3::new(sha3::SHAKE128);
+    for i in 0..32 {
+        sh.process(seed[i])
+    }
+    sh.shake(&mut hash, 4 * DEGREE);
+
+    let mut j = 0;
+    for i in 0..DEGREE {
+        let mut n = i32::from(hash[j] & 0x7f);
+        n <<= 8;
+        n += i32::from(hash[j + 1]);
+        n <<= 8;
+        n += i32::from(hash[j + 2]);
+        n <<= 8;
+        n += i32::from(hash[j + 3]);
+        j += 4;
+        poly[i] = nres(n);
+        //poly[i]=modmul(n,ONE); // reduce 31-bit random number mod q
+    }
+}
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+fn nres_it(p: &mut [i32]) {
+    for i in 0..DEGREE {
+        p[i] = nres(p[i]);
+    }
+}
+fn encode(key: &[u8], poly: &mut [i32]) {
+    let q2 = PRIME / 2;
+    let mut j = 0;
+    let mut i = 0;
+    while i < 256 {
+        let mut kj = key[j];
+        j += 1;
+        for _ in 0..8 {
+            let b = i32::from(kj & 1);
+            poly[i] = b * q2;
+            poly[i + 256] = b * q2;
+            poly[i + 512] = b * q2;
+            poly[i + 768] = b * q2;
+            kj >>= 1;
+            i += 1;
+        }
+    }
+}
+fn nhs_pack(poly: &[i32], array: &mut [u8]) {
+    let mut j = 0;
+    let mut i = 0;
+    while i < DEGREE {
+        let a = poly[i];
+        let b = poly[i + 1];
+        let c = poly[i + 2];
+        let d = poly[i + 3];
+        i += 4;
+        array[j] = (a & 0xff) as u8;
+        array[j + 1] = (((a >> 8) | (b << 6)) & 0xff) as u8;
+        array[j + 2] = ((b >> 2) & 0xff) as u8;
+        array[j + 3] = (((b >> 10) | (c << 4)) & 0xff) as u8;
+        array[j + 4] = ((c >> 4) & 0xff) as u8;
+        array[j + 5] = (((c >> 12) | (d << 2)) & 0xff) as u8;
+        array[j + 6] = (d >> 6) as u8;
+        j += 7;
+    }
+}
+fn poly_mul(p1: &mut [i32], p3: &[i32]) {
+    for i in 0..DEGREE {
+        p1[i] = modmul(p1[i], p3[i]);
+    }
+}
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+pub struct SHA3 {
+    length: u64,
+    rate: usize,
+    len: usize,
+    s: [[u64; 5]; 5],
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use crate::rand::RAND;
+use crate::sha3;
+use crate::sha3::SHA3;
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client(mut rng: &mut RAND, sb: &[u8], uc: &mut [u8], okey: &mut [u8]) {
+    let mut sh = SHA3::new(sha3::HASH256);
+
+    let mut seed: [u8; 32] = [0; 32];
+    let mut array: [u8; 1792] = [0; 1792];
+    let mut key: [u8; 32] = [0; 32];
+    let mut cc: [u8; 384] = [0; 384];
+
+    let mut sd: [i32; DEGREE] = [0; DEGREE];
+    let mut ed: [i32; DEGREE] = [0; DEGREE];
+    let mut u: [i32; DEGREE] = [0; DEGREE];
+    let mut k: [i32; DEGREE] = [0; DEGREE];
+    let mut c: [i32; DEGREE] = [0; DEGREE];
+
+    error(&mut rng, &mut sd);
+    error(&mut rng, &mut ed);
+
+    ntt(&mut sd);
+    ntt(&mut ed);
+
+    for i in 0..32 {
+        seed[i] = sb[i];
+    }
+
+    for i in 0..1792 {
+        array[i] = sb[i + 32];
+    }
+
+    parse(&seed, &mut u);
+
+    poly_mul(&mut u, &sd);
+    poly_add(&mut u, &ed);
+    poly_hard_reduce(&mut u);
+
+    for i in 0..32 {
+        key[i] = rng.getbyte();
+    }
+
+    for i in 0..32 {
+        sh.process(key[i]);
+    }
+    sh.hash(&mut key);
+
+    encode(&key, &mut k);
+
+    nhs_unpack(&array, &mut c);
+    nres_it(&mut c);
+
+    poly_mul(&mut c, &sd);
+    intt(&mut c);
+    error(&mut rng, &mut ed);
+    poly_add(&mut c, &ed);
+    poly_add(&mut c, &k);
+
+    compress(&c, &mut cc);
+
+    sh = SHA3::new(sha3::HASH256);
+    for i in 0..32 {
+        sh.process(key[i]);
+    }
+    sh.hash(&mut key);
+
+    for i in 0..32 {
+        okey[i] = key[i];
+    }
+
+    redc_it(&mut u);
+    nhs_pack(&u, &mut array);
+
+    for i in 0..1792 {
+        uc[i] = array[i];
+    }
+
+    for i in 0..384 {
+        uc[i + 1792] = cc[i];
+    }
+}
+</function>
+<translated function>
+ ```rust
+pub fn client(mut rng: &mut RAND, sb: &[u8], uc: &mut [u8], okey: &mut [u8]) {
+    let mut sh = SHA3::new(sha3::SHA3_256);
+
+    let mut seed = vec![0u8; 32];
+    let mut array = vec![0u8; 1792];
+    let mut key = vec![0u8; 32];
+    let mut cc = vec![0u8; 384];
+
+    let mut sd = vec![0i32; DEGREE];
+    let mut ed = vec![0i32; DEGREE];
+    let mut u = vec![0i32; DEGREE];
+    let mut k = vec![0i32; DEGREE];
+    let mut c = vec![0i32; DEGREE];
+
+    error(&mut rng, &mut sd);
+    error(&mut rng, &mut ed);
+
+    ntt(&mut sd);
+    ntt(&mut ed);
+
+    for i in 0..32 {
+        seed[i] = sb[i];
+    }
+
+    for i in 0..1792 {
+        array[i] = sb[i + 32];
+    }
+
+    parse(&seed, &mut u);
+
+    poly_mul(&mut u, &u, &sd);
+    poly_add(&mut u, &u, &ed);
+    poly_hard_reduce(&mut u);
+
+    for i in 0..32 {
+        key[i] = rng.getbyte() as u8;
+    }
+
+    for i in 0..32 {
+        sh.process(key[i]);
+    }
+    sh.hash(&mut key);
+
+    encode(&key, &mut k);
+
+    unpack(&array, &mut c);
+    nres_it(&mut c);
+
+    poly_mul(&mut c, &mut c, &sd);
+    intt(&mut c);
+    error(&mut rng, &mut ed);
+    poly_add(&mut c, &mut c, &ed);
+    poly_add(&mut c, &mut c, &k);
+
+    compress(&c, &mut cc);
+
+    sh.init(sha3::SHA3_256);
+    for i in 0..32 {
+        sh.process(key[i]);
+    }
+    sh.hash(&mut key);
+
+    for i in 0..32 {
+        okey[i] = key[i];
+    }
+
+    redc_it(&mut u);
+    pack(&u, &mut array);
+
+    for i in 0..1792 {
+        uc[i] = array[i];
+    }
+    for i in 0..384 {
+        uc[i + 1792] = cc[i];
+    }
+}
+```</translated function> ```rust
+pub fn client(mut rng: &mut RAND, sb: &[u8], uc: &mut [u8], okey: &mut [u8]) {
+    let mut sh = SHA3::new(sha3::SHA3_256);
+
+    let mut seed = vec![0u8; 32];
+    let mut array = vec![0u8; 1792];
+    let mut key = vec![0u8; 32];
+    let mut cc = vec![0u8; 384];
+
+    let mut sd = vec![0i32; DEGREE];
+    let mut ed = vec![0i32; DEGREE];
+    let mut u = vec![0i32; DEGREE];
+    let mut k = vec![0i32; DEGREE];
+    let mut c = vec![0i32; DEGREE];
+
+    error(&mut rng, &mut sd);
+    error(&mut rng, &mut ed);
+
+    ntt(&mut sd);
+    ntt(&mut ed);
+
+    for i in 0..32 {
+        seed[i] = sb[i];
+    }
+
+    for i in 0..1792 {
+        array[i] = sb[i + 32];
+    }
+
+    parse(&seed, &mut u);
+
+    poly_mul(&mut u, &u, &sd);
+    poly_add(&mut u, &u, &ed);
+    poly_hard_reduce(&mut u);
+
+    for i in 0..32 {
+        key[i] = rng.getbyte() as u8;
+    }
+
+    for i in 0..32 {
+        sh.process(key[i]);
+    }
+    sh.hash(&mut key);
+
+    encode(&key, &mut k);
+
+    unpack(&array, &mut c);
+    nres_it(&mut c);
+
+    poly_mul(&mut c, &mut c, &sd);
+    intt(&mut c);
+    error(&mut rng, &mut ed);
+    poly_add(&mut c, &mut c, &ed);
+    poly_add(&mut c, &mut c, &k);
+
+    compress(&c, &mut cc);
+
+    sh.init(sha3::SHA3_256);
+    for i in 0..32 {
+        sh.process(key[i]);
+    }
+    sh.hash(&mut key);
+
+    for i in 0..32 {
+        okey[i] = key[i];
+    }
+
+    redc_it(&mut u);
+    pack(&u, &mut array);
+
+    for i in 0..1792 {
+        uc[i] = array[i];
+    }
+    for i in 0..384 {
+        uc[i + 1792] = cc[i];
+    }
+}
+```

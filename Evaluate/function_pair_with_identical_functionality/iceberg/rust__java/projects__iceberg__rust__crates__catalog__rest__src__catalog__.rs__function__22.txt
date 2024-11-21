@@ -1,0 +1,93 @@
+<path>
+projects/iceberg/rust/crates/catalog/rest/src/catalog.rs
+</path>
+<function>
+    async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> {
+        let table_ident = TableIdent::new(namespace.clone(), creation.name.clone());
+
+        let request = self
+            .client
+            .0
+            .post(self.config.tables_endpoint(namespace))
+            .json(&CreateTableRequest {
+                name: creation.name,
+                location: creation.location,
+                schema: creation.schema,
+                partition_spec: creation.partition_spec,
+                write_order: creation.sort_order,
+                // We don't support stage create yet.
+                stage_create: Some(false),
+                properties: if creation.properties.is_empty() {
+                    None
+                } else {
+                    Some(creation.properties)
+                },
+            })
+            .build()?;
+
+        let resp = self
+            .client
+            .query::<LoadTableResponse, ErrorResponse, OK>(request)
+            .await?;
+
+        let file_io = self.load_file_io(resp.metadata_location.as_deref(), resp.config)?;
+
+        let table = Table::builder()
+            .identifier(table_ident)
+            .file_io(file_io)
+            .metadata(resp.metadata)
+            .metadata_location(resp.metadata_location.ok_or_else(|| {
+                Error::new(
+                    ErrorKind::DataInvalid,
+                    "Metadata location missing in create table response!",
+                )
+            })?)
+            .build();
+
+        Ok(table)
+    }
+</function>
+------
+
+<path>
+projects/iceberg/java/core/src/main/java/org/apache/iceberg/rest/RESTSessionCatalog.java
+</path>
+<function>
+    public Table create() {
+      CreateTableRequest request =
+          CreateTableRequest.builder()
+              .withName(ident.name())
+              .withSchema(schema)
+              .withPartitionSpec(spec)
+              .withWriteOrder(writeOrder)
+              .withLocation(location)
+              .setProperties(propertiesBuilder.build())
+              .build();
+
+      LoadTableResponse response =
+          client.post(
+              paths.tables(ident.namespace()),
+              request,
+              LoadTableResponse.class,
+              headers(context),
+              ErrorHandlers.tableErrorHandler());
+
+      AuthSession session = tableSession(response.config(), session(context));
+      RESTTableOperations ops =
+          new RESTTableOperations(
+              client,
+              paths.table(ident),
+              session::headers,
+              tableFileIO(context, response.config()),
+              response.tableMetadata());
+
+      trackFileIO(ops);
+
+      return new BaseTable(
+          ops, fullTableName(ident), metricsReporter(paths.metrics(ident), session::headers));
+    }
+</function>

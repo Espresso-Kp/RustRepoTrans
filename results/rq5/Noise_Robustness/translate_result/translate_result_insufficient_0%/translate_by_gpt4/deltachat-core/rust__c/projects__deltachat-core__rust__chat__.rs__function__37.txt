@@ -1,0 +1,251 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_get_fresh_msg_cnt(dc_context_t* context, uint32_t chat_id)
+{
+	int           ret = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+    if (chat_id == DC_CHAT_ID_ARCHIVED_LINK){
+        stmt = dc_sqlite3_prepare(context->sql,       
+        "SELECT COUNT(DISTINCT(m.chat_id))"
+        "FROM msgs m"
+        "LEFT JOIN chats c ON m.chat_id=c.id"
+        "WHERE m.state=10"
+        "and m.hidden=0"
+        "AND m.chat_id>9"
+        "AND c.blocked=0"
+        "AND c.archived=1;");
+    }
+    else{
+        stmt = dc_sqlite3_prepare(context->sql,
+            "SELECT COUNT(*) FROM msgs "
+            " WHERE state=" DC_STRINGIFY(DC_STATE_IN_FRESH)
+            "   AND hidden=0 "
+            "   AND chat_id=?;"); /* we have an index over the state-column, this should be sufficient as there are typically only few fresh messages */
+        sqlite3_bind_int(stmt, 1, chat_id);
+    }
+ 
+
+	if (sqlite3_step(stmt)!=SQLITE_ROW) {
+		goto cleanup;
+	}
+
+	ret = sqlite3_column_int(stmt, 0);
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_fresh_msg_cnt(self, context: &Context) -> Result<usize> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_fresh_msg_cnt(self, context: &Context) -> Result<usize> {
+        // this function is typically used to show a badge counter beside _each_ chatlist item.
+        // to make this as fast as possible, esp. on older devices, we added an combined index over the rows used for querying.
+        // so if you alter the query here, you may want to alter the index over `(state, hidden, chat_id)` in `sql.rs`.
+        //
+        // the impact of the index is significant once the database grows:
+        // - on an older android4 with 18k messages, query-time decreased from 110ms to 2ms
+        // - on an mid-class moto-g or iphone7 with 50k messages, query-time decreased from 26ms or 6ms to 0-1ms
+        // the times are average, no matter if there are fresh messages or not -
+        // and have to be multiplied by the number of items shown at once on the chatlist,
+        // so savings up to 2 seconds are possible on older devices - newer ones will feel "snappier" :)
+        let count = if self.is_archived_link() {
+            context
+                .sql
+                .count(
+                    "SELECT COUNT(DISTINCT(m.chat_id))
+                    FROM msgs m
+                    LEFT JOIN chats c ON m.chat_id=c.id
+                    WHERE m.state=10
+                    and m.hidden=0
+                    AND m.chat_id>9
+                    AND c.blocked=0
+                    AND c.archived=1
+                    ",
+                    (),
+                )
+                .await?
+        } else {
+            context
+                .sql
+                .count(
+                    "SELECT COUNT(*)
+                FROM msgs
+                WHERE state=?
+                AND hidden=0
+                AND chat_id=?;",
+                    (MessageState::InFresh, self),
+                )
+                .await?
+        };
+        Ok(count)
+    }
+</function>
+<translated function>
+Below is a translation of the provided C function to Rust, as per the function signature, corresponding dependencies, and related variable and data type declarations we have on the plate. 
+
+```rust
+use rusqlite::{params, OptionalExtension, NO_PARAMS};
+
+pub async fn get_fresh_msg_cnt(self, context: &Context) -> Result<usize> {
+    let mut ret: usize = 0;
+
+    if context.isNull() || !context.magic.is_dc_context() {
+        bail!("Context is null or not a DC context.");
+    }
+
+    let conn = context.sql.get_conn().await?;
+
+    if self == DC_CHAT_ID_ARCHIVED_LINK {
+        let stmt = "SELECT COUNT(DISTINCT(m.chat_id))
+                     FROM msgs m
+                     LEFT JOIN chats c ON m.chat_id = c.id
+                     WHERE m.state = 10
+                       AND m.hidden = 0
+                       AND m.chat_id > 9
+                       AND c.blocked = 0
+                       AND c.archived = 1";
+        ret = conn.query_row(stmt, NO_PARAMS, |r| r.get(0)).optional()?;
+    } else {
+        let stmt = "SELECT COUNT(*) FROM msgs 
+                     WHERE state = ?
+                     AND hidden = 0 
+                     AND chat_id = ?";
+        ret = conn.query_row(stmt, params![self, MessageState::InFresh as i32], |r| r.get(0)).optional()?;
+    }
+
+    if ret.isNone() {
+        bail!("No rows found.");
+    }
+
+    Ok(ret.unwrap())
+}
+```
+In this Rust function, I used `rusqlite` for SQL handling, `Option` and `Result` for better error handling and used connection from context for interacting with SQLite database. 
+
+Remember that you need to replace `?` placeholders according to order and provide parameters for where clause if required. Note that here in the `params!` macro, `MessageState::InFresh as i32` is used as a parameter assuming there's an enum for it similar to the C code. If there isn't this statement should be modified accordingly.
+
+I used `.await?` for retrieving the connection from context, assuming `get_conn()` is a part of asynchronous code. If that's not the case, replace `.await?` with `?`.
+
+Finally, using `bail!` for an early exit from function when an error occurs.</translated function>Below is a translation of the provided C function to Rust, as per the function signature, corresponding dependencies, and related variable and data type declarations we have on the plate. 
+
+```rust
+use rusqlite::{params, OptionalExtension, NO_PARAMS};
+
+pub async fn get_fresh_msg_cnt(self, context: &Context) -> Result<usize> {
+    let mut ret: usize = 0;
+
+    if context.isNull() || !context.magic.is_dc_context() {
+        bail!("Context is null or not a DC context.");
+    }
+
+    let conn = context.sql.get_conn().await?;
+
+    if self == DC_CHAT_ID_ARCHIVED_LINK {
+        let stmt = "SELECT COUNT(DISTINCT(m.chat_id))
+                     FROM msgs m
+                     LEFT JOIN chats c ON m.chat_id = c.id
+                     WHERE m.state = 10
+                       AND m.hidden = 0
+                       AND m.chat_id > 9
+                       AND c.blocked = 0
+                       AND c.archived = 1";
+        ret = conn.query_row(stmt, NO_PARAMS, |r| r.get(0)).optional()?;
+    } else {
+        let stmt = "SELECT COUNT(*) FROM msgs 
+                     WHERE state = ?
+                     AND hidden = 0 
+                     AND chat_id = ?";
+        ret = conn.query_row(stmt, params![self, MessageState::InFresh as i32], |r| r.get(0)).optional()?;
+    }
+
+    if ret.isNone() {
+        bail!("No rows found.");
+    }
+
+    Ok(ret.unwrap())
+}
+```
+In this Rust function, I used `rusqlite` for SQL handling, `Option` and `Result` for better error handling and used connection from context for interacting with SQLite database. 
+
+Remember that you need to replace `?` placeholders according to order and provide parameters for where clause if required. Note that here in the `params!` macro, `MessageState::InFresh as i32` is used as a parameter assuming there's an enum for it similar to the C code. If there isn't this statement should be modified accordingly.
+
+I used `.await?` for retrieving the connection from context, assuming `get_conn()` is a part of asynchronous code. If that's not the case, replace `.await?` with `?`.
+
+Finally, using `bail!` for an early exit from function when an error occurs.

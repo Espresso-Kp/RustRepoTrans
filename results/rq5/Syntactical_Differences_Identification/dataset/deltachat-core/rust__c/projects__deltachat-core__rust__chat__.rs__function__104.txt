@@ -1,0 +1,81 @@
+<path>
+projects/deltachat-core/rust/chat.rs
+</path>
+<function>
+pub async fn send_msg(context: &Context, chat_id: ChatId, msg: &mut Message) -> Result<MsgId> {
+    if chat_id.is_unset() {
+        let forwards = msg.param.get(Param::PrepForwards);
+        if let Some(forwards) = forwards {
+            for forward in forwards.split(' ') {
+                if let Ok(msg_id) = forward.parse::<u32>().map(MsgId::new) {
+                    if let Ok(mut msg) = Message::load_from_db(context, msg_id).await {
+                        send_msg_inner(context, chat_id, &mut msg).await?;
+                    };
+                }
+            }
+            msg.param.remove(Param::PrepForwards);
+            msg.update_param(context).await?;
+        }
+        return send_msg_inner(context, chat_id, msg).await;
+    }
+
+    if msg.state != MessageState::Undefined && msg.state != MessageState::OutPreparing {
+        msg.param.remove(Param::GuaranteeE2ee);
+        msg.param.remove(Param::ForcePlaintext);
+        msg.update_param(context).await?;
+    }
+    send_msg_inner(context, chat_id, msg).await
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_chat.c
+</path>
+<function>
+ *     If dc_prepare_msg() was called before, this parameter can be 0.
+ * @param msg Message object to send to the chat defined by the chat ID.
+ *     On succcess, msg_id of the object is set up,
+ *     The function does not take ownership of the object,
+ *     so you have to free it using dc_msg_unref() as usual.
+ * @return The ID of the message that is about to be sent. 0 in case of errors.
+ */
+uint32_t dc_send_msg(dc_context_t* context, uint32_t chat_id, dc_msg_t* msg)
+{
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || msg==NULL) {
+		return 0;
+	}
+
+	// recursively send any forwarded copies
+	if (!chat_id) {
+		char* forwards = dc_param_get(msg->param, DC_PARAM_PREP_FORWARDS, NULL);
+		if (forwards) {
+			char* p = forwards;
+			while (*p) {
+				int32_t id = strtol(p, &p, 10);
+				if (!id) break; // avoid hanging if user tampers with db
+				dc_msg_t* copy = dc_get_msg(context, id);
+				if (copy) {
+					dc_send_msg(context, chat_id, copy);
+				}
+				dc_msg_unref(copy);
+			}
+			dc_param_set(msg->param, DC_PARAM_PREP_FORWARDS, NULL);
+			dc_msg_save_param_to_disk(msg);
+		}
+		free(forwards);
+		dc_send_msg(context, chat_id, msg);
+		return msg->id;
+	}
+
+	
+	// automatically prepare normal messages
+	if (msg->state!=DC_STATE_OUT_PREPARING && msg-state!=DC_STATE_UNDEFINED) {
+		dc_param_set(msg->param, DC_PARAM_GUARANTEE_E2EE, NULL);
+		dc_param_set(msg->param, DC_PARAM_FORCE_PLAINTEXT, NULL);
+		dc_msg_save_param_to_disk(msg);
+	}
+	dc_send_msg(context, chat_id, msg);
+	return msg->id;
+}
+</function>

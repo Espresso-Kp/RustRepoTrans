@@ -1,0 +1,235 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def any_specified_encoding(sequence: bytes, search_zone: int = 8192) -> Optional[str]:
+    """
+    Extract using ASCII-only decoder any specified encoding in the first n-bytes.
+    """
+    if not isinstance(sequence, bytes):
+        raise TypeError
+
+    seq_len: int = len(sequence)
+
+    results: List[str] = findall(
+        RE_POSSIBLE_ENCODING_INDICATION,
+        sequence[: min(seq_len, search_zone)].decode("ascii", errors="ignore"),
+    )
+
+    if len(results) == 0:
+        return None
+
+    for specified_encoding in results:
+        specified_encoding = specified_encoding.lower()
+
+        encoding_alias: str
+        encoding_iana: str
+
+        for encoding_alias, encoding_iana in aliases.items():
+            if encoding_alias == specified_encoding:
+                return encoding_iana
+            if encoding_iana == specified_encoding:
+                return encoding_iana
+
+    return None
+</python function>
+<rust function signature>
+pub(crate) fn any_specified_encoding(sequence: &[u8], search_zone: usize) -> Option<String> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn decode(
+    input: &[u8],
+    from_encoding: &str,
+    how_process_errors: DecoderTrap,
+    only_test: bool,
+    is_chunk: bool,
+) -> Result<String, String> {
+    let encoder = encoding_from_whatwg_label(from_encoding)
+        .ok_or(format!("Encoding '{}' not found", from_encoding))?;
+
+    let mut buf = DecodeTestResult {
+        only_test,
+        data: String::new(),
+    };
+    let mut err = CodecError {
+        upto: 0,
+        cause: Cow::from(String::new()),
+    };
+    let chunk_len = input.len();
+    let mut begin_offset: usize = 0;
+    let mut end_offset: usize = chunk_len;
+    let mut error_occured: bool;
+    loop {
+        let res = decode_to(
+            encoder,
+            &input[begin_offset..end_offset],
+            how_process_errors,
+            &mut buf,
+        );
+        error_occured = res.is_err();
+        if let DecoderTrap::Strict = how_process_errors {
+            if !is_chunk || res.is_ok() || !is_multi_byte_encoding(from_encoding) {
+                break;
+            }
+            err = res.unwrap_err();
+            if err.cause.contains("invalid sequence") {
+                begin_offset += 1;
+            } else if err.cause.contains("incomplete sequence") {
+                end_offset -= 1;
+            }
+            if end_offset - begin_offset < 1 || begin_offset > 3 || (chunk_len - end_offset) > 3 {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    if error_occured {
+        return Err(format!("{} at index {}", err.cause, err.upto));
+    }
+    Ok(String::from(buf.get_buffer()))
+}
+pub fn iana_name(cp_name: &str) -> Option<&str> {
+    IANA_SUPPORTED
+        .contains(&cp_name) // first just try to search it in our list
+        .then_some(cp_name)
+        .or_else(|| {
+            // if not found, try to use alternative way
+            encoding_from_whatwg_label(cp_name).map(|enc| enc.whatwg_name().unwrap_or(enc.name()))
+        })
+}
+pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use crate::assets::LANGUAGES;
+use crate::consts::{
+    ENCODING_MARKS, IANA_SUPPORTED, IANA_SUPPORTED_SIMILAR, RE_POSSIBLE_ENCODING_INDICATION,
+    UNICODE_RANGES_COMBINED, UNICODE_SECONDARY_RANGE_KEYWORD,
+};
+use crate::entity::Language;
+use ahash::{HashSet, HashSetExt};
+use encoding::label::encoding_from_whatwg_label;
+use encoding::{CodecError, DecoderTrap, EncoderTrap, Encoding, EncodingRef, StringWriter};
+use icu_normalizer::DecomposingNormalizer;
+use unicode_names2::name;
+use std::borrow::Cow;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn any_specified_encoding(sequence: &[u8], search_zone: usize) -> Option<String> {
+    encoding::all::ASCII
+        .decode(
+            &sequence[0..search_zone.min(sequence.len())],
+            DecoderTrap::Ignore,
+        )
+        .ok()
+        .and_then(|test_string| {
+            RE_POSSIBLE_ENCODING_INDICATION
+                .captures_iter(&test_string)
+                .map(|c| c.extract())
+                .find_map(|(_, [specified_encoding])| iana_name(specified_encoding))
+                .map(|found_iana| found_iana.to_string())
+        })
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub(crate) fn any_specified_encoding(sequence: &[u8], search_zone: usize) -> Option<String> {
+    let seq_len = sequence.len();
+    let search_zone = std::cmp::min(seq_len, search_zone);
+
+    let decoded_sequence = match decode(
+        &sequence[..search_zone],
+        "ascii",
+        DecoderTrap::Ignore,
+        false,
+        false,
+    ) {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+
+    let re = regex::Regex::new(RE_POSSIBLE_ENCODING_INDICATION).unwrap();
+    let results: Vec<String> = re
+        .captures_iter(&decoded_sequence)
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_lowercase()))
+        .collect();
+
+    if results.is_empty() {
+        return None;
+    }
+
+    for specified_encoding in results {
+        if let Some(encoding_iana) = iana_name(&specified_encoding) {
+            return Some(encoding_iana.to_string());
+        }
+    }
+
+    None
+}
+```
+
+This Rust function closely follows the logic of the original Python function while using the provided Rust dependencies and libraries. Here are the key changes and considerations:
+
+1. The function signature matches the provided Rust signature.
+2. We use the `decode` function to handle the ASCII decoding with error ignoring.
+3. Instead of `findall`, we use a `regex::Regex` to find matches.
+4. We use the `iana_name` function to check for encoding aliases and IANA names.
+5. The function returns `Option<String>` instead of `Optional[str]`.
+
+Note that this translation assumes that the `RE_POSSIBLE_ENCODING_INDICATION` constant is defined and accessible in the Rust code, similar to how it was used in the Python version.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub(crate) fn any_specified_encoding(sequence: &[u8], search_zone: usize) -> Option<String> {
+    let seq_len = sequence.len();
+    let search_zone = std::cmp::min(seq_len, search_zone);
+
+    let decoded_sequence = match decode(
+        &sequence[..search_zone],
+        "ascii",
+        DecoderTrap::Ignore,
+        false,
+        false,
+    ) {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+
+    let re = regex::Regex::new(RE_POSSIBLE_ENCODING_INDICATION).unwrap();
+    let results: Vec<String> = re
+        .captures_iter(&decoded_sequence)
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_lowercase()))
+        .collect();
+
+    if results.is_empty() {
+        return None;
+    }
+
+    for specified_encoding in results {
+        if let Some(encoding_iana) = iana_name(&specified_encoding) {
+            return Some(encoding_iana.to_string());
+        }
+    }
+
+    None
+}
+```
+
+This Rust function closely follows the logic of the original Python function while using the provided Rust dependencies and libraries. Here are the key changes and considerations:
+
+1. The function signature matches the provided Rust signature.
+2. We use the `decode` function to handle the ASCII decoding with error ignoring.
+3. Instead of `findall`, we use a `regex::Regex` to find matches.
+4. We use the `iana_name` function to check for encoding aliases and IANA names.
+5. The function returns `Option<String>` instead of `Optional[str]`.
+
+Note that this translation assumes that the `RE_POSSIBLE_ENCODING_INDICATION` constant is defined and accessible in the Rust code, similar to how it was used in the Python version.

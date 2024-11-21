@@ -1,0 +1,141 @@
+pub async fn load_from_db(context: &Context, id: MsgId) -> Result<Message> {
+        let message = Self::load_from_db_optional(context, id)
+            .await?
+            .with_context(|| format!("Message {id} does not exist"))?;
+        Ok(message)
+    }
+pub fn open_file_std(context: &Context, path: impl AsRef<Path>) -> Result<std::fs::File> {
+    let path_abs = get_abs_path(context, path.as_ref());
+
+    match std::fs::File::open(path_abs) {
+        Ok(bytes) => Ok(bytes),
+        Err(err) => {
+            warn!(
+                context,
+                "Cannot read \"{}\" or file is empty: {}",
+                path.as_ref().display(),
+                err
+            );
+            Err(err.into())
+        }
+    }
+}
+pub fn get_file(&self, context: &Context) -> Option<PathBuf> {
+        self.param.get_path(Param::File, context).unwrap_or(None)
+    }
+async fn set_self_key(context: &Context, armored: &str, set_default: bool) -> Result<()> {
+    // try hard to only modify key-state
+    let (private_key, header) = SignedSecretKey::from_asc(armored)?;
+    let public_key = private_key.split_public_key()?;
+    if let Some(preferencrypt) = header.get("Autocrypt-Prefer-Encrypt") {
+        let e2ee_enabled = match preferencrypt.as_str() {
+            "nopreference" => 0,
+            "mutual" => 1,
+            _ => {
+                bail!("invalid Autocrypt-Prefer-Encrypt header: {:?}", header);
+            }
+        };
+        context
+            .sql
+            .set_raw_config_int("e2ee_enabled", e2ee_enabled)
+            .await?;
+    } else {
+        // `Autocrypt-Prefer-Encrypt` is not included
+        // in keys exported to file.
+        //
+        // `Autocrypt-Prefer-Encrypt` also SHOULD be sent
+        // in Autocrypt Setup Message according to Autocrypt specification,
+        // but K-9 6.802 does not include this header.
+        //
+        // We keep current setting in this case.
+        info!(context, "No Autocrypt-Prefer-Encrypt header.");
+    };
+
+    let self_addr = context.get_primary_self_addr().await?;
+    let addr = EmailAddress::new(&self_addr)?;
+    let keypair = pgp::KeyPair {
+        addr,
+        public: public_key,
+        secret: private_key,
+    };
+    key::store_self_keypair(
+        context,
+        &keypair,
+        if set_default {
+            key::KeyPairUse::Default
+        } else {
+            key::KeyPairUse::ReadOnly
+        },
+    )
+    .await?;
+
+    info!(context, "stored self key: {:?}", keypair.secret.key_id());
+    Ok(())
+}
+async fn maybe_add_bcc_self_device_msg(context: &Context) -> Result<()> {
+    if !context.sql.get_raw_config_bool("bcc_self").await? {
+        let mut msg = Message::new(Viewtype::Text);
+        // TODO: define this as a stockstring once the wording is settled.
+        msg.text = "It seems you are using multiple devices with Delta Chat. Great!\n\n\
+             If you also want to synchronize outgoing messages across all devices, \
+             go to \"Settings → Advanced\" and enable \"Send Copy to Self\"."
+            .to_string();
+        chat::add_device_msg(context, Some("bcc-self-hint"), Some(&mut msg)).await?;
+    }
+    Ok(())
+}
+async fn decrypt_setup_file<T: std::io::Read + std::io::Seek>(
+    passphrase: &str,
+    file: T,
+) -> Result<String> {
+    let plain_bytes = pgp::symm_decrypt(passphrase, file).await?;
+    let plain_text = std::string::String::from_utf8(plain_bytes)?;
+
+    Ok(plain_text)
+}
+pub struct MsgId(u32);
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+------
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};

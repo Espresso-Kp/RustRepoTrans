@@ -1,0 +1,130 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def new_output(self, location: str) -> FsspecOutputFile:
+        """Get an FsspecOutputFile instance to write bytes to the file at the given location.
+
+        Args:
+            location (str): A URI or a path to a local file.
+
+        Returns:
+            FsspecOutputFile: An FsspecOutputFile instance for the given location.
+        """
+        uri = urlparse(location)
+        fs = self.get_fs(uri.scheme)
+        return FsspecOutputFile(location=location, fs=fs)
+</python function>
+<rust function signature>
+pub fn new_output(&self, path: impl AsRef<str>) -> Result<OutputFile> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct OutputFile {
+    op: Operator,
+    // Absolution path of file.
+    path: String,
+    // Relative path of file to uri, starts at [`relative_path_pos`]
+    relative_path_pos: usize,
+}
+pub struct FileIO {
+    inner: Arc<Storage>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn new_output(&self, path: impl AsRef<str>) -> Result<OutputFile> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        let path = path.as_ref().to_string();
+        let relative_path_pos = path.len() - relative_path.len();
+        Ok(OutputFile {
+            op,
+            path,
+            relative_path_pos,
+        })
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn new_output(&self, path: impl AsRef<str>) -> Result<OutputFile> {
+    let path_str = path.as_ref();
+    let url = Url::parse(path_str).map_err(|e| Error::new(ErrorKind::InvalidInput, e))?;
+    
+    let scheme = url.scheme();
+    let op = self.inner.get_operator(scheme)?;
+    
+    let relative_path_pos = url.path().trim_start_matches('/').as_ptr() as usize - path_str.as_ptr() as usize;
+    
+    Ok(OutputFile {
+        op,
+        path: path_str.to_string(),
+        relative_path_pos,
+    })
+}
+```
+
+This Rust function does the following:
+
+1. It takes a path as an input, which can be any type that implements `AsRef<str>`.
+2. It parses the input path as a URL using the `Url::parse` function.
+3. It extracts the scheme from the URL.
+4. It gets the appropriate operator for the scheme using `self.inner.get_operator`.
+5. It calculates the `relative_path_pos` by finding the difference between the start of the path (trimmed of leading slashes) and the start of the input string.
+6. Finally, it creates and returns an `OutputFile` struct with the operator, path, and relative_path_pos.
+
+Note that this translation makes some assumptions:
+- The `self.inner` is assumed to be of type `Arc<Storage>` and have a `get_operator` method that returns a `Result<Operator>`.
+- Error handling is done using the `Result` type and the `Error` struct from the crate.
+- The `OutputFile` struct is created directly instead of using a separate `FsspecOutputFile` type as in the Python version.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub fn new_output(&self, path: impl AsRef<str>) -> Result<OutputFile> {
+    let path_str = path.as_ref();
+    let url = Url::parse(path_str).map_err(|e| Error::new(ErrorKind::InvalidInput, e))?;
+    
+    let scheme = url.scheme();
+    let op = self.inner.get_operator(scheme)?;
+    
+    let relative_path_pos = url.path().trim_start_matches('/').as_ptr() as usize - path_str.as_ptr() as usize;
+    
+    Ok(OutputFile {
+        op,
+        path: path_str.to_string(),
+        relative_path_pos,
+    })
+}
+```
+
+This Rust function does the following:
+
+1. It takes a path as an input, which can be any type that implements `AsRef<str>`.
+2. It parses the input path as a URL using the `Url::parse` function.
+3. It extracts the scheme from the URL.
+4. It gets the appropriate operator for the scheme using `self.inner.get_operator`.
+5. It calculates the `relative_path_pos` by finding the difference between the start of the path (trimmed of leading slashes) and the start of the input string.
+6. Finally, it creates and returns an `OutputFile` struct with the operator, path, and relative_path_pos.
+
+Note that this translation makes some assumptions:
+- The `self.inner` is assumed to be of type `Arc<Storage>` and have a `get_operator` method that returns a `Result<Operator>`.
+- Error handling is done using the `Result` type and the `Error` struct from the crate.
+- The `OutputFile` struct is created directly instead of using a separate `FsspecOutputFile` type as in the Python version.

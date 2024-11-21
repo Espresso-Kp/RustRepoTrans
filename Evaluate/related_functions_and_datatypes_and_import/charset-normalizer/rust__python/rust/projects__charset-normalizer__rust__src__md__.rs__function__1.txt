@@ -1,0 +1,154 @@
+fn feed(&mut self, character: &MessDetectorChar) {
+        if !(character.is(MessDetectorCharFlags::ALPHABETIC)
+            && character.is(MessDetectorCharFlags::CASE_VARIABLE))
+            && self.character_count_since_last_sep > 0
+        {
+            if self.character_count_since_last_sep <= 64
+                && !character.is(MessDetectorCharFlags::ASCII_DIGIT)
+                && !self.current_ascii_only
+            {
+                self.successive_upper_lower_count_final += self.successive_upper_lower_count;
+            }
+
+            self.successive_upper_lower_count = 0;
+            self.character_count_since_last_sep = 0;
+            self.last_alpha_seen = None;
+            self.buf = false;
+            self.character_count += 1;
+            self.current_ascii_only = true;
+
+            return;
+        }
+
+        self.current_ascii_only &= character.is(MessDetectorCharFlags::ASCII);
+
+        if let Some(tmp_last_alpha) = self.last_alpha_seen {
+            if (character.is(MessDetectorCharFlags::UPPERCASE)
+                && tmp_last_alpha.is(MessDetectorCharFlags::LOWERCASE))
+                || (character.is(MessDetectorCharFlags::LOWERCASE)
+                    && tmp_last_alpha.is(MessDetectorCharFlags::UPPERCASE))
+            {
+                if self.buf {
+                    self.successive_upper_lower_count += 2;
+                    self.buf = false;
+                } else {
+                    self.buf = true;
+                }
+            } else {
+                self.buf = false;
+            }
+        }
+
+        self.character_count += 1;
+        self.character_count_since_last_sep += 1;
+        self.last_alpha_seen = Some(*character);
+    }
+
+fn eligible(&self, _: &MessDetectorChar) -> bool {
+        true
+    }
+
+fn ratio(&self) -> f32 {
+        if self.character_count == 0 {
+            return 0.0;
+        }
+        self.successive_upper_lower_count_final as f32 / self.character_count as f32
+    }
+
+#[derive(Default)]
+pub(super) struct TooManySymbolOrPunctuationPlugin {
+    punctuation_count: u64,
+    symbol_count: u64,
+    character_count: u64,
+    last_printable_char: Option<MessDetectorChar>,
+}
+
+#[derive(Default)]
+pub(super) struct TooManyAccentuatedPlugin {
+    character_count: u64,
+    accentuated_count: u64,
+}
+
+#[derive(Default)]
+pub(super) struct UnprintablePlugin {
+    character_count: u64,
+    unprintable_count: u64,
+}
+
+#[derive(Default)]
+pub(super) struct SuspiciousDuplicateAccentPlugin {
+    character_count: u64,
+    successive_count: u64,
+    last_latin_character: Option<MessDetectorChar>,
+}
+
+#[derive(Default)]
+pub(super) struct SuspiciousRangePlugin {
+    character_count: u64,
+    suspicious_successive_range_count: u64,
+    last_printable_char: Option<MessDetectorChar>,
+}
+
+#[derive(Default)]
+pub(super) struct SuperWeirdWordPlugin {
+    character_count: u64,
+    word_count: u64,
+    bad_word_count: u64,
+    foreign_long_count: u64,
+    is_current_word_bad: bool,
+    foreign_long_watch: bool,
+    bad_character_count: u64,
+    buffer_accent_count: u64,
+    buffer: Vec<MessDetectorChar>,
+}
+
+#[derive(Default)]
+pub(super) struct CjkInvalidStopPlugin {
+    wrong_stop_count: u64,
+    cjk_character_count: u64,
+}
+
+pub(super) struct ArchaicUpperLowerPlugin {
+    buf: bool,
+    current_ascii_only: bool,
+    character_count_since_last_sep: u64,
+    successive_upper_lower_count: u64,
+    successive_upper_lower_count_final: u64,
+    character_count: u64,
+    last_alpha_seen: Option<MessDetectorChar>,
+}
+
+impl Default for ArchaicUpperLowerPlugin {
+    fn default() -> Self {
+        ArchaicUpperLowerPlugin {
+            buf: false,
+            current_ascii_only: true,
+            character_count_since_last_sep: 0,
+            successive_upper_lower_count: 0,
+            successive_upper_lower_count_final: 0,
+            character_count: 0,
+            last_alpha_seen: None,
+        }
+    }
+}
+
+pub(crate) struct MessDetectorChar {
+    pub character: char,
+    pub flags: MessDetectorCharFlags,
+    pub unicode_range: Option<&'static str>,
+}
+
+pub fn new(character: char) -> Self {
+        new_mess_detector_character(character)
+    }
+    
+------
+use cached::proc_macro::cached;
+use log::{log_enabled, trace};
+use ordered_float::OrderedFloat;
+use plugins::{
+    ArchaicUpperLowerPlugin, CjkInvalidStopPlugin, MessDetectorPlugin, SuperWeirdWordPlugin,
+    SuspiciousDuplicateAccentPlugin, SuspiciousRangePlugin, TooManyAccentuatedPlugin,
+    TooManySymbolOrPunctuationPlugin, UnprintablePlugin,
+};
+use structs::MessDetectorChar;

@@ -1,0 +1,258 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+void dc_send_locations_to_chat(dc_context_t* context, uint32_t chat_id,
+                               int seconds)
+{
+	sqlite3_stmt* stmt = NULL;
+	time_t        now = time(NULL);
+	dc_msg_t*     msg = NULL;
+	char*         stock_str = NULL;
+	int           is_sending_locations_before = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || seconds<0
+	 || chat_id<=DC_CHAT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+	is_sending_locations_before = dc_is_sending_locations_to_chat(context, chat_id);
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"UPDATE chats "
+		"   SET locations_send_begin=?, "
+		"       locations_send_until=? "
+		" WHERE id=?");
+	sqlite3_bind_int64(stmt, 1, seconds? now : 0);
+	sqlite3_bind_int64(stmt, 2, seconds? now+seconds : 0);
+	sqlite3_bind_int  (stmt, 3, chat_id);
+	sqlite3_step(stmt);
+
+	// add/sent status message.
+	// as disable also happens after a timeout, this is not sent explicitly.
+	if (seconds && !is_sending_locations_before) {
+		msg = dc_msg_new(context, DC_MSG_TEXT);
+		msg->text = dc_stock_system_msg(context, DC_STR_MSGLOCATIONENABLED, NULL, NULL, 0);
+		dc_param_set_int(msg->param, DC_PARAM_CMD, DC_CMD_LOCATION_STREAMING_ENABLED);
+		dc_send_msg(context, chat_id, msg);
+	}
+	else if(!seconds && is_sending_locations_before) {
+		stock_str = dc_stock_system_msg(context, DC_STR_MSGLOCATIONDISABLED, NULL, NULL, 0);
+		dc_add_device_msg(context, chat_id, stock_str);
+	}
+
+	// update eg. the "location-sending"-icon
+	context->cb(context, DC_EVENT_CHAT_MODIFIED, chat_id, 0);
+
+	if (seconds) {
+		schedule_MAYBE_SEND_LOCATIONS(context, 0);
+		dc_job_add(context, DC_JOB_MAYBE_SEND_LOC_ENDED, chat_id, NULL, seconds+1);
+	}
+
+cleanup:
+	free(stock_str);
+	dc_msg_unref(msg);
+	sqlite3_finalize(stmt);
+}
+</c function>
+<rust function signature>
+pub async fn send_locations_to_chat(
+    context: &Context,
+    chat_id: ChatId,
+    seconds: i64,
+) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::Duration;
+use anyhow::{ensure, Context as _, Result};
+use async_channel::Receiver;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText};
+use tokio::time::timeout;
+use crate::chat::{self, ChatId};
+use crate::constants::DC_CHAT_ID_TRASH;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::events::EventType;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::tools::{duration_to_str, time};
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::config::Config;
+use crate::message::MessageState;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn send_locations_to_chat(
+    context: &Context,
+    chat_id: ChatId,
+    seconds: i64,
+) -> Result<()> {
+    ensure!(seconds >= 0);
+    ensure!(!chat_id.is_special());
+    let now = time();
+    let is_sending_locations_before = is_sending_locations_to_chat(context, Some(chat_id)).await?;
+    context
+        .sql
+        .execute(
+            "UPDATE chats    \
+         SET locations_send_begin=?,        \
+         locations_send_until=?  \
+         WHERE id=?",
+            (
+                if 0 != seconds { now } else { 0 },
+                if 0 != seconds { now + seconds } else { 0 },
+                chat_id,
+            ),
+        )
+        .await?;
+    if 0 != seconds && !is_sending_locations_before {
+        let mut msg = Message::new(Viewtype::Text);
+        msg.text = stock_str::msg_location_enabled(context).await;
+        msg.param.set_cmd(SystemMessage::LocationStreamingEnabled);
+        chat::send_msg(context, chat_id, &mut msg)
+            .await
+            .unwrap_or_default();
+    } else if 0 == seconds && is_sending_locations_before {
+        let stock_str = stock_str::msg_location_disabled(context).await;
+        chat::add_info_msg(context, chat_id, &stock_str, now).await?;
+    }
+    context.emit_event(EventType::ChatModified(chat_id));
+    chatlist_events::emit_chatlist_item_changed(context, chat_id);
+    if 0 != seconds {
+        context.scheduler.interrupt_location().await;
+    }
+    Ok(())
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn send_locations_to_chat(
+    context: &Context,
+    chat_id: ChatId,
+    seconds: i64,
+) -> Result<()> {
+    ensure!(
+        seconds >= 0 && chat_id > ChatId::LAST_SPECIAL,
+        "Invalid input parameters"
+    );
+
+    let now = time();
+    let is_sending_locations_before = context.is_sending_locations_to_chat(chat_id).await?;
+
+    context
+        .sql
+        .execute(
+            "UPDATE chats SET locations_send_begin=?, locations_send_until=? WHERE id=?",
+            (
+                if seconds > 0 { now } else { 0 },
+                if seconds > 0 { now + seconds } else { 0 },
+                chat_id,
+            ),
+        )
+        .await
+        .context("Failed to update chat locations")?;
+
+    if seconds > 0 && !is_sending_locations_before {
+        let mut msg = Message::new(Viewtype::Text);
+        msg.set_text(stock_str::msglocationsent());
+        msg.param.set_int(crate::message::Param::Cmd, SystemMessage::LocationStreamingEnabled as i32);
+        context.send_msg(chat_id, &mut msg).await?;
+    } else if seconds == 0 && is_sending_locations_before {
+        let stock_str = stock_str::msglocationdisabled();
+        context.add_device_msg(chat_id, &stock_str).await?;
+    }
+
+    context
+        .emit_event(EventType::ChatModified(chat_id))
+        .await;
+
+    if seconds > 0 {
+        context.schedule_maybe_send_locations(Duration::from_secs(0)).await?;
+        context
+            .job_add(
+                crate::job::Job::MaybeSendLocEnded,
+                chat_id,
+                None,
+                Duration::from_secs((seconds + 1) as u64),
+            )
+            .await?;
+    }
+
+    Ok(())
+}
+```
+
+This Rust translation aims to maintain the functionality of the original C function while adapting it to Rust's async/await paradigm and error handling approach. It uses the provided dependencies and follows Rust idioms. Note that some function calls and type names have been adjusted to match the expected Rust environment based on the given dependencies.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn send_locations_to_chat(
+    context: &Context,
+    chat_id: ChatId,
+    seconds: i64,
+) -> Result<()> {
+    ensure!(
+        seconds >= 0 && chat_id > ChatId::LAST_SPECIAL,
+        "Invalid input parameters"
+    );
+
+    let now = time();
+    let is_sending_locations_before = context.is_sending_locations_to_chat(chat_id).await?;
+
+    context
+        .sql
+        .execute(
+            "UPDATE chats SET locations_send_begin=?, locations_send_until=? WHERE id=?",
+            (
+                if seconds > 0 { now } else { 0 },
+                if seconds > 0 { now + seconds } else { 0 },
+                chat_id,
+            ),
+        )
+        .await
+        .context("Failed to update chat locations")?;
+
+    if seconds > 0 && !is_sending_locations_before {
+        let mut msg = Message::new(Viewtype::Text);
+        msg.set_text(stock_str::msglocationsent());
+        msg.param.set_int(crate::message::Param::Cmd, SystemMessage::LocationStreamingEnabled as i32);
+        context.send_msg(chat_id, &mut msg).await?;
+    } else if seconds == 0 && is_sending_locations_before {
+        let stock_str = stock_str::msglocationdisabled();
+        context.add_device_msg(chat_id, &stock_str).await?;
+    }
+
+    context
+        .emit_event(EventType::ChatModified(chat_id))
+        .await;
+
+    if seconds > 0 {
+        context.schedule_maybe_send_locations(Duration::from_secs(0)).await?;
+        context
+            .job_add(
+                crate::job::Job::MaybeSendLocEnded,
+                chat_id,
+                None,
+                Duration::from_secs((seconds + 1) as u64),
+            )
+            .await?;
+    }
+
+    Ok(())
+}
+```
+
+This Rust translation aims to maintain the functionality of the original C function while adapting it to Rust's async/await paradigm and error handling approach. It uses the provided dependencies and follows Rust idioms. Note that some function calls and type names have been adjusted to match the expected Rust environment based on the given dependencies.

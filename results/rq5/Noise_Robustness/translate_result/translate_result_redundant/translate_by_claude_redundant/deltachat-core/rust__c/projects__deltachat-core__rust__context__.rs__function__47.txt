@@ -1,0 +1,498 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+* Searching can be done globally (chat_id=0) or in a specified chat only (chat_id
+ * set).
+ *
+ * Global chat results are typically displayed using dc_msg_get_summary(), chat
+ * search results may just hilite the corresponding messages and present a
+ * prev/next button.
+ *
+ * @memberof dc_context_t
+ * @param context The context object as returned from dc_context_new().
+ * @param chat_id ID of the chat to search messages in.
+ *     Set this to 0 for a global search.
+ * @param query The query to search for.
+ * @return An array of message IDs. Must be freed using dc_array_unref() when no longer needed.
+ *     If nothing can be found, the function returns NULL.
+ */
+dc_array_t* dc_search_msgs(dc_context_t* context, uint32_t chat_id, const char* query)
+{
+	//clock_t       start = clock();
+
+	int           success = 0;
+	dc_array_t*   ret = dc_array_new(context, 100);
+	char*         strLikeInText = NULL;
+	char*         strLikeBeg = NULL;
+	char*         real_query = NULL;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || ret==NULL || query==NULL) {
+		goto cleanup;
+	}
+
+	real_query = dc_strdup(query);
+	dc_trim(real_query);
+	if (real_query[0]==0) {
+		success = 1; /*empty result*/
+		goto cleanup;
+	}
+
+	strLikeInText = dc_mprintf("%%%s%%", real_query);
+	strLikeBeg = dc_mprintf("%s%%", real_query); /*for the name search, we use "Name%" which is fast as it can use the index ("%Name%" could not). */
+
+	/* Incremental search with "LIKE %query%" cannot take advantages from any index
+	("query%" could for COLLATE NOCASE indexes, see http://www.sqlite.org/optoverview.html#like_opt)
+	An alternative may be the FULLTEXT sqlite stuff, however, this does not really help with incremental search.
+	An extra table with all words and a COLLATE NOCASE indexes may help, however,
+	this must be updated all the time and probably consumes more time than we can save in tenthousands of searches.
+	For now, we just expect the following query to be fast enough :-) */
+	if (chat_id) {
+		stmt = dc_sqlite3_prepare(context->sql,
+			"SELECT m.id AS id"
+			"FROM msgs m"
+			"LEFT JOIN contacts ct ON m.from_id=ct.id"
+			"WHERE m.chat_id=?"
+			"AND m.hidden=0"
+			"AND ct.blocked=0"
+			"AND txt LIKE ?"
+			"ORDER BY m.timestamp,m.id;");/* chats starts with the oldest message*/
+		sqlite3_bind_int (stmt, 1, chat_id);
+		sqlite3_bind_text(stmt, 2, strLikeInText, -1, SQLITE_STATIC);
+		sqlite3_bind_text(stmt, 3, strLikeBeg, -1, SQLITE_STATIC);
+	}
+	else {
+		int show_deaddrop = 0;//dc_sqlite3_get_config_int(context->sql, "show_deaddrop", 0);
+		stmt = dc_sqlite3_prepare(context->sql,
+			"SELECT m.id AS id FROM msgs m"
+			"LEFT JOIN contacts ct ON m.from_id=ct.id"
+			"LEFT JOIN chats c ON m.chat_id=c.id"
+			"WHERE m.chat_id>9"
+			"AND m.hidden=0"
+			"AND c.blocked!=1"
+			"AND ct.blocked=0"
+			"AND m.txt LIKE ?"
+			"ORDER BY m.id DESC LIMIT 1000"); /* chat overview starts with the newest message*/
+		sqlite3_bind_int (stmt, 1, show_deaddrop? DC_CHAT_DEADDROP_BLOCKED : 0);
+		sqlite3_bind_text(stmt, 2, strLikeInText, -1, SQLITE_STATIC);
+		sqlite3_bind_text(stmt, 3, strLikeBeg, -1, SQLITE_STATIC);
+	}
+
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+
+	success = 1;
+
+cleanup:
+	free(strLikeInText);
+	free(strLikeBeg);
+	free(real_query);
+	sqlite3_finalize(stmt);
+
+	//dc_log_info(context, 0, "Message list for search \"%s\" in chat #%i created in %.3f ms.", query, chat_id, (double)(clock()-start)*1000.0/CLOCKS_PER_SEC);
+
+	if (success) {
+		return ret;
+	}
+	else {
+		if (ret) {
+			dc_array_unref(ret);
+		}
+		return NULL;
+	}
+}
+</c function>
+<rust function signature>
+pub async fn search_msgs(&self, chat_id: Option<ChatId>, query: &str) -> Result<Vec<MsgId>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+pub async fn query_map<T, F, G, H>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+        mut g: G,
+    ) -> Result<H>
+    where
+        F: Send + FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+        G: Send + FnMut(rusqlite::MappedRows<F>) -> Result<H>,
+        H: Send + 'static,
+    {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let res = stmt.query_map(params, f)?;
+            g(res)
+        })
+        .await
+    }
+    
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+
+pub struct MsgId(u32);
+
+
+pub fn is_empty(&self) -> bool {
+        self.reactions.is_empty()
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use pgp::SignedPublicKey;
+use ratelimit::Ratelimit;
+use tokio::sync::{Mutex, Notify, OnceCell, RwLock};
+use crate::aheader::EncryptPreference;
+use crate::chat::{get_chat_cnt, ChatId, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    self, DC_BACKGROUND_FETCH_QUOTA_CHECK_RATELIMIT, DC_CHAT_ID_TRASH, DC_VERSION_STR,
+};
+use crate::contact::{Contact, ContactId};
+use crate::debug_logging::DebugLogging;
+use crate::download::DownloadState;
+use crate::events::{Event, EventEmitter, EventType, Events};
+use crate::imap::{FolderMeaning, Imap, ServerMetadata};
+use crate::key::{load_self_public_key, load_self_secret_key, DcKey as _};
+use crate::login_param::LoginParam;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::param::{Param, Params};
+use crate::peer_channels::Iroh;
+use crate::peerstate::Peerstate;
+use crate::push::PushSubscriber;
+use crate::quota::QuotaInfo;
+use crate::scheduler::{convert_folder_meaning, SchedulerState};
+use crate::sql::Sql;
+use crate::stock_str::StockStrings;
+use crate::timesmearing::SmearedTimestamp;
+use crate::tools::{self, create_id, duration_to_str, time, time_elapsed};
+use anyhow::Context as _;
+use strum::IntoEnumIterator;
+use tempfile::tempdir;
+use super::*;
+use crate::chat::{get_chat_contacts, get_chat_msgs, send_msg, set_muted, Chat, MuteDuration};
+use crate::chatlist::Chatlist;
+use crate::constants::Chattype;
+use crate::mimeparser::SystemMessage;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{get_chat_msg, TestContext};
+use crate::tools::{create_outgoing_rfc724_mid, SystemTime};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn search_msgs(&self, chat_id: Option<ChatId>, query: &str) -> Result<Vec<MsgId>> {
+        let real_query = query.trim();
+        if real_query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let str_like_in_text = format!("%{real_query}%");
+
+        let list = if let Some(chat_id) = chat_id {
+            self.sql
+                .query_map(
+                    "SELECT m.id AS id
+                 FROM msgs m
+                 LEFT JOIN contacts ct
+                        ON m.from_id=ct.id
+                 WHERE m.chat_id=?
+                   AND m.hidden=0
+                   AND ct.blocked=0
+                   AND txt LIKE ?
+                 ORDER BY m.timestamp,m.id;",
+                    (chat_id, str_like_in_text),
+                    |row| row.get::<_, MsgId>("id"),
+                    |rows| {
+                        let mut ret = Vec::new();
+                        for id in rows {
+                            ret.push(id?);
+                        }
+                        Ok(ret)
+                    },
+                )
+                .await?
+        } else {
+            // For performance reasons results are sorted only by `id`, that is in the order of
+            // message reception.
+            //
+            // Unlike chat view, sorting by `timestamp` is not necessary but slows down the query by
+            // ~25% according to benchmarks.
+            //
+            // To speed up incremental search, where queries for few characters usually return lots
+            // of unwanted results that are discarded moments later, we added `LIMIT 1000`.
+            // According to some tests, this limit speeds up eg. 2 character searches by factor 10.
+            // The limit is documented and UI may add a hint when getting 1000 results.
+            self.sql
+                .query_map(
+                    "SELECT m.id AS id
+                 FROM msgs m
+                 LEFT JOIN contacts ct
+                        ON m.from_id=ct.id
+                 LEFT JOIN chats c
+                        ON m.chat_id=c.id
+                 WHERE m.chat_id>9
+                   AND m.hidden=0
+                   AND c.blocked!=1
+                   AND ct.blocked=0
+                   AND m.txt LIKE ?
+                 ORDER BY m.id DESC LIMIT 1000",
+                    (str_like_in_text,),
+                    |row| row.get::<_, MsgId>("id"),
+                    |rows| {
+                        let mut ret = Vec::new();
+                        for id in rows {
+                            ret.push(id?);
+                        }
+                        Ok(ret)
+                    },
+                )
+                .await?
+        };
+
+        Ok(list)
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn search_msgs(&self, chat_id: Option<ChatId>, query: &str) -> Result<Vec<MsgId>> {
+    let mut success = false;
+    let mut ret = Vec::new();
+
+    let real_query = query.trim();
+    if real_query.is_empty() {
+        success = true;
+        return Ok(ret);
+    }
+
+    let str_like_in_text = format!("%{}%", real_query);
+    let str_like_beg = format!("{}%", real_query);
+
+    let sql = if let Some(chat_id) = chat_id {
+        "SELECT m.id AS id \
+         FROM msgs m \
+         LEFT JOIN contacts ct ON m.from_id=ct.id \
+         WHERE m.chat_id=? \
+         AND m.hidden=0 \
+         AND ct.blocked=0 \
+         AND txt LIKE ? \
+         ORDER BY m.timestamp,m.id"
+    } else {
+        let show_deaddrop = self.inner.sql.get_config_int("show_deaddrop").await?;
+        "SELECT m.id AS id FROM msgs m \
+         LEFT JOIN contacts ct ON m.from_id=ct.id \
+         LEFT JOIN chats c ON m.chat_id=c.id \
+         WHERE m.chat_id>9 \
+         AND m.hidden=0 \
+         AND c.blocked!=1 \
+         AND ct.blocked=0 \
+         AND m.txt LIKE ? \
+         ORDER BY m.id DESC LIMIT 1000"
+    };
+
+    let params: Vec<_> = if let Some(chat_id) = chat_id {
+        vec![chat_id.to_u32().into(), str_like_in_text.into()]
+    } else {
+        vec![
+            (if show_deaddrop { DC_CHAT_DEADDROP_BLOCKED } else { 0 }).into(),
+            str_like_in_text.into(),
+        ]
+    };
+
+    self.inner.sql.query_map(
+        sql,
+        params,
+        |row| row.get::<_, u32>(0),
+        |mapped_rows| {
+            for row in mapped_rows {
+                ret.push(MsgId::new(row?));
+            }
+            Ok(())
+        },
+    )
+    .await?;
+
+    success = true;
+
+    if success {
+        Ok(ret)
+    } else {
+        Ok(Vec::new())
+    }
+}
+```
+
+This Rust translation aims to maintain the functionality of the original C function while adapting it to Rust's idioms and the provided function signature. It uses the async/await syntax and the `Result` type for error handling. The function now returns a `Vec<MsgId>` instead of a `dc_array_t*`, and it uses the `Option<ChatId>` for the `chat_id` parameter.
+
+The function uses the provided `query_map` method from the `Sql` struct to execute the SQL query and map the results. It also uses the `get_config_int` method to retrieve the `show_deaddrop` configuration.
+
+Note that some parts of the original C function, such as memory management and specific error handling, are not directly applicable in Rust due to its different memory model and error handling approach. The Rust version relies on Rust's built-in memory management and the `Result` type for error handling.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn search_msgs(&self, chat_id: Option<ChatId>, query: &str) -> Result<Vec<MsgId>> {
+    let mut success = false;
+    let mut ret = Vec::new();
+
+    let real_query = query.trim();
+    if real_query.is_empty() {
+        success = true;
+        return Ok(ret);
+    }
+
+    let str_like_in_text = format!("%{}%", real_query);
+    let str_like_beg = format!("{}%", real_query);
+
+    let sql = if let Some(chat_id) = chat_id {
+        "SELECT m.id AS id \
+         FROM msgs m \
+         LEFT JOIN contacts ct ON m.from_id=ct.id \
+         WHERE m.chat_id=? \
+         AND m.hidden=0 \
+         AND ct.blocked=0 \
+         AND txt LIKE ? \
+         ORDER BY m.timestamp,m.id"
+    } else {
+        let show_deaddrop = self.inner.sql.get_config_int("show_deaddrop").await?;
+        "SELECT m.id AS id FROM msgs m \
+         LEFT JOIN contacts ct ON m.from_id=ct.id \
+         LEFT JOIN chats c ON m.chat_id=c.id \
+         WHERE m.chat_id>9 \
+         AND m.hidden=0 \
+         AND c.blocked!=1 \
+         AND ct.blocked=0 \
+         AND m.txt LIKE ? \
+         ORDER BY m.id DESC LIMIT 1000"
+    };
+
+    let params: Vec<_> = if let Some(chat_id) = chat_id {
+        vec![chat_id.to_u32().into(), str_like_in_text.into()]
+    } else {
+        vec![
+            (if show_deaddrop { DC_CHAT_DEADDROP_BLOCKED } else { 0 }).into(),
+            str_like_in_text.into(),
+        ]
+    };
+
+    self.inner.sql.query_map(
+        sql,
+        params,
+        |row| row.get::<_, u32>(0),
+        |mapped_rows| {
+            for row in mapped_rows {
+                ret.push(MsgId::new(row?));
+            }
+            Ok(())
+        },
+    )
+    .await?;
+
+    success = true;
+
+    if success {
+        Ok(ret)
+    } else {
+        Ok(Vec::new())
+    }
+}
+```
+
+This Rust translation aims to maintain the functionality of the original C function while adapting it to Rust's idioms and the provided function signature. It uses the async/await syntax and the `Result` type for error handling. The function now returns a `Vec<MsgId>` instead of a `dc_array_t*`, and it uses the `Option<ChatId>` for the `chat_id` parameter.
+
+The function uses the provided `query_map` method from the `Sql` struct to execute the SQL query and map the results. It also uses the `get_config_int` method to retrieve the `show_deaddrop` configuration.
+
+Note that some parts of the original C function, such as memory management and specific error handling, are not directly applicable in Rust due to its different memory model and error handling approach. The Rust version relies on Rust's built-in memory management and the `Result` type for error handling.

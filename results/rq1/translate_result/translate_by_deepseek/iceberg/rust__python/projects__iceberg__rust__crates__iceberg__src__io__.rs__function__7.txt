@@ -1,0 +1,216 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def delete(self, location: Union[str, InputFile, OutputFile]) -> None:
+        """Delete the file at the given location.
+
+        Args:
+            location (Union[str, InputFile, OutputFile]): The URI to the file--if an InputFile instance or an OutputFile instance is provided,
+                the location attribute for that instance is used as the location to delete.
+
+        Raises:
+            FileNotFoundError: When the file at the provided location does not exist.
+            PermissionError: If the file at the provided location cannot be accessed due to a permission error such as
+                an AWS error code 15.
+        """
+        str_location = location.location if isinstance(location, (InputFile, OutputFile)) else location
+        scheme, netloc, path = self.parse_location(str_location)
+        fs = self.fs_by_scheme(scheme, netloc)
+
+        try:
+            fs.delete_file(path)
+        except FileNotFoundError:
+            raise
+        except PermissionError:
+            raise
+        except OSError as e:
+            if e.errno == 2 or "Path does not exist" in str(e):
+                raise FileNotFoundError(f"Cannot delete file, does not exist: {location}") from e
+            elif e.errno == 13 or "AWS Error [code 15]" in str(e):
+                raise PermissionError(f"Cannot delete file, access denied: {location}") from e
+            raise  # pragma: no cover - If some other kind of OSError, raise the raw error
+</python function>
+<rust function signature>
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn create_operator<'a>(&self, path: &'a impl AsRef<str>) -> Result<(Operator, &'a str)> {
+        let path = path.as_ref();
+        match self {
+            Storage::LocalFs { op } => {
+                if let Some(stripped) = path.strip_prefix("file:/") {
+                    Ok((op.clone(), stripped))
+                } else {
+                    Ok((op.clone(), &path[1..]))
+                }
+            }
+            Storage::S3 { scheme_str, props } => {
+                let mut props = props.clone();
+                let url = Url::parse(path)?;
+                let bucket = url.host_str().ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::DataInvalid,
+                        format!("Invalid s3 url: {}, missing bucket", path),
+                    )
+                })?;
+
+                props.insert("bucket".to_string(), bucket.to_string());
+
+                let prefix = format!("{}://{}/", scheme_str, bucket);
+                if path.starts_with(&prefix) {
+                    Ok((Operator::via_map(Scheme::S3, props)?, &path[prefix.len()..]))
+                } else {
+                    Err(Error::new(
+                        ErrorKind::DataInvalid,
+                        format!("Invalid s3 url: {}, should start with {}", path, prefix),
+                    ))
+                }
+            }
+        }
+    }
+
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        Ok(op.delete(relative_path).await?)
+    }
+
+pub struct FileIO {
+    inner: Arc<Storage>,
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        Ok(op.delete(relative_path).await?)
+    }
+</function>
+<translated function>
+ ```rust
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+    let (op, relative_path) = self.create_operator(&path)?;
+    Ok(op.delete(relative_path).await?)
+}
+
+fn create_operator<'a>(&self, path: &'a impl AsRef<str>) -> Result<(Operator, &'a str)> {
+    let path = path.as_ref();
+    match self {
+        Storage::LocalFs { op } => {
+            if let Some(stripped) = path.strip_prefix("file:/") {
+                Ok((op.clone(), stripped))
+            } else {
+                Ok((op.clone(), &path[1..]))
+            }
+        }
+        Storage::S3 { scheme_str, props } => {
+            let mut props = props.clone();
+            let url = Url::parse(path)?;
+            let bucket = url.host_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::DataInvalid,
+                    format!("Invalid s3 url: {}, missing bucket", path),
+                )
+            })?;
+
+            props.insert("bucket".to_string(), bucket.to_string());
+
+            let prefix = format!("{}://{}/", scheme_str, bucket);
+            if path.starts_with(&prefix) {
+                Ok((Operator::via_map(Scheme::S3, props)?, &path[prefix.len()..]))
+            } else {
+                Err(Error::new(
+                    ErrorKind::DataInvalid,
+                    format!("Invalid s3 url: {}, should start with {}", path, prefix),
+                ))
+            }
+        }
+    }
+}
+```</translated function> ```rust
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+pub async fn delete(&self, path: impl AsRef<str>) -> Result<()> {
+    let (op, relative_path) = self.create_operator(&path)?;
+    Ok(op.delete(relative_path).await?)
+}
+
+fn create_operator<'a>(&self, path: &'a impl AsRef<str>) -> Result<(Operator, &'a str)> {
+    let path = path.as_ref();
+    match self {
+        Storage::LocalFs { op } => {
+            if let Some(stripped) = path.strip_prefix("file:/") {
+                Ok((op.clone(), stripped))
+            } else {
+                Ok((op.clone(), &path[1..]))
+            }
+        }
+        Storage::S3 { scheme_str, props } => {
+            let mut props = props.clone();
+            let url = Url::parse(path)?;
+            let bucket = url.host_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::DataInvalid,
+                    format!("Invalid s3 url: {}, missing bucket", path),
+                )
+            })?;
+
+            props.insert("bucket".to_string(), bucket.to_string());
+
+            let prefix = format!("{}://{}/", scheme_str, bucket);
+            if path.starts_with(&prefix) {
+                Ok((Operator::via_map(Scheme::S3, props)?, &path[prefix.len()..]))
+            } else {
+                Err(Error::new(
+                    ErrorKind::DataInvalid,
+                    format!("Invalid s3 url: {}, should start with {}", path, prefix),
+                ))
+            }
+        }
+    }
+}
+```

@@ -1,0 +1,262 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+*      unless it was edited manually by dc_create_contact() before.
+ * @return The number of modified or added contacts.
+ */
+int dc_add_address_book(dc_context_t* context, const char* adr_book)
+{
+	carray* lines = NULL;
+	size_t  i = 0;
+	size_t  iCnt = 0;
+	int     sth_modified = 0;
+	int     modify_cnt = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || adr_book==NULL) {
+		goto cleanup;
+	}
+
+	if ((lines=dc_split_into_lines(adr_book))==NULL) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_begin_transaction(context->sql);
+
+		iCnt = carray_count(lines);
+		for (i = 0; i+1 < iCnt; i += 2) {
+			char* name = (char*)carray_get(lines, i);
+			char* addr = (char*)carray_get(lines, i+1);
+			dc_normalize_name(name);
+            dc_normalize_addr(addr);
+			dc_add_or_lookup_contact(context, name, addr, DC_ORIGIN_ADRESS_BOOK, &sth_modified);
+			if (sth_modified) {
+				modify_cnt++;
+			}
+		}
+
+	dc_sqlite3_commit(context->sql);
+
+	if (modify_cnt) {
+		context->cb(context, DC_EVENT_CONTACTS_CHANGED, 0, 0);
+	}
+
+cleanup:
+	dc_free_splitted_lines(lines);
+
+	return modify_cnt;
+}
+</c function>
+<rust function signature>
+pub async fn add_address_book(context: &Context, addr_book: &str) -> Result<usize> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+fn split_address_book(book: &str) -> Vec<(&str, &str)> {
+    book.lines()
+        .collect::<Vec<&str>>()
+        .chunks(2)
+        .filter_map(|chunk| {
+            let name = chunk.first()?;
+            let addr = chunk.get(1)?;
+            Some((*name, *addr))
+        })
+        .collect()
+}
+impl ContactAddress {
+    /// Constructs a new contact address from string,
+    /// normalizing and validating it.
+    pub fn new(s: &str) -> Result<Self> {
+        let addr = addr_normalize(s);
+        if !may_be_valid_addr(&addr) {
+            bail!("invalid address {:?}", s);
+        }
+        Ok(Self(addr.to_string()))
+    }
+}
+macro_rules! warn {
+    ($ctx:expr, $msg:expr) => {
+        warn!($ctx, $msg,)
+    };
+    ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
+        let formatted = format!($msg, $($args),*);
+        let full = format!("{file}:{line}: {msg}",
+                           file = file!(),
+                           line = line!(),
+                           msg = &formatted);
+        $ctx.emit_event($crate::EventType::Warning(full));
+    }};
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp::{min, Reverse};
+use std::collections::BinaryHeap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use base64::Engine as _;
+use deltachat_contact_tools::may_be_valid_addr;
+use deltachat_contact_tools::{
+    self as contact_tools, addr_cmp, addr_normalize, sanitize_name_and_addr, strip_rtlo_characters,
+    ContactAddress, VcardContact,
+};
+use deltachat_derive::{FromSql, ToSql};
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use tokio::task;
+use tokio::time::{timeout, Duration};
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::blob::BlobObject;
+use crate::chat::{ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{Blocked, Chattype, DC_GCL_ADD_SELF, DC_GCL_VERIFIED_ONLY};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{load_self_public_key, DcKey, SignedPublicKey};
+use crate::log::LogExt;
+use crate::login_param::LoginParam;
+use crate::message::MessageState;
+use crate::mimeparser::AvatarAction;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::sql::{self, params_iter};
+use crate::sync::{self, Sync::*};
+use crate::tools::{
+    duration_to_str, get_abs_path, improve_single_line_input, smeared_time, time, SystemTime,
+};
+use crate::{chat, chatlist_events, stock_str};
+use deltachat_contact_tools::{may_be_valid_addr, normalize_name};
+use super::*;
+use crate::chat::{get_chat_contacts, send_text_msg, Chat};
+use crate::chatlist::Chatlist;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{self, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn add_address_book(context: &Context, addr_book: &str) -> Result<usize> {
+        let mut modify_cnt = 0;
+
+        for (name, addr) in split_address_book(addr_book) {
+            let (name, addr) = sanitize_name_and_addr(name, addr);
+            match ContactAddress::new(&addr) {
+                Ok(addr) => {
+                    match Contact::add_or_lookup(context, &name, &addr, Origin::AddressBook).await {
+                        Ok((_, modified)) => {
+                            if modified != Modifier::None {
+                                modify_cnt += 1
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                context,
+                                "Failed to add address {} from address book: {}", addr, err
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(context, "{:#}.", err);
+                }
+            }
+        }
+        if modify_cnt > 0 {
+            context.emit_event(EventType::ContactsChanged(None));
+        }
+
+        Ok(modify_cnt)
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+```rust
+pub async fn add_address_book(context: &Context, addr_book: &str) -> Result<usize> {
+    let lines = split_address_book(addr_book).await?;
+    let mut modify_cnt = 0;
+
+    if context.is_none() || context.magic()!= DC_CONTEXT_MAGIC || addr_book.is_none() {
+        return Err(anyhow!("Invalid context or address book"));
+    }
+
+    let mut tx = context.sql().begin_transaction().await?;
+    for (name, addr) in lines.chunks(2).map(|chunk| (chunk.first().ok_or(anyhow!("Invalid address book"))?, chunk.get(1).ok_or(anyhow!("Invalid address book"))?)) {
+        let name = normalize_name(name);
+        let addr = addr_normalize(addr);
+        let contact = ContactAddress::new(addr).await?;
+        let sth_modified = context.add_or_lookup_contact(name, addr, DC_ORIGIN_ADRESS_BOOK).await?;
+        if sth_modified {
+            modify_cnt += 1;
+        }
+    }
+
+    tx.commit().await?;
+
+    if modify_cnt > 0 {
+        context.emit_event(EventType::ContactsChanged);
+    }
+
+    Ok(modify_cnt)
+}
+
+async fn split_address_book(book: &str) -> Result<Vec<(&str, &str)>> {
+    book.lines()
+       .collect::<Vec<&str>>()
+       .chunks(2)
+       .filter_map(|chunk| {
+            let name = chunk.first()?;
+            let addr = chunk.get(1)?;
+            Some((*name, *addr))
+        })
+       .collect()
+}
+```
+Note that I've assumed that the `Context` type has methods `is_none()`, `magic()`, `sql()`, `add_or_lookup_contact()`, and `emit_event()` that are not shown in the provided code. I've also assumed that the `ContactAddress` type has a method `new()` that returns a `Result<Self>` and that the `addr_normalize()` function returns a `Result<String>`. If these assumptions are incorrect, the code may need to be adjusted accordingly.</translated function>Here is the translated Rust function:
+```rust
+pub async fn add_address_book(context: &Context, addr_book: &str) -> Result<usize> {
+    let lines = split_address_book(addr_book).await?;
+    let mut modify_cnt = 0;
+
+    if context.is_none() || context.magic()!= DC_CONTEXT_MAGIC || addr_book.is_none() {
+        return Err(anyhow!("Invalid context or address book"));
+    }
+
+    let mut tx = context.sql().begin_transaction().await?;
+    for (name, addr) in lines.chunks(2).map(|chunk| (chunk.first().ok_or(anyhow!("Invalid address book"))?, chunk.get(1).ok_or(anyhow!("Invalid address book"))?)) {
+        let name = normalize_name(name);
+        let addr = addr_normalize(addr);
+        let contact = ContactAddress::new(addr).await?;
+        let sth_modified = context.add_or_lookup_contact(name, addr, DC_ORIGIN_ADRESS_BOOK).await?;
+        if sth_modified {
+            modify_cnt += 1;
+        }
+    }
+
+    tx.commit().await?;
+
+    if modify_cnt > 0 {
+        context.emit_event(EventType::ContactsChanged);
+    }
+
+    Ok(modify_cnt)
+}
+
+async fn split_address_book(book: &str) -> Result<Vec<(&str, &str)>> {
+    book.lines()
+       .collect::<Vec<&str>>()
+       .chunks(2)
+       .filter_map(|chunk| {
+            let name = chunk.first()?;
+            let addr = chunk.get(1)?;
+            Some((*name, *addr))
+        })
+       .collect()
+}
+```
+Note that I've assumed that the `Context` type has methods `is_none()`, `magic()`, `sql()`, `add_or_lookup_contact()`, and `emit_event()` that are not shown in the provided code. I've also assumed that the `ContactAddress` type has a method `new()` that returns a `Result<Self>` and that the `addr_normalize()` function returns a `Result<String>`. If these assumptions are incorrect, the code may need to be adjusted accordingly.

@@ -1,0 +1,233 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_KEY(int sha,byte[] G1,byte[] G2,int pin,byte[] R,byte[] X,byte[] H,byte[] wCID,byte[] CK)
+	{
+		byte[] t;
+
+		FP24 g1=FP24.fromBytes(G1);
+		FP24 g2=FP24.fromBytes(G2);
+		BIG z=BIG.fromBytes(R);
+		BIG x=BIG.fromBytes(X);
+		BIG h=BIG.fromBytes(H);
+
+		ECP W=ECP.fromBytes(wCID);
+		if (W.is_infinity()) return INVALID_POINT; 
+
+		W=PAIR192.G1mul(W,x);
+
+//		FP2 f=new FP2(new BIG(ROM.Fra),new BIG(ROM.Frb));
+		BIG r=new BIG(ROM.CURVE_Order);
+//		BIG q=new BIG(ROM.Modulus);
+
+		z.add(h);	//new
+		z.mod(r);
+
+		g2.pinpow(pin,PBLEN);
+		g1.mul(g2);
+
+		FP8 c=g1.compow(z,r);
+
+		t=mpin_hash(sha,c,W);
+
+		for (int i=0;i<ECP.AESKEY;i++) CK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP24::from_bytes(&g1);
+    let mut g2 = FP24::from_bytes(&g2);
+    let mut z = Big::from_bytes(&r);
+    let mut x = Big::from_bytes(&x);
+    let h = Big::from_bytes(&h);
+
+    let mut W = ECP::from_bytes(&wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    W = pair192::g1mul(&mut W, &mut x);
+
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+
+    z.add(&h); //new
+    z.rmod(&mut r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&mut g2);
+
+    let mut c = g1.compow(&z, &mut r);
+
+    hash(sha, &mut c, &mut W, ck);
+
+    return 0;
+}
+</function>
+<translated function>
+Here is your translated function:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+
+    use super::rom;
+    use super::pair192;
+    use super::big::BIG;
+    use std::convert::TryFrom;
+
+    let mut t: Vec<u8>;
+
+    let mut g1 = FP24::frombytes(&g1);
+    let mut g2 = FP24::frombytes(&g2);
+    let mut z = BIG::frombytes(&r);
+    let x = BIG::frombytes(&x);
+    let h = BIG::frombytes(&h);
+
+    let mut w = ECP::frombytes(&wcid);
+    if w.is_infinity() {
+        return rom::INVALID_POINT;
+    }
+
+    w = pair192::g1mul(&w, &x);
+
+    let r = BIG::new_ints(&rom::CURVE_ORDER);
+
+    z.plus(&h);
+    z.rmod(&r);
+
+    g2.pinpow(pin, pair192::PBLEN);
+    g1.mul(&g2);
+
+    let c = g1.compow(&z, &r);
+
+    t = hash256::create_hash(sha, c.bytes(), w.bytes());
+
+    for (i, item) in t.iter().enumerate().take(ECP::AESKEY) {
+        ck[i] = *item;
+    }
+
+    return 0;
+}
+```
+Please note that in this translation, the function `mpin_hash(sha,c,W)` in Java is replaced with `hash256::create_hash(sha, c.bytes(), w.bytes())` in Rust. You might want to adjust this part based on the specific hash function you want to use in the Rust implementation. The function signature `hash256::create_hash()` is assumed from a generic hash function. You may need to adjust it according to your specific hash function. The original Java function was not given the hash function to use, it was simply referred to as `mpin_hash(sha,c,W)`. 
+
+This translation can be built upon as per your need, this is a basic translation of the provided java code into rust.</translated function>Here is your translated function:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+
+    use super::rom;
+    use super::pair192;
+    use super::big::BIG;
+    use std::convert::TryFrom;
+
+    let mut t: Vec<u8>;
+
+    let mut g1 = FP24::frombytes(&g1);
+    let mut g2 = FP24::frombytes(&g2);
+    let mut z = BIG::frombytes(&r);
+    let x = BIG::frombytes(&x);
+    let h = BIG::frombytes(&h);
+
+    let mut w = ECP::frombytes(&wcid);
+    if w.is_infinity() {
+        return rom::INVALID_POINT;
+    }
+
+    w = pair192::g1mul(&w, &x);
+
+    let r = BIG::new_ints(&rom::CURVE_ORDER);
+
+    z.plus(&h);
+    z.rmod(&r);
+
+    g2.pinpow(pin, pair192::PBLEN);
+    g1.mul(&g2);
+
+    let c = g1.compow(&z, &r);
+
+    t = hash256::create_hash(sha, c.bytes(), w.bytes());
+
+    for (i, item) in t.iter().enumerate().take(ECP::AESKEY) {
+        ck[i] = *item;
+    }
+
+    return 0;
+}
+```
+Please note that in this translation, the function `mpin_hash(sha,c,W)` in Java is replaced with `hash256::create_hash(sha, c.bytes(), w.bytes())` in Rust. You might want to adjust this part based on the specific hash function you want to use in the Rust implementation. The function signature `hash256::create_hash()` is assumed from a generic hash function. You may need to adjust it according to your specific hash function. The original Java function was not given the hash function to use, it was simply referred to as `mpin_hash(sha,c,W)`. 
+
+This translation can be built upon as per your need, this is a basic translation of the provided java code into rust.

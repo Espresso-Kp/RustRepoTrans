@@ -1,0 +1,172 @@
+pub(crate) fn alphabet_languages(
+    characters: &[char],
+    ignore_non_latin: bool,
+) -> Vec<&'static Language> {
+    let mut languages: Vec<(&Language, f32)> = Vec::with_capacity(*LANGUAGE_SUPPORTED_COUNT);
+    let source_characters_set: HashSet<char> = characters.iter().copied().collect();
+    let source_has_accents = source_characters_set
+        .iter()
+        .any(|&char| is_accentuated(char));
+
+    for (language, language_characters, target_have_accents, target_pure_latin) in LANGUAGES.iter()
+    {
+        if (ignore_non_latin && !target_pure_latin) || (!target_have_accents && source_has_accents)
+        {
+            continue;
+        }
+
+        let language_characters_set: HashSet<char> = language_characters.chars().collect();
+        let intersection: HashSet<char> = language_characters_set
+            .intersection(&source_characters_set)
+            .copied()
+            .collect();
+
+        let ratio: f32 = intersection.len() as f32 / language_characters_set.len() as f32;
+        if ratio >= 0.2 {
+            languages.push((language, ratio));
+        }
+    }
+    // reverse sort
+    languages.sort_unstable_by(|&a, &b| b.1.partial_cmp(&a.1).unwrap());
+    languages.iter().map(|&lang| lang.0).collect()
+}
+
+pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+pub(crate) fn filter_alt_coherence_matches(results: &CoherenceMatches) -> CoherenceMatches {
+    let mut index: HashMap<&Language, f32> = HashMap::with_capacity(results.len());
+    for result in results {
+        let score = index.entry(result.language).or_default();
+        *score = result.score.max(*score);
+    }
+    index
+        .into_iter()
+        .map(|(language, score)| CoherenceMatch { language, score })
+        .collect()
+}
+
+pub(crate) fn characters_popularity_compare(
+    language: &Language,
+    ordered_characters: &str,
+) -> Result<f32, String> {
+    let language_data = get_language_data(language)?;
+    Ok(jaro(ordered_characters, language_data.0) as f32)
+}
+
+fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let mess_difference = (self.mean_mess_ratio - other.mean_mess_ratio).abs();
+        let coherence_a = self.coherence();
+        let coherence_b = other.coherence();
+        let coherence_difference = (coherence_a - coherence_b).abs();
+
+        // Below 1% difference --> Use Coherence
+        if mess_difference < 0.01 {
+            if coherence_difference > 0.02 {
+                return coherence_b.partial_cmp(&coherence_a);
+            }
+            let multibyte_usage_a = self.multi_byte_usage();
+            let multibyte_usage_b = other.multi_byte_usage();
+            let multibyte_usage_delta = (multibyte_usage_a - multibyte_usage_b).abs();
+            if multibyte_usage_delta > f32::EPSILON {
+                return multibyte_usage_b.partial_cmp(&multibyte_usage_a);
+            }
+        }
+        self.mean_mess_ratio.partial_cmp(&other.mean_mess_ratio)
+    }
+
+pub fn iter(&self) -> CharsetMatchesIter {
+        CharsetMatchesIter {
+            items: self.items.iter(),
+        }
+    }
+
+pub(crate) fn alpha_unicode_split(decoded_sequence: &str) -> Vec<String> {
+    let mut layers: HashMap<&str, String> = HashMap::new();
+
+    for ch in decoded_sequence.chars().filter(|c| c.is_alphabetic()) {
+        if let Some(character_range) = unicode_range(ch) {
+            let layer_key: &str = layers
+                .keys()
+                .find(|key| !is_suspiciously_successive_range(Some(key), Some(character_range)))
+                .copied()
+                .unwrap_or(character_range);
+            let layer = layers.entry(layer_key).or_default();
+            layer.extend(ch.to_lowercase());
+        }
+    }
+    layers.into_values().collect()
+}
+
+pub struct CoherenceMatch {
+    pub language: &'static Language,
+    pub score: f32,
+}
+
+pub enum Language {
+    English,
+    German,
+    French,
+    Dutch,
+    Italian,
+    Polish,
+    Spanish,
+    Russian,
+    Japanese,
+    Portuguese,
+    Swedish,
+    Chinese,
+    Ukrainian,
+    Norwegian,
+    Finnish,
+    Vietnamese,
+    Czech,
+    Hungarian,
+    Korean,
+    Indonesian,
+    Turkish,
+    Romanian,
+    Farsi,
+    Arabic,
+    Danish,
+    Serbian,
+    Lithuanian,
+    Slovene,
+    Slovak,
+    Hebrew,
+    Bulgarian,
+    Croatian,
+    Hindi,
+    Estonian,
+    Thai,
+    Greek,
+    Tamil,
+    Kazakh,
+    Unknown,
+}
+
+
+pub fn bom(&self) -> bool {
+        self.has_sig_or_bom
+    }
+pub struct CoherenceMatch {
+    pub language: &'static Language,
+    pub score: f32,
+}
+------
+
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;

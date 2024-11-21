@@ -1,0 +1,591 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public ECP2 mul(BIG e)
+	{
+/* fixed size windows */
+		int i,b,nb,m,s,ns;
+		BIG mt=new BIG();
+		BIG t=new BIG();
+		ECP2 P=new ECP2();
+		ECP2 Q=new ECP2();
+		ECP2 C=new ECP2();
+		ECP2[] W=new ECP2[8];
+		byte[] w=new byte[1+(BIG.NLEN*BIG.BASEBITS+3)/4];
+
+		if (is_infinity()) return new ECP2();
+
+		//affine();
+
+/* precompute table */
+		Q.copy(this);
+		Q.dbl();
+		W[0]=new ECP2();
+		W[0].copy(this);
+
+		for (i=1;i<8;i++)
+		{
+			W[i]=new ECP2();
+			W[i].copy(W[i-1]);
+			W[i].add(Q);
+		}
+
+/* make exponent odd - add 2P if even, P if odd */
+		t.copy(e);
+		s=t.parity();
+		t.inc(1); t.norm(); ns=t.parity(); mt.copy(t); mt.inc(1); mt.norm();
+		t.cmove(mt,s);
+		Q.cmove(this,ns);
+		C.copy(Q);
+
+		nb=1+(t.nbits()+3)/4;
+/* convert exponent to signed 4-bit window */
+		for (i=0;i<nb;i++)
+		{
+			w[i]=(byte)(t.lastbits(5)-16);
+			t.dec(w[i]); t.norm();
+			t.fshr(4);	
+		}
+		w[nb]=(byte)t.lastbits(5);
+	
+		P.copy(W[(w[nb]-1)/2]);  
+		for (i=nb-1;i>=0;i--)
+		{
+			Q.select(W,w[i]);
+			P.dbl();
+			P.dbl();
+			P.dbl();
+			P.dbl();
+			P.add(Q);
+		}
+		P.sub(C);
+		P.affine();
+		return P;
+	}
+</java function>
+<rust function signature>
+pub fn mul(&self, e: &Big) -> ECP2 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn new() -> ECP2 {
+        ECP2 {
+            x: FP2::new(),
+            y: FP2::new_int(1),
+            z: FP2::new(),
+        }
+    }
+
+pub fn fshr(&mut self, k: usize) -> isize {
+        let n = k;
+        let w = self.w[0] & ((1 << n) - 1); // shifted out part
+        for i in 0..NLEN - 1 {
+            self.w[i] = (self.w[i] >> k) | ((self.w[i + 1] << (BASEBITS - n)) & BMASK);
+        }
+        self.w[NLEN - 1] = self.w[NLEN - 1] >> k;
+        return w as isize;
+    }
+
+pub fn is_infinity(&self) -> bool {
+        self.x.is_zilch() && self.z.is_zilch()
+    }
+
+pub fn inc(&mut self, x: isize) {
+        self.norm();
+        self.w[0] += x as Chunk;
+    }
+
+pub fn affine(&mut self) {
+        if self.is_infinity() {
+            return;
+        }
+        let one = FP2::new_int(1);
+        if self.z.equals(&one) {
+            return;
+        }
+        self.z.inverse();
+
+        self.x.mul(&self.z);
+        self.x.reduce();
+        self.y.mul(&self.z);
+        self.y.reduce();
+        self.z = one.clone();
+    }
+
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+
+pub fn cmove(&mut self, Q: &ECP2, d: isize) {
+        self.x.cmove(&Q.x, d);
+        self.y.cmove(&Q.y, d);
+        self.z.cmove(&Q.z, d);
+    }
+
+pub fn nbits(&self) -> usize {
+        let mut k = NLEN - 1;
+        let mut s = self.clone();
+        s.norm();
+        while (k as isize) >= 0 && s.w[k] == 0 {
+            k = k.wrapping_sub(1)
+        }
+        if (k as isize) < 0 {
+            return 0;
+        }
+        let mut bts = BASEBITS * k;
+        let mut c = s.w[k];
+        while c != 0 {
+            c /= 2;
+            bts += 1;
+        }
+        bts
+    }
+
+pub fn selector(&mut self, W: &[ECP2], b: i32) {
+        let m = b >> 31;
+        let mut babs = (b ^ m) - m;
+
+        babs = (babs - 1) / 2;
+
+        self.cmove(&W[0], ECP2::teq(babs, 0)); // conditional move
+        self.cmove(&W[1], ECP2::teq(babs, 1));
+        self.cmove(&W[2], ECP2::teq(babs, 2));
+        self.cmove(&W[3], ECP2::teq(babs, 3));
+        self.cmove(&W[4], ECP2::teq(babs, 4));
+        self.cmove(&W[5], ECP2::teq(babs, 5));
+        self.cmove(&W[6], ECP2::teq(babs, 6));
+        self.cmove(&W[7], ECP2::teq(babs, 7));
+
+        let mut MP = self.clone();
+        MP.neg();
+        self.cmove(&MP, (m & 1) as isize);
+    }
+
+pub fn lastbits(&mut self, n: usize) -> isize {
+        let msk = ((1 << n) - 1) as Chunk;
+        self.norm();
+        (self.w[0] & msk) as isize
+    }
+
+pub fn dec(&mut self, x: isize) {
+        self.norm();
+        self.w[0] -= x as Chunk;
+    }
+
+pub fn sub(&mut self, Q: &ECP2) -> isize {
+        let mut NQ = Q.clone();
+        NQ.neg();
+        let d = self.add(&NQ);
+        return d;
+    }
+
+pub fn parity(&self) -> isize {
+        (self.w[0] % 2) as isize
+    }
+
+pub fn dbl(&mut self) -> isize {
+        let mut iy = self.y.clone();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            iy.mul_ip();
+            iy.norm();
+        }
+
+        let mut t0 = self.y.clone(); //***** Change
+        t0.sqr();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+        }
+        let mut t1 = iy.clone();
+        t1.mul(&self.z);
+        let mut t2 = self.z.clone();
+        t2.sqr();
+
+        self.z = t0.clone();
+        self.z.add(&t0);
+        self.z.norm();
+        self.z.dbl();
+        self.z.dbl();
+        self.z.norm();
+
+        t2.imul(3 * rom::CURVE_B_I);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut x3 = t2.clone();
+        x3.mul(&self.z);
+
+        let mut y3 = t0.clone();
+
+        y3.add(&t2);
+        y3.norm();
+        self.z.mul(&t1);
+        t1 = t2.clone();
+        t1.add(&t2);
+        t2.add(&t1);
+        t2.norm();
+        t0.sub(&t2);
+        t0.norm(); //y^2-9bz^2
+        y3.mul(&t0);
+        y3.add(&x3); //(y^2+3z*2)(y^2-9z^2)+3b.z^2.8y^2
+        t1 = self.x.clone();
+        t1.mul(&iy); //
+        self.x = t0.clone();
+        self.x.norm();
+        self.x.mul(&t1);
+        self.x.dbl(); //(y^2-9bz^2)xy2
+
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+
+        return 1;
+    }
+
+pub fn norm(&mut self) {
+        self.x.norm();
+    }
+
+pub struct ECP2 {
+    x: FP2,
+    y: FP2,
+    z: FP2,
+}
+
+pub struct Big {
+    pub w: [Chunk; NLEN],
+}
+
+pub const NLEN: usize = 1 + (8 * MODBYTES - 1) / BASEBITS;
+
+pub const BASEBITS: usize = 56;
+
+pub fn cmove(&mut self, Q: &ECP4, d: isize) {
+        self.x.cmove(&Q.x, d);
+        self.y.cmove(&Q.y, d);
+        self.z.cmove(&Q.z, d);
+    }
+pub struct ECP2 {
+    x: FP2,
+    y: FP2,
+    z: FP2,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::fp2::FP2;
+use super::rom;
+use crate::types::{CurvePairingType, SexticTwist, SignOfX};
+use std::fmt;
+use std::str::SplitWhitespace;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn mul(&self, e: &Big) -> ECP2 {
+        if self.is_infinity() {
+            return ECP2::new();
+        }
+
+        let mut W: [ECP2; 8] = [
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+            ECP2::new(),
+        ];
+
+        const CT: usize = 1 + (big::NLEN * (big::BASEBITS as usize) + 3) / 4;
+        let mut w: [i8; CT] = [0; CT];
+
+        /* precompute table */
+        let mut Q = self.clone();
+        Q.dbl();
+
+        W[0] = self.clone();
+
+        for i in 1..8 {
+            W[i] = W[i - 1].clone();
+            W[i].add(&Q);
+        }
+
+        /* make exponent odd - add 2P if even, P if odd */
+        let mut t = e.clone();
+        let s = t.parity();
+        t.inc(1);
+        t.norm();
+        let ns = t.parity();
+        let mut mt = t.clone();
+        mt.inc(1);
+        mt.norm();
+        t.cmove(&mt, s);
+        Q.cmove(&self, ns);
+        let C = Q.clone();
+
+        let nb = 1 + (t.nbits() + 3) / 4;
+
+        /* convert exponent to signed 4-bit window */
+        for i in 0..nb {
+            w[i] = (t.lastbits(5) - 16) as i8;
+            t.dec(w[i] as isize);
+            t.norm();
+            t.fshr(4);
+        }
+        w[nb] = (t.lastbits(5)) as i8;
+
+        let mut P = W[((w[nb] as usize) - 1) / 2].clone();
+        for i in (0..nb).rev() {
+            Q.selector(&W, w[i] as i32);
+            P.dbl();
+            P.dbl();
+            P.dbl();
+            P.dbl();
+            P.add(&Q);
+        }
+        P.sub(&C);
+        P.affine();
+        P
+    }
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+pub fn mul(&self, e: &Big) -> ECP2 {
+    let mut mt = ECP2::new();
+    let mut t = ECP2::new();
+    let mut P = ECP2::new();
+    let mut Q = ECP2::new();
+    let mut C = ECP2::new();
+    let mut W = [ECP2::new(); 8];
+    let mut w = [0u8; 1 + (Big::NLEN * Big::BASEBITS + 3) / 4];
+
+    if self.is_infinity() {
+        return ECP2::new();
+    }
+
+    // affine();
+
+/* precompute table */
+    Q.copy(self);
+    Q.dbl();
+    W[0] = ECP2::new();
+    W[0].copy(self);
+
+    for i in 1..8 {
+        W[i] = ECP2new();
+        W[i].copy(W[i-1]);
+        W[i].add(&Q);
+    }
+
+/* make exponent odd - add 2P if even, P if odd */
+    t.copy(e);
+    s = t.parity();
+    t.inc(1);
+    t.norm();
+    ns = t.parity();
+    mt.copy(t);
+    mt.inc(1);
+    mt.norm();
+    t.cmove(mt, s);
+    Q.cmove(self, ns);
+    C.copy(Q);
+
+    nb = 1 + (t.nbits() + 3) /4;
+/* convert exponent to signed 4-bit window */
+    for i in 0..nb {
+        w[i] = (t.lastbits(5) -16) as u8;
+        t.dec(w[i]);
+        t.norm();
+        t.fshr(4);
+    }
+    w[nb] = t.lastbits5();
+
+    P.copy(W[(w[nb-1] /2]);
+    for i in nb-1..0 {
+        Q.select(W, w[i]);
+        P.dbl();
+        P.dbl();
+        P.dbl();
+        P.dbl();
+        P.add(&Q);
+    }
+    P.sub(&C);
+    P.affine();
+    return P;
+}
+```
+
+Note that I've assumed that the `ECP2` and `ECP` types are defined elsewhere in the code, and that the `Big` type has a `NLEN` and `BASEBITS` constants. I've also assumed that the `FP2` type has a `new` and `mul` methods, and that the `Chunk` type is a type alias for `u64`. If these assumptions are incorrect, the code may need to be adjusted accordingly.</translated function>Here is the translated Rust function:
+
+```rust
+pub fn mul(&self, e: &Big) -> ECP2 {
+    let mut mt = ECP2::new();
+    let mut t = ECP2::new();
+    let mut P = ECP2::new();
+    let mut Q = ECP2::new();
+    let mut C = ECP2::new();
+    let mut W = [ECP2::new(); 8];
+    let mut w = [0u8; 1 + (Big::NLEN * Big::BASEBITS + 3) / 4];
+
+    if self.is_infinity() {
+        return ECP2::new();
+    }
+
+    // affine();
+
+/* precompute table */
+    Q.copy(self);
+    Q.dbl();
+    W[0] = ECP2::new();
+    W[0].copy(self);
+
+    for i in 1..8 {
+        W[i] = ECP2new();
+        W[i].copy(W[i-1]);
+        W[i].add(&Q);
+    }
+
+/* make exponent odd - add 2P if even, P if odd */
+    t.copy(e);
+    s = t.parity();
+    t.inc(1);
+    t.norm();
+    ns = t.parity();
+    mt.copy(t);
+    mt.inc(1);
+    mt.norm();
+    t.cmove(mt, s);
+    Q.cmove(self, ns);
+    C.copy(Q);
+
+    nb = 1 + (t.nbits() + 3) /4;
+/* convert exponent to signed 4-bit window */
+    for i in 0..nb {
+        w[i] = (t.lastbits(5) -16) as u8;
+        t.dec(w[i]);
+        t.norm();
+        t.fshr(4);
+    }
+    w[nb] = t.lastbits5();
+
+    P.copy(W[(w[nb-1] /2]);
+    for i in nb-1..0 {
+        Q.select(W, w[i]);
+        P.dbl();
+        P.dbl();
+        P.dbl();
+        P.dbl();
+        P.add(&Q);
+    }
+    P.sub(&C);
+    P.affine();
+    return P;
+}
+```
+
+Note that I've assumed that the `ECP2` and `ECP` types are defined elsewhere in the code, and that the `Big` type has a `NLEN` and `BASEBITS` constants. I've also assumed that the `FP2` type has a `new` and `mul` methods, and that the `Chunk` type is a type alias for `u64`. If these assumptions are incorrect, the code may need to be adjusted accordingly.

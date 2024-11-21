@@ -1,0 +1,454 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+void dc_forward_msgs(dc_context_t* context, const uint32_t* msg_ids, int msg_cnt, uint32_t chat_id)
+{
+	dc_msg_t*      msg = dc_msg_new_untyped(context);
+	dc_chat_t*     chat = dc_chat_new(context);
+	dc_contact_t*  contact = dc_contact_new(context);
+	int            transaction_pending = 0;
+	carray*        created_db_entries = carray_new(16);
+	char*          idsstr = NULL;
+	char*          q3 = NULL;
+	sqlite3_stmt*  stmt = NULL;
+	time_t         curr_timestamp = 0;
+	dc_param_t*    original_param = dc_param_new();
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || msg_ids==NULL || msg_cnt<=0 || chat_id<=DC_CHAT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_begin_transaction(context->sql);
+	transaction_pending = 1;
+
+		dc_unarchive_chat(context, chat_id);
+
+		context->smtp->log_connect_errors = 1;
+
+		if (!dc_chat_load_from_db(chat, chat_id)) {
+			goto cleanup;
+		}
+
+		curr_timestamp = dc_create_smeared_timestamps(context, msg_cnt);
+
+		idsstr = dc_arr_to_string(msg_ids, msg_cnt);
+		q3 = sqlite3_mprintf("SELECT id FROM msgs WHERE id IN(%s) ORDER BY timestamp,id", idsstr);
+		stmt = dc_sqlite3_prepare(context->sql, q3);
+		while (sqlite3_step(stmt)==SQLITE_ROW)
+		{
+			int src_msg_id = sqlite3_column_int(stmt, 0);
+			if (!dc_msg_load_from_db(msg, context, src_msg_id)) {
+				goto cleanup;
+			}
+
+			dc_param_set_packed(original_param, msg->param->packed);
+
+			// do not mark own messages as being forwarded.
+			// this allows sort of broadcasting
+			// by just forwarding messages to other chats.
+			if (msg->from_id!=DC_CONTACT_ID_SELF) {
+				dc_param_set_int(msg->param, DC_PARAM_FORWARDED, 1);
+			}
+
+			dc_param_set(msg->param, DC_PARAM_GUARANTEE_E2EE, NULL);
+			dc_param_set(msg->param, DC_PARAM_FORCE_PLAINTEXT, NULL);
+			dc_param_set(msg->param, DC_PARAM_CMD, NULL);
+
+			uint32_t new_msg_id;
+			// PREPARING messages can't be forwarded immediately
+			if (msg->state==DC_STATE_OUT_PREPARING) {
+				new_msg_id = prepare_msg_raw(context, chat, msg, curr_timestamp++);
+
+				// to update the original message, perform in-place surgery
+				// on msg to avoid copying the entire structure, text, etc.
+				dc_param_t* save_param = msg->param;
+				msg->param = original_param;
+				msg->id = src_msg_id;
+				{
+					// append new id to the original's param.
+					char* old_fwd = dc_param_get(msg->param, DC_PARAM_PREP_FORWARDS, "");
+					char* new_fwd = dc_mprintf("%s %d", old_fwd, new_msg_id);
+					dc_param_set(msg->param, DC_PARAM_PREP_FORWARDS, new_fwd);
+					dc_msg_save_param_to_disk(msg);
+					free(new_fwd);
+					free(old_fwd);
+				}
+				msg->param = save_param;
+			}
+			else {
+				msg->state = DC_STATE_OUT_PENDING;
+				new_msg_id = prepare_msg_raw(context, chat, msg, curr_timestamp++);
+				dc_job_send_msg(context, new_msg_id);
+			}
+
+			carray_add(created_db_entries, (void*)(uintptr_t)chat_id, NULL);
+			carray_add(created_db_entries, (void*)(uintptr_t)new_msg_id, NULL);
+		}
+
+	dc_sqlite3_commit(context->sql);
+	transaction_pending = 0;
+
+cleanup:
+	if (transaction_pending) { dc_sqlite3_rollback(context->sql); }
+	if (created_db_entries) {
+		size_t i, icnt = carray_count(created_db_entries);
+		for (i = 0; i < icnt; i += 2) {
+			context->cb(context, DC_EVENT_MSGS_CHANGED, (uintptr_t)carray_get(created_db_entries, i), (uintptr_t)carray_get(created_db_entries, i+1));
+		}
+		carray_free(created_db_entries);
+	}
+	dc_contact_unref(contact);
+	dc_msg_unref(msg);
+	dc_chat_unref(chat);
+	sqlite3_finalize(stmt);
+	free(idsstr);
+	sqlite3_free(q3);
+	dc_param_unref(original_param);
+}
+</c function>
+<rust function signature>
+pub async fn forward_msgs(context: &Context, msg_ids: &[MsgId], chat_id: ChatId) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn forward_msgs(context: &Context, msg_ids: &[MsgId], chat_id: ChatId) -> Result<()> {
+    ensure!(!msg_ids.is_empty(), "empty msgs_ids: nothing to forward");
+    ensure!(!chat_id.is_special(), "can not forward to special chat");
+
+    let mut created_chats: Vec<ChatId> = Vec::new();
+    let mut created_msgs: Vec<MsgId> = Vec::new();
+    let mut curr_timestamp: i64;
+
+    chat_id
+        .unarchive_if_not_muted(context, MessageState::Undefined)
+        .await?;
+    let mut chat = Chat::load_from_db(context, chat_id).await?;
+    if let Some(reason) = chat.why_cant_send(context).await? {
+        bail!("cannot send to {}: {}", chat_id, reason);
+    }
+    curr_timestamp = create_smeared_timestamps(context, msg_ids.len());
+    let ids = context
+        .sql
+        .query_map(
+            &format!(
+                "SELECT id FROM msgs WHERE id IN({}) ORDER BY timestamp,id",
+                sql::repeat_vars(msg_ids.len())
+            ),
+            rusqlite::params_from_iter(msg_ids),
+            |row| row.get::<_, MsgId>(0),
+            |ids| ids.collect::<Result<Vec<_>, _>>().map_err(Into::into),
+        )
+        .await?;
+
+    for id in ids {
+        let src_msg_id: MsgId = id;
+        let mut msg = Message::load_from_db(context, src_msg_id).await?;
+        if msg.state == MessageState::OutDraft {
+            bail!("cannot forward drafts.");
+        }
+
+        let original_param = msg.param.clone();
+
+        // we tested a sort of broadcast
+        // by not marking own forwarded messages as such,
+        // however, this turned out to be to confusing and unclear.
+
+        if msg.get_viewtype() != Viewtype::Sticker {
+            msg.param
+                .set_int(Param::Forwarded, src_msg_id.to_u32() as i32);
+        }
+
+        msg.param.remove(Param::GuaranteeE2ee);
+        msg.param.remove(Param::ForcePlaintext);
+        msg.param.remove(Param::Cmd);
+        msg.param.remove(Param::OverrideSenderDisplayname);
+        msg.param.remove(Param::WebxdcDocument);
+        msg.param.remove(Param::WebxdcDocumentTimestamp);
+        msg.param.remove(Param::WebxdcSummary);
+        msg.param.remove(Param::WebxdcSummaryTimestamp);
+        msg.in_reply_to = None;
+
+        // do not leak data as group names; a default subject is generated by mimefactory
+        msg.subject = "".to_string();
+
+        let new_msg_id: MsgId;
+        if msg.state == MessageState::OutPreparing {
+            new_msg_id = chat
+                .prepare_msg_raw(context, &mut msg, None, curr_timestamp)
+                .await?;
+            curr_timestamp += 1;
+            msg.param = original_param;
+            msg.id = src_msg_id;
+
+            if let Some(old_fwd) = msg.param.get(Param::PrepForwards) {
+                let new_fwd = format!("{} {}", old_fwd, new_msg_id.to_u32());
+                msg.param.set(Param::PrepForwards, new_fwd);
+            } else {
+                msg.param
+                    .set(Param::PrepForwards, new_msg_id.to_u32().to_string());
+            }
+
+            msg.update_param(context).await?;
+        } else {
+            msg.state = MessageState::OutPending;
+            new_msg_id = chat
+                .prepare_msg_raw(context, &mut msg, None, curr_timestamp)
+                .await?;
+            curr_timestamp += 1;
+            if !create_send_msg_jobs(context, &mut msg).await?.is_empty() {
+                context.scheduler.interrupt_smtp().await;
+            }
+        }
+        created_chats.push(chat_id);
+        created_msgs.push(new_msg_id);
+    }
+    for (chat_id, msg_id) in created_chats.iter().zip(created_msgs.iter()) {
+        context.emit_msgs_changed(*chat_id, *msg_id);
+    }
+    Ok(())
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn forward_msgs(context: &Context, msg_ids: &[MsgId], chat_id: ChatId) -> Result<()> {
+    let mut msg = Message::new_untyped(context);
+    let mut chat = Chat::new(context);
+    let mut created_db_entries = Vec::with_capacity(16);
+    let mut original_param = Params::new();
+
+    if chat_id <= DC_CHAT_ID_LAST_SPECIAL {
+        return Ok(());
+    }
+
+    context.sql.transaction(|transaction| {
+        context.unarchive_chat(chat_id)?;
+
+        context.smtp().set_log_connect_errors(true);
+
+        if !chat.load_from_db(chat_id)? {
+            return Ok(());
+        }
+
+        let curr_timestamp = create_smeared_timestamps(context, msg_ids.len() as i32);
+
+        let idsstr = msg_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+        let q3 = format!("SELECT id FROM msgs WHERE id IN({}) ORDER BY timestamp,id", idsstr);
+        let mut stmt = transaction.prepare(&q3)?;
+        let mut rows = stmt.query([])?;
+
+        while let Some(row) = rows.next()? {
+            let src_msg_id: MsgId = row.get(0)?;
+            if !msg.load_from_db(src_msg_id)? {
+                continue;
+            }
+
+            original_param.set_packed(msg.param.get_packed());
+
+            if msg.from_id != ContactId::SELF {
+                msg.param.set_int(Param::Forwarded, 1);
+            }
+
+            msg.param.remove(Param::GuaranteeE2ee);
+            msg.param.remove(Param::ForcePlaintext);
+            msg.param.remove(Param::Cmd);
+
+            let new_msg_id: MsgId = if msg.state == MessageState::OutPreparing {
+                let new_msg_id = prepare_msg_raw(context, &chat, &msg, curr_timestamp)?;
+
+                let save_param = std::mem::replace(&mut msg.param, original_param);
+                msg.id = src_msg_id;
+
+                let old_fwd = msg.param.get(Param::PrepForwards).unwrap_or_default();
+                let new_fwd = format!("{} {}", old_fwd, new_msg_id);
+                msg.param.set(Param::PrepForwards, new_fwd);
+                msg.save_param_to_disk(context)?;
+
+                msg.param = save_param;
+                new_msg_id
+            } else {
+                msg.state = MessageState::OutPending;
+                let new_msg_id = prepare_msg_raw(context, &chat, &msg, curr_timestamp)?;
+                context.send_msg(new_msg_id).await?;
+                new_msg_id
+            };
+
+            created_db_entries.push(chat_id);
+            created_db_entries.push(new_msg_id);
+        }
+
+        Ok(())
+    })?;
+
+    for chunk in created_db_entries.chunks(2) {
+        if let [chat_id, msg_id] = chunk {
+            context.emit_event(EventType::MsgsChanged {
+                chat_id: *chat_id,
+                msg_id: *msg_id,
+            });
+        }
+    }
+
+    Ok(())
+}
+```
+
+This translation incorporates Rust-specific features and idioms while maintaining the core logic of the original C function. Note that some parts of the function have been adapted to use Rust's async/await syntax and error handling mechanisms. The function now returns a `Result<()>` to propagate errors, and uses the `?` operator for error handling.
+
+Some C-specific operations (like memory management and pointer handling) have been omitted as they're not necessary in Rust. The function also assumes the existence of certain methods and types (like `Message::new_untype</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn forward_msgs(context: &Context, msg_ids: &[MsgId], chat_id: ChatId) -> Result<()> {
+    let mut msg = Message::new_untyped(context);
+    let mut chat = Chat::new(context);
+    let mut created_db_entries = Vec::with_capacity(16);
+    let mut original_param = Params::new();
+
+    if chat_id <= DC_CHAT_ID_LAST_SPECIAL {
+        return Ok(());
+    }
+
+    context.sql.transaction(|transaction| {
+        context.unarchive_chat(chat_id)?;
+
+        context.smtp().set_log_connect_errors(true);
+
+        if !chat.load_from_db(chat_id)? {
+            return Ok(());
+        }
+
+        let curr_timestamp = create_smeared_timestamps(context, msg_ids.len() as i32);
+
+        let idsstr = msg_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+        let q3 = format!("SELECT id FROM msgs WHERE id IN({}) ORDER BY timestamp,id", idsstr);
+        let mut stmt = transaction.prepare(&q3)?;
+        let mut rows = stmt.query([])?;
+
+        while let Some(row) = rows.next()? {
+            let src_msg_id: MsgId = row.get(0)?;
+            if !msg.load_from_db(src_msg_id)? {
+                continue;
+            }
+
+            original_param.set_packed(msg.param.get_packed());
+
+            if msg.from_id != ContactId::SELF {
+                msg.param.set_int(Param::Forwarded, 1);
+            }
+
+            msg.param.remove(Param::GuaranteeE2ee);
+            msg.param.remove(Param::ForcePlaintext);
+            msg.param.remove(Param::Cmd);
+
+            let new_msg_id: MsgId = if msg.state == MessageState::OutPreparing {
+                let new_msg_id = prepare_msg_raw(context, &chat, &msg, curr_timestamp)?;
+
+                let save_param = std::mem::replace(&mut msg.param, original_param);
+                msg.id = src_msg_id;
+
+                let old_fwd = msg.param.get(Param::PrepForwards).unwrap_or_default();
+                let new_fwd = format!("{} {}", old_fwd, new_msg_id);
+                msg.param.set(Param::PrepForwards, new_fwd);
+                msg.save_param_to_disk(context)?;
+
+                msg.param = save_param;
+                new_msg_id
+            } else {
+                msg.state = MessageState::OutPending;
+                let new_msg_id = prepare_msg_raw(context, &chat, &msg, curr_timestamp)?;
+                context.send_msg(new_msg_id).await?;
+                new_msg_id
+            };
+
+            created_db_entries.push(chat_id);
+            created_db_entries.push(new_msg_id);
+        }
+
+        Ok(())
+    })?;
+
+    for chunk in created_db_entries.chunks(2) {
+        if let [chat_id, msg_id] = chunk {
+            context.emit_event(EventType::MsgsChanged {
+                chat_id: *chat_id,
+                msg_id: *msg_id,
+            });
+        }
+    }
+
+    Ok(())
+}
+```
+
+This translation incorporates Rust-specific features and idioms while maintaining the core logic of the original C function. Note that some parts of the function have been adapted to use Rust's async/await syntax and error handling mechanisms. The function now returns a `Result<()>` to propagate errors, and uses the `?` operator for error handling.
+
+Some C-specific operations (like memory management and pointer handling) have been omitted as they're not necessary in Rust. The function also assumes the existence of certain methods and types (like `Message::new_untype

@@ -1,0 +1,34 @@
+pub(crate) fn unicode_range(character: char) -> Option<&'static str> {
+    let char_code = character as u32;
+    UNICODE_RANGES_COMBINED
+        .iter()
+        .find(|&(_, range)| range.contains(&char_code))
+        .map(|(name, _)| *name)
+}
+
+
+pub(crate) fn identify_sig_or_bom(sequence: &[u8]) -> (Option<String>, Option<&[u8]>) {
+    ENCODING_MARKS
+        .iter()
+        .find(|&(_, enc_sig)| sequence.starts_with(enc_sig))
+        .map_or((None, None), |(enc_name, enc_sig)| {
+            (Some((*enc_name).to_string()), Some(*enc_sig))
+        })
+}
+struct Thing;
+------
+
+use crate::assets::LANGUAGES;
+use crate::consts::{
+    ENCODING_MARKS, IANA_SUPPORTED, IANA_SUPPORTED_SIMILAR, RE_POSSIBLE_ENCODING_INDICATION,
+    UNICODE_RANGES_COMBINED, UNICODE_SECONDARY_RANGE_KEYWORD,
+};
+use crate::entity::Language;
+use ahash::{HashSet, HashSetExt};
+use encoding::label::encoding_from_whatwg_label;
+use encoding::{CodecError, DecoderTrap, EncoderTrap, Encoding, EncodingRef, StringWriter};
+use icu_normalizer::DecomposingNormalizer;
+use unicode_names2::name;
+use std::borrow::Cow;
+use std::fs;
+use std::path::{Path, PathBuf};

@@ -1,0 +1,229 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void dc_block_contact(dc_context_t* context, uint32_t contact_id, int new_blocking)
+{
+	int           send_event = 0;
+	dc_contact_t* contact = dc_contact_new(context);
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || contact_id<=DC_CONTACT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+		if (dc_contact_load_from_db(contact, context->sql, contact_id)
+		 && contact->blocked!=new_blocking)
+		{
+			stmt = dc_sqlite3_prepare(context->sql,
+				"UPDATE contacts SET blocked=? WHERE id=?;");
+			sqlite3_bind_int(stmt, 1, new_blocking);
+			sqlite3_bind_int(stmt, 2, contact_id);
+			if (sqlite3_step(stmt)!=SQLITE_DONE) {
+				goto cleanup;
+			}
+			sqlite3_finalize(stmt);
+			stmt = NULL;
+
+			/* also (un)block all chats with _only_ this contact - we do not delete them to allow a non-destructive blocking->unblocking.
+			(Maybe, beside normal chats (type=100) we should also block group chats with only this user.
+			However, I'm not sure about this point; it may be confusing if the user wants to add other people;
+			this would result in recreating the same group...) */
+			stmt = dc_sqlite3_prepare(context->sql,
+				"UPDATE chats SET blocked=? WHERE type=? AND id IN (SELECT chat_id FROM chats_contacts WHERE contact_id=?);");
+			sqlite3_bind_int(stmt, 1, new_blocking);
+			sqlite3_bind_int(stmt, 2, DC_CHAT_TYPE_SINGLE);
+			sqlite3_bind_int(stmt, 3, contact_id);
+			if (sqlite3_step(stmt)!=SQLITE_DONE) {
+				goto cleanup;
+			}
+
+			/* mark all messages from the blocked contact as being noticed (this is to remove the deaddrop popup) */
+			dc_marknoticed_contact(context, contact_id);
+
+			send_event = 1;
+		}
+
+	if (send_event) {
+		context->cb(context, DC_EVENT_CONTACTS_CHANGED, 0, 0);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	dc_contact_unref(contact);
+}
+</c function>
+<rust function signature>
+pub async fn block(context: &Context, id: ContactId) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp::{min, Reverse};
+use std::collections::BinaryHeap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use base64::Engine as _;
+use deltachat_contact_tools::may_be_valid_addr;
+use deltachat_contact_tools::{
+    self as contact_tools, addr_cmp, addr_normalize, sanitize_name_and_addr, strip_rtlo_characters,
+    ContactAddress, VcardContact,
+};
+use deltachat_derive::{FromSql, ToSql};
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use tokio::task;
+use tokio::time::{timeout, Duration};
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::blob::BlobObject;
+use crate::chat::{ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{Blocked, Chattype, DC_GCL_ADD_SELF, DC_GCL_VERIFIED_ONLY};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{load_self_public_key, DcKey, SignedPublicKey};
+use crate::log::LogExt;
+use crate::login_param::LoginParam;
+use crate::message::MessageState;
+use crate::mimeparser::AvatarAction;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::sql::{self, params_iter};
+use crate::sync::{self, Sync::*};
+use crate::tools::{
+    duration_to_str, get_abs_path, improve_single_line_input, smeared_time, time, SystemTime,
+};
+use crate::{chat, chatlist_events, stock_str};
+use deltachat_contact_tools::{may_be_valid_addr, normalize_name};
+use super::*;
+use crate::chat::{get_chat_contacts, send_text_msg, Chat};
+use crate::chatlist::Chatlist;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{self, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn block(context: &Context, id: ContactId) -> Result<()> {
+        set_blocked(context, Sync, id, true).await
+    }
+</function>
+<translated function>
+The translation of your provided C function to Rust is shown below:
+
+```rust
+use std::result::Result;
+use crate::context::Context;
+use crate::ContactId;
+use crate::DC_EVENT_CONTACTS_CHANGED;
+use crate::DC_CONTEXT_MAGIC;
+use crate::DC_CONTACT_ID_LAST_SPECIAL;
+use crate::dc_contact_new;
+use crate::dc_contact_load_from_db;
+use crate::dc_sqlite3_prepare;
+use crate::dc_contact_unref;
+use crate::Chattype;
+use rusqlite::types::ToSql;
+use rusqlite::{params, Connection, NO_PARAMS};
+
+pub async fn block(context: &Context, id: ContactId) -> Result<()> {
+    let mut send_event = false;
+    let contact = dc_contact_new(&context);
+
+    if context.is_null() || context.magic != DC_CONTEXT_MAGIC || id <= DC_CONTACT_ID_LAST_SPECIAL {
+        return Ok(())
+    }
+
+    if dc_contact_load_from_db(&contact, &context.sql, id) && contact.blocked != new_blocking {
+        let mut stmt = dc_sqlite3_prepare(&context.sql, "UPDATE contacts SET blocked=? WHERE id=?;").await?;
+        stmt.execute(params![new_blocking, id]).await?;
+
+        stmt = dc_sqlite3_prepare(&context.sql,
+            "UPDATE chats SET blocked=? WHERE type=? AND id IN (SELECT chat_id FROM chats_contacts WHERE contact_id=?);").await?;
+        stmt.execute(params![new_blocking, Chattype::Single, id]).await?;
+
+        stmt.finalize().await?;
+        stmt = None;
+
+        dc_marknoticed_contact(&context, id).await;
+
+        send_event = true;
+    }
+
+    if send_event {
+        context.call_cb(EventType::ContactsChanged, 0, 0).await;
+    }
+
+    Ok(())
+}
+```
+Please note:
+
+- This translation assumes the equivalent functions as mentioned in the provided C code are present in the Rust codebase.
+- The database operations in SQLite in C are translated to use `rusqlite`, which is a common Rust crate for SQLite operations.
+- The `await` keyword is used as the Rust code is written in asynchronous syntax.
+- Error handling in Rust is done through the `Result<T, E>` type. If a function can result in failure, it returns `Result`, which is either `Ok` (with the success value), or `Err` (with the error information).
+- Please replace `new_blocking`, `dc_marknoticed_contact`, `context.call_cb`, `EventType::ContactsChanged` with your actual implementations.</translated function>The translation of your provided C function to Rust is shown below:
+
+```rust
+use std::result::Result;
+use crate::context::Context;
+use crate::ContactId;
+use crate::DC_EVENT_CONTACTS_CHANGED;
+use crate::DC_CONTEXT_MAGIC;
+use crate::DC_CONTACT_ID_LAST_SPECIAL;
+use crate::dc_contact_new;
+use crate::dc_contact_load_from_db;
+use crate::dc_sqlite3_prepare;
+use crate::dc_contact_unref;
+use crate::Chattype;
+use rusqlite::types::ToSql;
+use rusqlite::{params, Connection, NO_PARAMS};
+
+pub async fn block(context: &Context, id: ContactId) -> Result<()> {
+    let mut send_event = false;
+    let contact = dc_contact_new(&context);
+
+    if context.is_null() || context.magic != DC_CONTEXT_MAGIC || id <= DC_CONTACT_ID_LAST_SPECIAL {
+        return Ok(())
+    }
+
+    if dc_contact_load_from_db(&contact, &context.sql, id) && contact.blocked != new_blocking {
+        let mut stmt = dc_sqlite3_prepare(&context.sql, "UPDATE contacts SET blocked=? WHERE id=?;").await?;
+        stmt.execute(params![new_blocking, id]).await?;
+
+        stmt = dc_sqlite3_prepare(&context.sql,
+            "UPDATE chats SET blocked=? WHERE type=? AND id IN (SELECT chat_id FROM chats_contacts WHERE contact_id=?);").await?;
+        stmt.execute(params![new_blocking, Chattype::Single, id]).await?;
+
+        stmt.finalize().await?;
+        stmt = None;
+
+        dc_marknoticed_contact(&context, id).await;
+
+        send_event = true;
+    }
+
+    if send_event {
+        context.call_cb(EventType::ContactsChanged, 0, 0).await;
+    }
+
+    Ok(())
+}
+```
+Please note:
+
+- This translation assumes the equivalent functions as mentioned in the provided C code are present in the Rust codebase.
+- The database operations in SQLite in C are translated to use `rusqlite`, which is a common Rust crate for SQLite operations.
+- The `await` keyword is used as the Rust code is written in asynchronous syntax.
+- Error handling in Rust is done through the `Result<T, E>` type. If a function can result in failure, it returns `Result`, which is either `Ok` (with the success value), or `Err` (with the error information).
+- Please replace `new_blocking`, `dc_marknoticed_contact`, `context.call_cb`, `EventType::ContactsChanged` with your actual implementations.

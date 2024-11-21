@@ -1,0 +1,78 @@
+pub(crate) fn is_suspiciously_successive_range(
+    range_a: Option<&'static str>,
+    range_b: Option<&'static str>,
+) -> bool {
+    if let (Some(range_a), Some(range_b)) = (range_a, range_b) {
+        if range_a == range_b
+            || [range_a, range_b].iter().all(|x| x.contains("Latin"))
+            || [range_a, range_b].iter().any(|x| x.contains("Emoticons"))
+        {
+            return false;
+        }
+
+        // Latin characters can be accompanied with a combining diacritical mark
+        // eg. Vietnamese.
+        if [range_a, range_b].iter().any(|x| x.contains("Latin"))
+            && [range_a, range_b].iter().any(|x| x.contains("Combining"))
+        {
+            return false;
+        }
+
+        // keywords intersection
+        let set_a: HashSet<_> = range_a.split_whitespace().collect();
+        let set_b: HashSet<_> = range_b.split_whitespace().collect();
+
+        if set_a
+            .intersection(&set_b)
+            .any(|elem| !UNICODE_SECONDARY_RANGE_KEYWORD.contains(elem))
+        {
+            return false;
+        }
+
+        // Japanese exception
+        let jp_ranges = ["Hiragana", "Katakana"];
+        match (
+            jp_ranges.contains(&range_a),                            // has_jp_a
+            jp_ranges.contains(&range_b),                            // has_jp_b
+            [range_a, range_b].iter().any(|x| x.contains("CJK")),    // has_cjk
+            [range_a, range_b].iter().any(|x| x.contains("Hangul")), // has_hangul
+            [range_a, range_b]
+                .iter()
+                .any(|x| x.contains("Punctuation") || x.contains("Forms")), // has_punct_or_forms
+            [range_a, range_b].iter().any(|&x| x == "Basic Latin"),  // is_any_basic_latin
+        ) {
+            (true, true, _, _, _, _) // both are japanese
+            | (true, _, true, _, _, _) | (_, true, true, _, _, _) //either is japanese and either contains CJK
+            | (_, _, true, true, _, _) // either has both CJK and Hanguls
+            | (_, _, true, _, true, _) // either has chinese and dedicated punctuation and separators 
+            | (_, _, _, true, _, true) // either has hangul and basic latin 
+            => return false,
+            _ => {} // All other combinations
+        }
+    }
+    true // if either range is none or edge cases never triggers, return true
+}
+pub(crate) fn unicode_range(character: char) -> Option<&'static str> {
+    let char_code = character as u32;
+    UNICODE_RANGES_COMBINED
+        .iter()
+        .find(|&(_, range)| range.contains(&char_code))
+        .map(|(name, _)| *name)
+}
+------
+
+
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;

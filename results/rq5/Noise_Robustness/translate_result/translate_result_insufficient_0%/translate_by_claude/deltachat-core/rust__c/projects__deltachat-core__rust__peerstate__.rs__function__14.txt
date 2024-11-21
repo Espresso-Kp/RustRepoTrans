@@ -1,0 +1,137 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+*     Typically either DC_NOT_VERIFIED (0) if there is no need for the key being verified
+ *     or DC_BIDIRECT_VERIFIED (2) for bidirectional verification requirement.
+ * @return public_key or gossip_key, NULL if nothing is available.
+ *     the returned pointer MUST NOT be unref()'d.
+ */
+dc_key_t* dc_apeerstate_peek_key(const dc_apeerstate_t* peerstate, int min_verified)
+{
+	if ( peerstate==NULL
+	 || (peerstate->public_key && (peerstate->public_key->binary==NULL || peerstate->public_key->bytes<=0))
+	 || (peerstate->gossip_key && (peerstate->gossip_key->binary==NULL || peerstate->gossip_key->bytes<=0))
+	 || (peerstate->verified_key && (peerstate->verified_key->binary==NULL || peerstate->verified_key->bytes<=0))) {
+		return NULL;
+	}
+
+	if (min_verified)
+	{
+		return peerstate->verified_key;
+	}
+
+	if (peerstate->public_key)
+	{
+		return peerstate->public_key;
+	}
+
+	return peerstate->gossip_key;
+}
+</c function>
+<rust function signature>
+pub fn peek_key(&self, verified: bool) -> Option<&SignedPublicKey> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::mem;
+use anyhow::{Context as _, Error, Result};
+use deltachat_contact_tools::{addr_cmp, ContactAddress};
+use num_traits::FromPrimitive;
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::chat::{self, Chat};
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::constants::Chattype;
+use crate::contact::{Contact, Origin};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{DcKey, Fingerprint, SignedPublicKey};
+use crate::message::Message;
+use crate::mimeparser::SystemMessage;
+use crate::sql::Sql;
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::test_utils::alice_keypair;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn peek_key(&self, verified: bool) -> Option<&SignedPublicKey> {
+        if verified {
+            self.verified_key.as_ref()
+        } else {
+            self.public_key.as_ref().or(self.gossip_key.as_ref())
+        }
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub fn peek_key(&self, verified: bool) -> Option<&SignedPublicKey> {
+    if self.public_key.as_ref().map_or(true, |k| k.binary().is_empty())
+        || self.gossip_key.as_ref().map_or(true, |k| k.binary().is_empty())
+        || self.verified_key.as_ref().map_or(true, |k| k.binary().is_empty())
+    {
+        return None;
+    }
+
+    if verified {
+        return self.verified_key.as_ref();
+    }
+
+    if let Some(ref public_key) = self.public_key {
+        return Some(public_key);
+    }
+
+    self.gossip_key.as_ref()
+}
+```
+
+This Rust function follows the provided signature and implements the logic of the original C function. Here are the key changes and adaptations:
+
+1. The function now returns an `Option<&SignedPublicKey>` instead of a raw pointer.
+2. The `min_verified` parameter is replaced with a `verified` boolean parameter.
+3. Null checks are replaced with `Option` handling using `as_ref()` and `map_or()`.
+4. The function uses Rust's idiomatic `if let` and `Option` returning instead of explicit `NULL` checks.
+5. The function assumes that `self` (equivalent to `peerstate` in C) is always valid, as it's a method on the struct.
+
+Note that this translation assumes that `SignedPublicKey` is equivalent to `dc_key_t` in the C code, and that it has a `binary()` method that returns a slice or vector representing the key data.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub fn peek_key(&self, verified: bool) -> Option<&SignedPublicKey> {
+    if self.public_key.as_ref().map_or(true, |k| k.binary().is_empty())
+        || self.gossip_key.as_ref().map_or(true, |k| k.binary().is_empty())
+        || self.verified_key.as_ref().map_or(true, |k| k.binary().is_empty())
+    {
+        return None;
+    }
+
+    if verified {
+        return self.verified_key.as_ref();
+    }
+
+    if let Some(ref public_key) = self.public_key {
+        return Some(public_key);
+    }
+
+    self.gossip_key.as_ref()
+}
+```
+
+This Rust function follows the provided signature and implements the logic of the original C function. Here are the key changes and adaptations:
+
+1. The function now returns an `Option<&SignedPublicKey>` instead of a raw pointer.
+2. The `min_verified` parameter is replaced with a `verified` boolean parameter.
+3. Null checks are replaced with `Option` handling using `as_ref()` and `map_or()`.
+4. The function uses Rust's idiomatic `if let` and `Option` returning instead of explicit `NULL` checks.
+5. The function assumes that `self` (equivalent to `peerstate` in C) is always valid, as it's a method on the struct.
+
+Note that this translation assumes that `SignedPublicKey` is equivalent to `dc_key_t` in the C code, and that it has a `binary()` method that returns a slice or vector representing the key data.

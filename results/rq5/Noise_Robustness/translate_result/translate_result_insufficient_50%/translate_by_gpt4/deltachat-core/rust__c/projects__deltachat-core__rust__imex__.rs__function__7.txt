@@ -1,0 +1,247 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_continue_key_transfer(dc_context_t* context, uint32_t msg_id, const char* setup_code)
+{
+	int       success = 0;
+	dc_msg_t* msg = NULL;
+	char*     filename = NULL;
+	char*     filecontent = NULL;
+	size_t    filebytes = 0;
+	char*     armored_key = NULL;
+	char*     norm_sc = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || msg_id <= DC_MSG_ID_LAST_SPECIAL || setup_code==NULL) {
+		goto cleanup;
+	}
+
+	if ((msg=dc_get_msg(context, msg_id))==NULL || !dc_msg_is_setupmessage(msg)
+	 || (filename=dc_msg_get_file(msg))==NULL || filename[0]==0) {
+		dc_log_error(context, 0, "Message is no Autocrypt Setup Message.");
+		goto cleanup;
+	}
+
+	if (!dc_read_file(context, filename, (void**)&filecontent, &filebytes) || filecontent==NULL || filebytes <= 0) {
+		dc_log_error(context, 0, "Cannot read Autocrypt Setup Message file.");
+		goto cleanup;
+	}
+
+	if ((norm_sc = dc_normalize_setup_code(context, setup_code))==NULL) {
+		dc_log_warning(context, 0, "Cannot normalize Setup Code.");
+		goto cleanup;
+	}
+
+	if ((armored_key=dc_decrypt_setup_file(context, norm_sc, filecontent))==NULL) {
+		dc_log_warning(context, 0, "Cannot decrypt Autocrypt Setup Message."); /* do not log as error - this is quite normal after entering the bad setup code */
+		goto cleanup;
+	}
+
+	if (!set_self_key(context, armored_key, 1/*set default*/)) {
+		goto cleanup; /* error already logged */
+	}
+
+	success = 1;
+
+cleanup:
+	free(armored_key);
+	free(filecontent);
+	free(filename);
+	dc_msg_unref(msg);
+	free(norm_sc);
+	return success;
+}
+</c function>
+<rust function signature>
+pub async fn continue_key_transfer(
+    context: &Context,
+    msg_id: MsgId,
+    setup_code: &str,
+) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn open_file_std(context: &Context, path: impl AsRef<Path>) -> Result<std::fs::File> {
+    let path_abs = get_abs_path(context, path.as_ref());
+
+    match std::fs::File::open(path_abs) {
+        Ok(bytes) => Ok(bytes),
+        Err(err) => {
+            warn!(
+                context,
+                "Cannot read \"{}\" or file is empty: {}",
+                path.as_ref().display(),
+                err
+            );
+            Err(err.into())
+        }
+    }
+}
+pub fn get_file(&self, context: &Context) -> Option<PathBuf> {
+        self.param.get_path(Param::File, context).unwrap_or(None)
+    }
+async fn maybe_add_bcc_self_device_msg(context: &Context) -> Result<()> {
+    if !context.sql.get_raw_config_bool("bcc_self").await? {
+        let mut msg = Message::new(Viewtype::Text);
+        // TODO: define this as a stockstring once the wording is settled.
+        msg.text = "It seems you are using multiple devices with Delta Chat. Great!\n\n\
+             If you also want to synchronize outgoing messages across all devices, \
+             go to \"Settings → Advanced\" and enable \"Send Copy to Self\"."
+            .to_string();
+        chat::add_device_msg(context, Some("bcc-self-hint"), Some(&mut msg)).await?;
+    }
+    Ok(())
+}
+async fn decrypt_setup_file<T: std::io::Read + std::io::Seek>(
+    passphrase: &str,
+    file: T,
+) -> Result<String> {
+    let plain_bytes = pgp::symm_decrypt(passphrase, file).await?;
+    let plain_text = std::string::String::from_utf8(plain_bytes)?;
+
+    Ok(plain_text)
+}
+pub struct MsgId(u32);
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn continue_key_transfer(
+    context: &Context,
+    msg_id: MsgId,
+    setup_code: &str,
+) -> Result<()> {
+    ensure!(!msg_id.is_special(), "wrong id");
+
+    let msg = Message::load_from_db(context, msg_id).await?;
+    ensure!(
+        msg.is_setupmessage(),
+        "Message is no Autocrypt Setup Message."
+    );
+
+    if let Some(filename) = msg.get_file(context) {
+        let file = open_file_std(context, filename)?;
+        let sc = normalize_setup_code(setup_code);
+        let armored_key = decrypt_setup_file(&sc, file).await?;
+        set_self_key(context, &armored_key, true).await?;
+        maybe_add_bcc_self_device_msg(context).await?;
+
+        Ok(())
+    } else {
+        bail!("Message is no Autocrypt Setup Message.");
+    }
+}
+</function>
+<translated function>
+Based on the given C function, Rust function signature, function related variables, functions, dependencies, and data type declarations, the translated Rust function could be:
+
+```rust
+pub async fn continue_key_transfer(
+    &context: &Context,
+    msg_id: MsgId,
+    setup_code: &str,
+) -> Result<()> {
+    let msg = Message::load_from_db(context, msg_id).await?;
+
+    if msg.is_setupmessage() != SetupMessage::Encoded {
+        warn!(context, "continueKeyTransfer {}: Message is no setup message.", msg_id);
+        bail!("Message is no setup message");
+    }
+
+    let filename_path = msg.get_file(context);
+    let file_content: Vec<u8> = open_file_std(context, &filename_path).await?.into_bytes();
+
+    if file_content.is_empty() {
+        warn!(context, "continueKeyTransfer {}: File is empty.", msg_id);
+        bail!("File is empty");
+    }
+
+    if let Err(err) = decrypt_setup_file(context, setup_code, &filename_path).await {
+        warn!(context, "continueKeyTransfer {}: Failed to decrypt.", msg_id);
+        bail!("Failed to decrypt");
+    }
+
+    maybe_add_bcc_self_device_msg(context).await?;
+
+    Ok(())
+}
+```</translated function>Based on the given C function, Rust function signature, function related variables, functions, dependencies, and data type declarations, the translated Rust function could be:
+
+```rust
+pub async fn continue_key_transfer(
+    &context: &Context,
+    msg_id: MsgId,
+    setup_code: &str,
+) -> Result<()> {
+    let msg = Message::load_from_db(context, msg_id).await?;
+
+    if msg.is_setupmessage() != SetupMessage::Encoded {
+        warn!(context, "continueKeyTransfer {}: Message is no setup message.", msg_id);
+        bail!("Message is no setup message");
+    }
+
+    let filename_path = msg.get_file(context);
+    let file_content: Vec<u8> = open_file_std(context, &filename_path).await?.into_bytes();
+
+    if file_content.is_empty() {
+        warn!(context, "continueKeyTransfer {}: File is empty.", msg_id);
+        bail!("File is empty");
+    }
+
+    if let Err(err) = decrypt_setup_file(context, setup_code, &filename_path).await {
+        warn!(context, "continueKeyTransfer {}: Failed to decrypt.", msg_id);
+        bail!("Failed to decrypt");
+    }
+
+    maybe_add_bcc_self_device_msg(context).await?;
+
+    Ok(())
+}
+```

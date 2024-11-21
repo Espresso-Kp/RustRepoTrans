@@ -1,0 +1,149 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def append(self, item: CharsetMatch) -> None:
+        """
+        Insert a single match. Will be inserted accordingly to preserve sort.
+        Can be inserted as a submatch.
+        """
+        if not isinstance(item, CharsetMatch):
+            raise ValueError(
+                "Cannot append instance '{}' to CharsetMatches".format(
+                    str(item.__class__)
+                )
+            )
+        # We should disable the submatch factoring when the input file is too heavy (conserve RAM usage)
+        if len(item.raw) <= TOO_BIG_SEQUENCE:
+            for match in self._results:
+                if match.fingerprint == item.fingerprint and match.chaos == item.chaos:
+                    match.add_submatch(item)
+                    return
+        self._results.append(item)
+        self._results = sorted(self._results)
+</python function>
+<rust function signature>
+pub fn append(&mut self, item: CharsetMatch) 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn add_submatch(&mut self, submatch: &CharsetMatch) {
+        self.submatch.push(submatch.clone());
+        //self.decoded_payload = None;
+    }
+pub struct CharsetMatch {
+    payload: Vec<u8>,
+    encoding: String,
+
+    mean_mess_ratio: f32,
+    coherence_matches: CoherenceMatches,
+
+    has_sig_or_bom: bool,
+
+    submatch: Vec<CharsetMatch>,
+    decoded_payload: Option<String>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use crate::cd::{encoding_languages, mb_encoding_languages};
+use crate::consts::{IANA_SUPPORTED_ALIASES, TOO_BIG_SEQUENCE};
+use crate::utils::{decode, iana_name, is_multi_byte_encoding, range_scan};
+use clap::Parser;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use serde::Serialize;
+use std::cmp::Ordering;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::Hash;
+use std::ops::Index;
+use std::path::PathBuf;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn append(&mut self, item: CharsetMatch) {
+        // We should disable the submatch factoring when the input file is too heavy
+        // (conserve RAM usage)
+        if item.payload.len() <= TOO_BIG_SEQUENCE {
+            for m in &mut self.items {
+                if m.decoded_payload() == item.decoded_payload()
+                    && (m.mean_mess_ratio - item.mean_mess_ratio).abs() < f32::EPSILON
+                {
+                    m.add_submatch(&item);
+                    return;
+                }
+            }
+        }
+        self.items.push(item);
+        CharsetMatches::resort(&mut self.items);
+    }
+</function>
+<translated function>
+pub fn append(&mut self, item: CharsetMatch) {
+        
+        // Check if item is an instance of the CharsetMatch, raise an error if not
+        // In Rust, we use a pattern matching, if the type does not match, Rust will panic
+        match item {
+            CharsetMatch {..} => (),
+            _ => panic!("Cannot append instance '{}' to CharsetMatches", item),
+        }
+
+        // Check if the item's raw length is less than or equals to too_big_sequence
+        if item.payload.len() <= TOO_BIG_SEQUENCE {
+            for match_item in &mut self.results {
+                if match_item.fingerprint == item.fingerprint && match_item.chaos == item.chaos {
+                    match_item.add_submatch(&item);
+                    return
+                }
+            }
+        }
+
+        self.results.push(item);
+
+        // Implement an order/sort function for CharsetMatch.
+        // Here assuming we have a function called sort_by that takes a closure
+        // on how to sort items in CharsetMatch.
+        self.results.sort_by(|a, b| 
+            match (a.fingerprint.cmp(&b.fingerprint), a.chaos.cmp(&b.chaos)) {
+              // compare fingerprints first, then chaos
+              (Ordering::Equal, _) => a.chaos.cmp(&b.chaos),
+              (ordering, _) => ordering,
+            }
+         );
+    }</translated function>pub fn append(&mut self, item: CharsetMatch) {
+        
+        // Check if item is an instance of the CharsetMatch, raise an error if not
+        // In Rust, we use a pattern matching, if the type does not match, Rust will panic
+        match item {
+            CharsetMatch {..} => (),
+            _ => panic!("Cannot append instance '{}' to CharsetMatches", item),
+        }
+
+        // Check if the item's raw length is less than or equals to too_big_sequence
+        if item.payload.len() <= TOO_BIG_SEQUENCE {
+            for match_item in &mut self.results {
+                if match_item.fingerprint == item.fingerprint && match_item.chaos == item.chaos {
+                    match_item.add_submatch(&item);
+                    return
+                }
+            }
+        }
+
+        self.results.push(item);
+
+        // Implement an order/sort function for CharsetMatch.
+        // Here assuming we have a function called sort_by that takes a closure
+        // on how to sort items in CharsetMatch.
+        self.results.sort_by(|a, b| 
+            match (a.fingerprint.cmp(&b.fingerprint), a.chaos.cmp(&b.chaos)) {
+              // compare fingerprints first, then chaos
+              (Ordering::Equal, _) => a.chaos.cmp(&b.chaos),
+              (ordering, _) => ordering,
+            }
+         );
+    }

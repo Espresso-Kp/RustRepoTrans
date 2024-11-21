@@ -1,0 +1,175 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int dc_alloc_ongoing(dc_context_t* context)
+{
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		return 0;
+	}
+
+	if (dc_has_ongoing(context)) {
+		dc_log_warning(context, 0, "There is already another ongoing process running.");
+		return 0;
+	}
+
+	context->ongoing_running    = 1;
+	context->shall_stop_ongoing = 0;
+	return 1;
+}
+</c function>
+<rust function signature>
+pub(crate) async fn alloc_ongoing(&self) -> Result<Receiver<()>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+enum RunningState {
+    /// Ongoing process is allocated.
+    Running { cancel_sender: Sender<()> },
+
+    /// Cancel signal has been sent, waiting for ongoing process to be freed.
+    ShallStop { request: tools::Time },
+
+    /// There is no ongoing process, a new one can be allocated.
+    Stopped,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use pgp::SignedPublicKey;
+use ratelimit::Ratelimit;
+use tokio::sync::{Mutex, Notify, OnceCell, RwLock};
+use crate::aheader::EncryptPreference;
+use crate::chat::{get_chat_cnt, ChatId, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    self, DC_BACKGROUND_FETCH_QUOTA_CHECK_RATELIMIT, DC_CHAT_ID_TRASH, DC_VERSION_STR,
+};
+use crate::contact::{Contact, ContactId};
+use crate::debug_logging::DebugLogging;
+use crate::download::DownloadState;
+use crate::events::{Event, EventEmitter, EventType, Events};
+use crate::imap::{FolderMeaning, Imap, ServerMetadata};
+use crate::key::{load_self_public_key, load_self_secret_key, DcKey as _};
+use crate::login_param::LoginParam;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::param::{Param, Params};
+use crate::peer_channels::Iroh;
+use crate::peerstate::Peerstate;
+use crate::push::PushSubscriber;
+use crate::quota::QuotaInfo;
+use crate::scheduler::{convert_folder_meaning, SchedulerState};
+use crate::sql::Sql;
+use crate::stock_str::StockStrings;
+use crate::timesmearing::SmearedTimestamp;
+use crate::tools::{self, create_id, duration_to_str, time, time_elapsed};
+use anyhow::Context as _;
+use strum::IntoEnumIterator;
+use tempfile::tempdir;
+use super::*;
+use crate::chat::{get_chat_contacts, get_chat_msgs, send_msg, set_muted, Chat, MuteDuration};
+use crate::chatlist::Chatlist;
+use crate::constants::Chattype;
+use crate::mimeparser::SystemMessage;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{get_chat_msg, TestContext};
+use crate::tools::{create_outgoing_rfc724_mid, SystemTime};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) async fn alloc_ongoing(&self) -> Result<Receiver<()>> {
+        let mut s = self.running_state.write().await;
+        ensure!(
+            matches!(*s, RunningState::Stopped),
+            "There is already another ongoing process running."
+        );
+
+        let (sender, receiver) = channel::bounded(1);
+        *s = RunningState::Running {
+            cancel_sender: sender,
+        };
+
+        Ok(receiver)
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub(crate) async fn alloc_ongoing(&self) -> Result<Receiver<()>> {
+    let mut running_state = self.running_state.lock().await;
+
+    match *running_state {
+        RunningState::Running { .. } => {
+            self.log_warning(0, "There is already another ongoing process running.").await;
+            bail!("Ongoing process already running")
+        }
+        RunningState::ShallStop { .. } => {
+            bail!("Cannot allocate ongoing process while stopping")
+        }
+        RunningState::Stopped => {
+            let (cancel_sender, cancel_receiver) = channel::bounded(1);
+            *running_state = RunningState::Running { cancel_sender };
+            Ok(cancel_receiver)
+        }
+    }
+}
+```
+
+This Rust function achieves the same functionality as the C function, with the following changes and considerations:
+
+1. It uses the `Result` type to handle errors and return the `Receiver<()>` on success.
+2. It uses a `Mutex` to ensure thread-safe access to the `running_state`.
+3. Instead of using flags, it uses an enum `RunningState` to represent the state of the ongoing process.
+4. It creates a channel to allow for cancellation of the ongoing process.
+5. It uses Rust's pattern matching to handle different states.
+6. It logs a warning using `self.log_warning()` instead of `dc_log_warning()`.
+7. It returns a `Receiver<()>` which can be used to wait for cancellation signals.
+
+This translation assumes that the `Context` struct in Rust has a `running_state` field of type `Mutex<RunningState>` and a `log_warning` method. The function uses the provided dependencies and libraries as needed.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub(crate) async fn alloc_ongoing(&self) -> Result<Receiver<()>> {
+    let mut running_state = self.running_state.lock().await;
+
+    match *running_state {
+        RunningState::Running { .. } => {
+            self.log_warning(0, "There is already another ongoing process running.").await;
+            bail!("Ongoing process already running")
+        }
+        RunningState::ShallStop { .. } => {
+            bail!("Cannot allocate ongoing process while stopping")
+        }
+        RunningState::Stopped => {
+            let (cancel_sender, cancel_receiver) = channel::bounded(1);
+            *running_state = RunningState::Running { cancel_sender };
+            Ok(cancel_receiver)
+        }
+    }
+}
+```
+
+This Rust function achieves the same functionality as the C function, with the following changes and considerations:
+
+1. It uses the `Result` type to handle errors and return the `Receiver<()>` on success.
+2. It uses a `Mutex` to ensure thread-safe access to the `running_state`.
+3. Instead of using flags, it uses an enum `RunningState` to represent the state of the ongoing process.
+4. It creates a channel to allow for cancellation of the ongoing process.
+5. It uses Rust's pattern matching to handle different states.
+6. It logs a warning using `self.log_warning()` instead of `dc_log_warning()`.
+7. It returns a `Receiver<()>` which can be used to wait for cancellation signals.
+
+This translation assumes that the `Context` struct in Rust has a `running_state` field of type `Mutex<RunningState>` and a `log_warning` method. The function uses the provided dependencies and libraries as needed.

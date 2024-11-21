@@ -1,0 +1,324 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int SERVER_KEY(int sha,byte[] Z,byte[] SST,byte[] W,byte[] H,byte[] HID,byte[] xID,byte[] xCID,byte[] SK)
+	{
+		byte[] t;
+
+		ECP8 sQ=ECP8.fromBytes(SST);
+		if (sQ.is_infinity()) return INVALID_POINT; 
+		ECP R=ECP.fromBytes(Z);
+		if (R.is_infinity()) return INVALID_POINT; 
+		ECP A=ECP.fromBytes(HID);
+		if (A.is_infinity()) return INVALID_POINT; 
+
+		ECP U;
+		if (xCID!=null)
+			U=ECP.fromBytes(xCID);
+		else
+			U=ECP.fromBytes(xID);
+		if (U.is_infinity()) return INVALID_POINT; 
+
+		BIG w=BIG.fromBytes(W);
+		BIG h=BIG.fromBytes(H);
+		A=PAIR256.G1mul(A,h);	// new
+		R.add(A); //R.affine();
+
+		U=PAIR256.G1mul(U,w);
+		FP48 g=PAIR256.ate(sQ,R);
+		g=PAIR256.fexp(g);
+
+		FP16 c=g.trace();
+
+		t=mpin_hash(sha,c,U);
+
+		for (int i=0;i<ECP.AESKEY;i++) SK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn add(&mut self, b: &FP) {
+        self.x.add(&(b.x));
+        self.xes += b.xes;
+        if self.xes > FEXCESS {
+            self.reduce()
+        }
+    }
+pub fn from_bytes(b: &[u8]) -> ECP {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+        let p = Big::new_ints(&rom::MODULUS);
+
+        for i in 0..mb {
+            t[i] = b[i + 1]
+        }
+        let px = Big::from_bytes(&t);
+        if Big::comp(&px, &p) >= 0 {
+            return ECP::new();
+        }
+
+        if CURVETYPE == CurveType::Montgomery {
+            return ECP::new_big(&px);
+        }
+
+        if b[0] == 0x04 {
+            for i in 0..mb {
+                t[i] = b[i + mb + 1]
+            }
+            let py = Big::from_bytes(&t);
+            if Big::comp(&py, &p) >= 0 {
+                return ECP::new();
+            }
+            return ECP::new_bigs(&px, &py);
+        }
+
+        if b[0] == 0x02 || b[0] == 0x03 {
+            return ECP::new_bigint(&px, (b[0] & 1) as isize);
+        }
+
+        return ECP::new();
+    }
+pub fn g1mul(P: &ECP, e: &Big) -> ECP {
+    if rom::USE_GLV {
+        let mut R = P.clone();
+        let mut Q = P.clone();
+        Q.affine();
+        let q = Big::new_ints(&rom::CURVE_ORDER);
+        let mut cru = FP::new_big(Big::new_ints(&rom::CURVE_CRU));
+        let mut u = glv(e);
+        Q.mulx(&mut cru);
+
+        let mut np = u[0].nbits();
+        let mut t: Big = Big::modneg(&u[0], &q);
+        let mut nn = t.nbits();
+        if nn < np {
+            u[0] = t.clone();
+            R.neg();
+        }
+
+        np = u[1].nbits();
+        t = Big::modneg(&u[1], &q);
+        nn = t.nbits();
+        if nn < np {
+            u[1] = t;
+            Q.neg();
+        }
+        u[0].norm();
+        u[1].norm();
+        R.mul2(&u[0], &Q, &u[1])
+    } else {
+        P.mul(e)
+    }
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let sQ = ECP8::from_bytes(&sst);
+    if sQ.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut R = ECP::from_bytes(&z);
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut A = ECP::from_bytes(&hid);
+    if A.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut U = if let Some(rxcid) = xcid {
+        ECP::from_bytes(&rxcid)
+    } else {
+        ECP::from_bytes(&xid)
+    };
+
+    if U.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut w = Big::from_bytes(&w);
+    let mut h = Big::from_bytes(&h);
+    A = pair256::g1mul(&mut A, &mut h); // new
+    R.add(&mut A);
+
+    U = pair256::g1mul(&mut U, &mut w);
+    let mut g = pair256::ate(&sQ, &R);
+    g = pair256::fexp(&g);
+
+    let mut c = g.trace();
+
+    hash(sha, &mut c, &mut U, sk);
+
+    return 0;
+}
+</function>
+<translated function>
+Here's the java function translated to Rust:
+
+```Rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let mut t: [u8; ecp::AESKEY as usize];
+    
+    let s_q = ECP8::from_bytes(sst);
+    if s_q.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut r = ECP::from_bytes(z);
+    if r.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut a = ECP::from_bytes(hid);
+    if a.is_infinity() {
+        return INVALID_POINT;
+    }
+  
+    let mut u;
+    match xcid {
+        Some(xcid) => u = ECP::from_bytes(xcid),
+        None =>  u = ECP::from_bytes(xid)
+    }
+    if u.is_infinity() {
+        return INVALID_POINT;
+    }
+  
+    let w = BIG::frombytes(w);
+    let h = BIG::frombytes(h);
+
+    a = pair256::g1mul(&a, &h);
+    r.add(&a);
+
+    u = pair256::g1mul(&u, &w);
+    let mut g = pair256::ate(&s_q, &r);
+    g = pair256::fexp(&g);
+
+    let c = g.trace();
+
+    t = mpin_hash(sha, &c, &u);
+
+    for i in 0..ecp::AESKEY {
+        sk[i] = t[i];
+    }
+
+    0
+}
+```
+I have replaced Java equivalent methods with Rust methods in the provided skeleton. This should cover the translation of the Java method to Rust. Please ensure the dependencies and/or other necessary inclusions are properly defined in your code as per your environment or requirement, as they might be slightly different than the snippet based on your project setup.</translated function>Here's the java function translated to Rust:
+
+```Rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let mut t: [u8; ecp::AESKEY as usize];
+    
+    let s_q = ECP8::from_bytes(sst);
+    if s_q.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut r = ECP::from_bytes(z);
+    if r.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut a = ECP::from_bytes(hid);
+    if a.is_infinity() {
+        return INVALID_POINT;
+    }
+  
+    let mut u;
+    match xcid {
+        Some(xcid) => u = ECP::from_bytes(xcid),
+        None =>  u = ECP::from_bytes(xid)
+    }
+    if u.is_infinity() {
+        return INVALID_POINT;
+    }
+  
+    let w = BIG::frombytes(w);
+    let h = BIG::frombytes(h);
+
+    a = pair256::g1mul(&a, &h);
+    r.add(&a);
+
+    u = pair256::g1mul(&u, &w);
+    let mut g = pair256::ate(&s_q, &r);
+    g = pair256::fexp(&g);
+
+    let c = g.trace();
+
+    t = mpin_hash(sha, &c, &u);
+
+    for i in 0..ecp::AESKEY {
+        sk[i] = t[i];
+    }
+
+    0
+}
+```
+I have replaced Java equivalent methods with Rust methods in the provided skeleton. This should cover the translation of the Java method to Rust. Please ensure the dependencies and/or other necessary inclusions are properly defined in your code as per your environment or requirement, as they might be slightly different than the snippet based on your project setup.

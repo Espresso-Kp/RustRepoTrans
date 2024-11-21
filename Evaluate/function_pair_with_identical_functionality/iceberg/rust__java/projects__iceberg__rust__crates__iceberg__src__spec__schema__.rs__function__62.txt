@@ -1,0 +1,70 @@
+<path>
+projects/iceberg/rust/crates/iceberg/src/spec/schema.rs
+</path>
+<function>
+    fn map(
+        &mut self,
+        map: &MapType,
+        _key_value: Option<Type>,
+        value: Option<Type>,
+    ) -> Result<Option<Type>> {
+        if self.selected.contains(&map.value_field.id) {
+            if self.select_full_types {
+                Ok(Some(Type::Map(map.clone())))
+            } else if map.value_field.field_type.is_struct() {
+                let projected_struct =
+                    PruneColumn::project_selected_struct(Some(value.unwrap())).unwrap();
+                return Ok(Some(Type::Map(PruneColumn::project_map(
+                    map,
+                    Type::Struct(projected_struct),
+                )?)));
+            } else if map.value_field.field_type.is_primitive() {
+                return Ok(Some(Type::Map(map.clone())));
+            } else {
+                return Err(Error::new(
+                        ErrorKind::DataInvalid,
+                        format!("Cannot explicitly project List or Map types, Map value {} of type {} was selected", map.value_field.id, map.value_field.field_type),
+                    ));
+            }
+        } else if let Some(value_result) = value {
+            return Ok(Some(Type::Map(PruneColumn::project_map(
+                map,
+                value_result,
+            )?)));
+        } else if self.selected.contains(&map.key_field.id) {
+            Ok(Some(Type::Map(map.clone())))
+        } else {
+            Ok(None)
+        }
+    }
+</function>
+------
+
+<path>
+projects/iceberg/java/api/src/main/java/org/apache/iceberg/types/PruneColumns.java
+</path>
+<function>
+  public Type map(Types.MapType map, Type ignored, Type valueResult) {
+    if (selected.contains(map.valueId())) {
+      if (selectFullTypes) {
+        return map;
+      } else if (map.valueType().isStructType()) {
+        Type projectedStruct = projectSelectedStruct(valueResult);
+        return projectMap(map, projectedStruct);
+      } else {
+        Preconditions.checkArgument(
+            map.valueType().isPrimitiveType(),
+            "Cannot explicitly project List or Map types, Map value %s of type %s was selected",
+            map.valueId(),
+            map.valueType());
+        return map;
+      }
+    } else if (valueResult != null) {
+      return projectMap(map, valueResult);
+    } else if (selected.contains(map.keyId())) {
+      // right now, maps can't be selected without values
+      return map;
+    }
+    return null;
+  }
+</function>

@@ -1,0 +1,522 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int CLIENT_1(int sha,int date,byte[] CLIENT_ID,RAND rng,byte[] X,int pin,byte[] TOKEN,byte[] SEC,byte[] xID,byte[] xCID,byte[] PERMIT)
+	{
+		BIG r=new BIG(ROM.CURVE_Order);
+		BIG x;
+		if (rng!=null)
+		{
+			x=BIG.randomnum(r,rng);
+			//if (ROM.AES_S>0)
+			//{
+			//	x.mod2m(2*ROM.AES_S);
+			//}
+			x.toBytes(X);
+		}
+		else
+		{
+			x=BIG.fromBytes(X);
+		}
+		ECP P,T,W;
+		BIG px;
+//		byte[] t=new byte[EFS];
+
+		byte[] h=hashit(sha,0,CLIENT_ID,EFS);
+		P=ECP.mapit(h);
+	
+		T=ECP.fromBytes(TOKEN);
+		if (T.is_infinity()) return INVALID_POINT;
+
+		pin%=MAXPIN;
+		W=P.pinmul(pin,PBLEN);
+		T.add(W);
+		if (date!=0)
+		{
+			W=ECP.fromBytes(PERMIT);
+			if (W.is_infinity()) return INVALID_POINT;
+			T.add(W);
+			h=hashit(sha,date,h,EFS);
+			W=ECP.mapit(h);
+			if (xID!=null)
+			{
+				P=PAIR192.G1mul(P,x);
+				P.toBytes(xID,false);
+				W=PAIR192.G1mul(W,x);
+				P.add(W); //P.affine();
+			}
+			else
+			{
+				P.add(W); //P.affine();
+				P=PAIR192.G1mul(P,x);
+			}
+			if (xCID!=null) P.toBytes(xCID,false);
+		}
+		else
+		{
+			if (xID!=null)
+			{
+				P=PAIR192.G1mul(P,x);
+				P.toBytes(xID,false);
+			}
+		}
+
+		//T.affine();
+		T.toBytes(SEC,false);
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+pub fn to_bytes(&self, b: &mut [u8]) {
+        self.to_byte_array(b, 0)
+    }
+fn hashit(sha: usize, n: usize, id: &[u8], w: &mut [u8]) -> bool {
+    let mut r: [u8; 64] = [0; 64];
+    let mut didit = false;
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        h.process_array(id);
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+        didit = true;
+    }
+    if !didit {
+        return false;
+    }
+
+    let rm = big::MODBYTES as usize;
+
+    if sha > rm {
+        for i in 0..rm {
+            w[i] = r[i]
+        }
+    } else {
+        for i in 0..sha {
+            w[i + rm - sha] = r[i]
+        }
+        for i in 0..(rm - sha) {
+            w[i] = 0
+        }
+    }
+
+    return true;
+}
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+pub fn from_bytes(b: &[u8]) -> Big {
+        Big::from_byte_array(b, 0)
+    }
+pub fn mapit(h: &[u8]) -> ECP {
+        let q = Big::new_ints(&rom::MODULUS);
+        let mut x = Big::from_bytes(h);
+        x.rmod(&q);
+        let mut P: ECP;
+
+        loop {
+            loop {
+                if CURVETYPE != CurveType::Montgomery {
+                    P = ECP::new_bigint(&x, 0);
+                } else {
+                    P = ECP::new_big(&x);
+                }
+                x.inc(1);
+                x.norm();
+                if !P.is_infinity() {
+                    break;
+                }
+            }
+            P.cfp();
+            if !P.is_infinity() {
+                break;
+            }
+        }
+
+        return P;
+    }
+pub struct Big {
+    pub w: [Chunk; NLEN],
+}
+pub struct RAND {
+    ira: [u32; RAND_NK], /* random number...   */
+    rndptr: usize,
+    borrow: u32,
+    pool_ptr: usize,
+    pool: [u8; 32],
+}
+pub const INVALID_POINT: isize = -14;
+pub const PBLEN: i32 = 14;
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new_ints(&rom::CURVE_ORDER);
+
+    let mut sx: Big;
+
+    if let Some(rd) = rng {
+        sx = Big::randomnum(&r, rd);
+        sx.to_bytes(x);
+    } else {
+        sx = Big::from_bytes(x);
+    }
+
+    const RM: usize = big::MODBYTES as usize;
+    let mut h: [u8; RM] = [0; RM];
+
+    hashit(sha, 0, &client_id, &mut h);
+    let mut P = ECP::mapit(&h);
+
+    let mut T = ECP::from_bytes(&token);
+    if T.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut W = P.pinmul((pin as i32) % MAXPIN, PBLEN);
+    T.add(&mut W);
+    if date != 0 {
+        if let Some(rpermit) = permit {
+            W = ECP::from_bytes(&rpermit);
+        }
+        if W.is_infinity() {
+            return INVALID_POINT;
+        }
+        T.add(&mut W);
+        let mut h2: [u8; RM] = [0; RM];
+        hashit(sha, date, &h, &mut h2);
+        W = ECP::mapit(&h2);
+        if let Some(mut rxid) = xid {
+            P = pair192::g1mul(&mut P, &mut sx);
+            P.to_bytes(&mut rxid, false);
+            W = pair192::g1mul(&mut W, &mut sx);
+            P.add(&mut W);
+        } else {
+            P.add(&mut W);
+            P = pair192::g1mul(&mut P, &mut sx);
+        }
+        if let Some(mut rxcid) = xcid {
+            P.to_bytes(&mut rxcid, false)
+        }
+    } else {
+        if let Some(mut rxid) = xid {
+            P = pair192::g1mul(&mut P, &mut sx);
+            P.to_bytes(&mut rxid, false);
+        }
+    }
+
+    T.to_bytes(sec, false);
+    return 0;
+}
+</function>
+<translated function>
+ ```rust
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new();
+    let mut x = if let Some(rng) = rng {
+        let mut x = Big::randomnum(&r, rng);
+        x.to_bytes(x);
+        x
+    } else {
+        Big::from_bytes(x)
+    };
+
+    let mut p = ECP::mapit(&hashit(sha, 0, client_id, EFS));
+    let t = ECP::from_bytes(token);
+    if t.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let pin = pin % MAXPIN;
+    let w = p.pinmul(pin, PBLEN);
+    t.add(&w);
+
+    if date != 0 {
+        let w = permit.map(|permit| ECP::from_bytes(permit)).unwrap_or(ECP::infinity());
+        if w.is_infinity() {
+            return INVALID_POINT;
+        }
+        t.add(&w);
+        let h = hashit(sha, date, &hashit(sha, 0, client_id, EFS), EFS);
+        let w = ECP::mapit(&h);
+        if let Some(xid) = xid {
+            p = PAIR192::g1mul(&p, &x);
+            p.to_bytes(xid, false);
+            let w = PAIR192::g1mul(&w, &x);
+            p.add(&w); // P.affine();
+        } else {
+            p.add(&w); // P.affine();
+            p = PAIR192::g1mul(&p, &x);
+        }
+        if let Some(xcid) = xcid {
+            p.to_bytes(xcid, false);
+        }
+    } else {
+        if let Some(xid) = xid {
+            p = PAIR192::g1mul(&p, &x);
+            p.to_bytes(xid, false);
+        }
+    }
+
+    t.to_bytes(sec, false);
+    0
+}
+```</translated function> ```rust
+pub fn client_1(
+    sha: usize,
+    date: usize,
+    client_id: &[u8],
+    rng: Option<&mut RAND>,
+    x: &mut [u8],
+    pin: usize,
+    token: &[u8],
+    sec: &mut [u8],
+    xid: Option<&mut [u8]>,
+    xcid: Option<&mut [u8]>,
+    permit: Option<&[u8]>,
+) -> isize {
+    let r = Big::new();
+    let mut x = if let Some(rng) = rng {
+        let mut x = Big::randomnum(&r, rng);
+        x.to_bytes(x);
+        x
+    } else {
+        Big::from_bytes(x)
+    };
+
+    let mut p = ECP::mapit(&hashit(sha, 0, client_id, EFS));
+    let t = ECP::from_bytes(token);
+    if t.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let pin = pin % MAXPIN;
+    let w = p.pinmul(pin, PBLEN);
+    t.add(&w);
+
+    if date != 0 {
+        let w = permit.map(|permit| ECP::from_bytes(permit)).unwrap_or(ECP::infinity());
+        if w.is_infinity() {
+            return INVALID_POINT;
+        }
+        t.add(&w);
+        let h = hashit(sha, date, &hashit(sha, 0, client_id, EFS), EFS);
+        let w = ECP::mapit(&h);
+        if let Some(xid) = xid {
+            p = PAIR192::g1mul(&p, &x);
+            p.to_bytes(xid, false);
+            let w = PAIR192::g1mul(&w, &x);
+            p.add(&w); // P.affine();
+        } else {
+            p.add(&w); // P.affine();
+            p = PAIR192::g1mul(&p, &x);
+        }
+        if let Some(xcid) = xcid {
+            p.to_bytes(xcid, false);
+        }
+    } else {
+        if let Some(xid) = xid {
+            p = PAIR192::g1mul(&p, &x);
+            p.to_bytes(xid, false);
+        }
+    }
+
+    t.to_bytes(sec, false);
+    0
+}
+```

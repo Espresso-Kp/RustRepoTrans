@@ -1,0 +1,290 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int SERVER_KEY(int sha,byte[] Z,byte[] SST,byte[] W,byte[] H,byte[] HID,byte[] xID,byte[] xCID,byte[] SK)
+	{
+		byte[] t;
+
+		ECP8 sQ=ECP8.fromBytes(SST);
+		if (sQ.is_infinity()) return INVALID_POINT; 
+		ECP R=ECP.fromBytes(Z);
+		if (R.is_infinity()) return INVALID_POINT; 
+		ECP A=ECP.fromBytes(HID);
+		if (A.is_infinity()) return INVALID_POINT; 
+
+		ECP U;
+		if (xCID!=null)
+			U=ECP.fromBytes(xCID);
+		else
+			U=ECP.fromBytes(xID);
+		if (U.is_infinity()) return INVALID_POINT; 
+
+		BIG w=BIG.fromBytes(W);
+		BIG h=BIG.fromBytes(H);
+		A=PAIR256.G1mul(A,h);	// new
+		R.add(A); //R.affine();
+
+		U=PAIR256.G1mul(U,w);
+		FP48 g=PAIR256.ate(sQ,R);
+		g=PAIR256.fexp(g);
+
+		FP16 c=g.trace();
+
+		t=mpin_hash(sha,c,U);
+
+		for (int i=0;i<ECP.AESKEY;i++) SK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp8::ECP8;
+use super::fp16::FP16;
+use super::fp48::FP48;
+use super::pair256;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+    let sQ = ECP8::from_bytes(&sst);
+    if sQ.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut R = ECP::from_bytes(&z);
+    if R.is_infinity() {
+        return INVALID_POINT;
+    }
+    let mut A = ECP::from_bytes(&hid);
+    if A.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut U = if let Some(rxcid) = xcid {
+        ECP::from_bytes(&rxcid)
+    } else {
+        ECP::from_bytes(&xid)
+    };
+
+    if U.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut w = Big::from_bytes(&w);
+    let mut h = Big::from_bytes(&h);
+    A = pair256::g1mul(&mut A, &mut h); // new
+    R.add(&mut A);
+
+    U = pair256::g1mul(&mut U, &mut w);
+    let mut g = pair256::ate(&sQ, &R);
+    g = pair256::fexp(&g);
+
+    let mut c = g.trace();
+
+    hash(sha, &mut c, &mut U, sk);
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+
+    let mut t: Vec<u8>;
+
+    let sQ = match ECP8::frombytes(&mut sst.to_vec()) {
+        Some(sQ) => sQ,
+        None => return rom::INVALID_POINT,
+    };
+
+    let mut R = match ECP::frombytes(&mut z.to_vec()) {
+        Some(R) => R,
+        None => return rom::INVALID_POINT,
+    };
+    
+    let mut A = match ECP::frombytes(&mut hid.to_vec()) {
+        Some(A) => A,
+        None => return rom::INVALID_POINT,
+    };
+    
+    let mut U = match xcid {
+        Some(xcid) => {
+            match ECP::frombytes(&mut xcid.to_vec()) {
+                Some(U) => U,
+                None => return rom::INVALID_POINT,
+            }
+        }
+        None => {
+            match ECP::frombytes(&mut xid.to_vec()) {
+                Some(U) => U,
+                None => return rom::INVALID_POINT,
+            }
+        }
+    };
+    
+    let w = Big::frombytes(&mut w.to_vec());
+    let h = Big::frombytes(&mut h.to_vec());
+    A = pair256::g1mul(&A, &h);
+    R.add(&A);
+    U = pair256::g1mul(&U, &w);
+    let mut g = pair256::ate(&sQ, &R);
+    g = pair256::fexp(&g);
+    let c = g.trace();
+    t = hcdsa::mpin_hash(sha, &c, &U);
+    for i in 0..sk.len() {
+        sk[i] = t[i];
+    }
+
+    return 0;
+}
+```
+
+Some notes about the translation:
+
+1. In the Rust code, the Java `null` is replaced with `Option<&[u8]>` in function signature and the corresponding `None` match arm.
+
+2. The Java `.is_infinity()` is equivalent to `None` match in Rust.
+
+3. The Java `byte[]` is equivalent to `&[u8]` in the Rust function.
+
+4. The `BIG` Java class corresponds to the `big::Big` Alegra type in Rust.
+
+5. Because Rust does not have exceptions like Java, using the `match` expression is a common way to check results.
+
+6. I've changed the error return from INVALID_POINT constant into `rom::INVALID_POINT`.
+
+7. It is necessary to import the `hcdsa` module for the `mpin_hash` function. Assuming the module exists and is part of the scope of the parent module or imported using a use statement. If it does not exist, the function need to be implemented.</translated function>Here is the translated Rust function:
+
+```rust
+pub fn server_key(
+    sha: usize,
+    z: &[u8],
+    sst: &[u8],
+    w: &[u8],
+    h: &[u8],
+    hid: &[u8],
+    xid: &[u8],
+    xcid: Option<&[u8]>,
+    sk: &mut [u8],
+) -> isize {
+
+    let mut t: Vec<u8>;
+
+    let sQ = match ECP8::frombytes(&mut sst.to_vec()) {
+        Some(sQ) => sQ,
+        None => return rom::INVALID_POINT,
+    };
+
+    let mut R = match ECP::frombytes(&mut z.to_vec()) {
+        Some(R) => R,
+        None => return rom::INVALID_POINT,
+    };
+    
+    let mut A = match ECP::frombytes(&mut hid.to_vec()) {
+        Some(A) => A,
+        None => return rom::INVALID_POINT,
+    };
+    
+    let mut U = match xcid {
+        Some(xcid) => {
+            match ECP::frombytes(&mut xcid.to_vec()) {
+                Some(U) => U,
+                None => return rom::INVALID_POINT,
+            }
+        }
+        None => {
+            match ECP::frombytes(&mut xid.to_vec()) {
+                Some(U) => U,
+                None => return rom::INVALID_POINT,
+            }
+        }
+    };
+    
+    let w = Big::frombytes(&mut w.to_vec());
+    let h = Big::frombytes(&mut h.to_vec());
+    A = pair256::g1mul(&A, &h);
+    R.add(&A);
+    U = pair256::g1mul(&U, &w);
+    let mut g = pair256::ate(&sQ, &R);
+    g = pair256::fexp(&g);
+    let c = g.trace();
+    t = hcdsa::mpin_hash(sha, &c, &U);
+    for i in 0..sk.len() {
+        sk[i] = t[i];
+    }
+
+    return 0;
+}
+```
+
+Some notes about the translation:
+
+1. In the Rust code, the Java `null` is replaced with `Option<&[u8]>` in function signature and the corresponding `None` match arm.
+
+2. The Java `.is_infinity()` is equivalent to `None` match in Rust.
+
+3. The Java `byte[]` is equivalent to `&[u8]` in the Rust function.
+
+4. The `BIG` Java class corresponds to the `big::Big` Alegra type in Rust.
+
+5. Because Rust does not have exceptions like Java, using the `match` expression is a common way to check results.
+
+6. I've changed the error return from INVALID_POINT constant into `rom::INVALID_POINT`.
+
+7. It is necessary to import the `hcdsa` module for the `mpin_hash` function. Assuming the module exists and is part of the scope of the parent module or imported using a use statement. If it does not exist, the function need to be implemented.

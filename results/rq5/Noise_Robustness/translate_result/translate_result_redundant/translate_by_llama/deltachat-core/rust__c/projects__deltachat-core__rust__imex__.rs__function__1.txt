@@ -1,0 +1,649 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+void dc_imex(dc_context_t* context, int what, const char* param1, const char* param2)
+{
+	dc_param_t* param = dc_param_new();
+
+	dc_param_set_int(param, DC_PARAM_CMD,      what);
+	dc_param_set    (param, DC_PARAM_CMD_ARG,  param1);
+	dc_param_set    (param, DC_PARAM_CMD_ARG2, param2);
+
+	dc_job_kill_action(context, DC_JOB_IMEX_IMAP);
+	dc_job_add(context, DC_JOB_IMEX_IMAP, 0, param->packed, 0); // results in a call to dc_job_do_DC_JOB_IMEX_IMAP()
+
+	dc_param_unref(param);
+}
+</c function>
+<rust function signature>
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) async fn free_ongoing(&self) {
+        let mut s = self.running_state.write().await;
+        if let RunningState::ShallStop { request } = *s {
+            info!(self, "Ongoing stopped in {:?}", time_elapsed(&request));
+        }
+        *s = RunningState::Stopped;
+    }
+
+async fn imex_inner(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> {
+    info!(
+        context,
+        "{} path: {}",
+        match what {
+            ImexMode::ExportSelfKeys | ImexMode::ExportBackup => "Export",
+            ImexMode::ImportSelfKeys | ImexMode::ImportBackup => "Import",
+        },
+        path.display()
+    );
+    ensure!(context.sql.is_open().await, "Database not opened.");
+    context.emit_event(EventType::ImexProgress(10));
+
+    if what == ImexMode::ExportBackup || what == ImexMode::ExportSelfKeys {
+        // before we export anything, make sure the private key exists
+        e2ee::ensure_secret_key_exists(context)
+            .await
+            .context("Cannot create private key or private key not available")?;
+
+        create_folder(context, &path).await?;
+    }
+
+    match what {
+        ImexMode::ExportSelfKeys => export_self_keys(context, path).await,
+        ImexMode::ImportSelfKeys => import_self_keys(context, path).await,
+
+        ImexMode::ExportBackup => {
+            export_backup(context, path, passphrase.unwrap_or_default()).await
+        }
+        ImexMode::ImportBackup => {
+            import_backup(context, path, passphrase.unwrap_or_default()).await
+        }
+    }
+}
+
+pub(crate) async fn alloc_ongoing(&self) -> Result<Receiver<()>> {
+        let mut s = self.running_state.write().await;
+        ensure!(
+            matches!(*s, RunningState::Stopped),
+            "There is already another ongoing process running."
+        );
+
+        let (sender, receiver) = channel::bounded(1);
+        *s = RunningState::Running {
+            cancel_sender: sender,
+        };
+
+        Ok(receiver)
+    }
+
+pub async fn recv(&self) -> Option<Event> {
+        let mut lock = self.0.lock().await;
+        match lock.recv().await {
+            Err(async_broadcast::RecvError::Overflowed(n)) => Some(Event {
+                id: 0,
+                typ: EventType::EventChannelOverflow { n },
+            }),
+            Err(async_broadcast::RecvError::Closed) => None,
+            Ok(event) => Some(event),
+        }
+    }
+
+macro_rules! error {
+    ($ctx:expr, $msg:expr) => {
+        error!($ctx, $msg,)
+    };
+    ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
+        let formatted = format!($msg, $($args),*);
+        $ctx.set_last_error(&formatted);
+        $ctx.emit_event($crate::EventType::Error(formatted));
+    }};
+}
+
+macro_rules! anyhow {
+    ($msg:literal $(,)?) => {
+        $crate::__private::must_use({
+            let error = $crate::__private::format_err($crate::__private::format_args!($msg));
+            error
+        })
+    };
+    ($err:expr $(,)?) => {
+        $crate::__private::must_use({
+            use $crate::__private::kind::*;
+            let error = match $err {
+                error => (&error).anyhow_kind().new(error),
+            };
+            error
+        })
+    };
+    ($fmt:expr, $($arg:tt)*) => {
+        $crate::Error::msg($crate::__private::format!($fmt, $($arg)*))
+    };
+}    
+
+macro_rules! info {
+    ($ctx:expr,  $msg:expr) => {
+        info!($ctx, $msg,)
+    };
+    ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
+        let formatted = format!($msg, $($args),*);
+        let full = format!("{file}:{line}: {msg}",
+                           file = file!(),
+                           line = line!(),
+                           msg = &formatted);
+        $ctx.emit_event($crate::EventType::Info(full));
+    }};
+}
+
+pub fn emit_event(&self, event: EventType) {
+        {
+            let lock = self.debug_logging.read().expect("RwLock is poisoned");
+            if let Some(debug_logging) = &*lock {
+                debug_logging.log_event(event.clone());
+            }
+        }
+        self.events.emit(Event {
+            id: self.id,
+            typ: event,
+        });
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub enum EventType {
+    /// The library-user may write an informational string to the log.
+    ///
+    /// This event should *not* be reported to the end-user using a popup or something like
+    /// that.
+    Info(String),
+
+    /// Emitted when SMTP connection is established and login was successful.
+    SmtpConnected(String),
+
+    /// Emitted when IMAP connection is established and login was successful.
+    ImapConnected(String),
+
+    /// Emitted when a message was successfully sent to the SMTP server.
+    SmtpMessageSent(String),
+
+    /// Emitted when an IMAP message has been marked as deleted
+    ImapMessageDeleted(String),
+
+    /// Emitted when an IMAP message has been moved
+    ImapMessageMoved(String),
+
+    /// Emitted before going into IDLE on the Inbox folder.
+    ImapInboxIdle,
+
+    /// Emitted when an new file in the $BLOBDIR was created
+    NewBlobFile(String),
+
+    /// Emitted when an file in the $BLOBDIR was deleted
+    DeletedBlobFile(String),
+
+    /// The library-user should write a warning string to the log.
+    ///
+    /// This event should *not* be reported to the end-user using a popup or something like
+    /// that.
+    Warning(String),
+
+    /// The library-user should report an error to the end-user.
+    ///
+    /// As most things are asynchronous, things may go wrong at any time and the user
+    /// should not be disturbed by a dialog or so.  Instead, use a bubble or so.
+    ///
+    /// However, for ongoing processes (eg. configure())
+    /// or for functions that are expected to fail (eg. dc_continue_key_transfer())
+    /// it might be better to delay showing these events until the function has really
+    /// failed (returned false). It should be sufficient to report only the *last* error
+    /// in a messasge box then.
+    Error(String),
+
+    /// An action cannot be performed because the user is not in the group.
+    /// Reported eg. after a call to
+    /// dc_set_chat_name(), dc_set_chat_profile_image(),
+    /// dc_add_contact_to_chat(), dc_remove_contact_from_chat(),
+    /// dc_send_text_msg() or another sending function.
+    ErrorSelfNotInGroup(String),
+
+    /// Messages or chats changed.  One or more messages or chats changed for various
+    /// reasons in the database:
+    /// - Messages sent, received or removed
+    /// - Chats created, deleted or archived
+    /// - A draft has been set
+    ///
+    MsgsChanged {
+        /// Set if only a single chat is affected by the changes, otherwise 0.
+        chat_id: ChatId,
+
+        /// Set if only a single message is affected by the changes, otherwise 0.
+        msg_id: MsgId,
+    },
+
+    /// Reactions for the message changed.
+    ReactionsChanged {
+        /// ID of the chat which the message belongs to.
+        chat_id: ChatId,
+
+        /// ID of the message for which reactions were changed.
+        msg_id: MsgId,
+
+        /// ID of the contact whose reaction set is changed.
+        contact_id: ContactId,
+    },
+
+    /// There is a fresh message. Typically, the user will show an notification
+    /// when receiving this message.
+    ///
+    /// There is no extra #DC_EVENT_MSGS_CHANGED event send together with this event.
+    IncomingMsg {
+        /// ID of the chat where the message is assigned.
+        chat_id: ChatId,
+
+        /// ID of the message.
+        msg_id: MsgId,
+    },
+
+    /// Downloading a bunch of messages just finished.
+    IncomingMsgBunch,
+
+    /// Messages were seen or noticed.
+    /// chat id is always set.
+    MsgsNoticed(ChatId),
+
+    /// A single message is sent successfully. State changed from  DC_STATE_OUT_PENDING to
+    /// DC_STATE_OUT_DELIVERED, see dc_msg_get_state().
+    MsgDelivered {
+        /// ID of the chat which the message belongs to.
+        chat_id: ChatId,
+
+        /// ID of the message that was successfully sent.
+        msg_id: MsgId,
+    },
+
+    /// A single message could not be sent. State changed from DC_STATE_OUT_PENDING or DC_STATE_OUT_DELIVERED to
+    /// DC_STATE_OUT_FAILED, see dc_msg_get_state().
+    MsgFailed {
+        /// ID of the chat which the message belongs to.
+        chat_id: ChatId,
+
+        /// ID of the message that could not be sent.
+        msg_id: MsgId,
+    },
+
+    /// A single message is read by the receiver. State changed from DC_STATE_OUT_DELIVERED to
+    /// DC_STATE_OUT_MDN_RCVD, see dc_msg_get_state().
+    MsgRead {
+        /// ID of the chat which the message belongs to.
+        chat_id: ChatId,
+
+        /// ID of the message that was read.
+        msg_id: MsgId,
+    },
+
+    /// A single message was deleted.
+    ///
+    /// This event means that the message will no longer appear in the messagelist.
+    /// UI should remove the message from the messagelist
+    /// in response to this event if the message is currently displayed.
+    ///
+    /// The message may have been explicitly deleted by the user or expired.
+    /// Internally the message may have been removed from the database,
+    /// moved to the trash chat or hidden.
+    ///
+    /// This event does not indicate the message
+    /// deletion from the server.
+    MsgDeleted {
+        /// ID of the chat where the message was prior to deletion.
+        /// Never 0 or trash chat.
+        chat_id: ChatId,
+
+        /// ID of the deleted message. Never 0.
+        msg_id: MsgId,
+    },
+
+    /// Chat changed.  The name or the image of a chat group was changed or members were added or removed.
+    /// Or the verify state of a chat has changed.
+    /// See dc_set_chat_name(), dc_set_chat_profile_image(), dc_add_contact_to_chat()
+    /// and dc_remove_contact_from_chat().
+    ///
+    /// This event does not include ephemeral timer modification, which
+    /// is a separate event.
+    ChatModified(ChatId),
+
+    /// Chat ephemeral timer changed.
+    ChatEphemeralTimerModified {
+        /// Chat ID.
+        chat_id: ChatId,
+
+        /// New ephemeral timer value.
+        timer: EphemeralTimer,
+    },
+
+    /// Contact(s) created, renamed, blocked, deleted or changed their "recently seen" status.
+    ///
+    /// @param data1 (int) If set, this is the contact_id of an added contact that should be selected.
+    ContactsChanged(Option<ContactId>),
+
+    /// Location of one or more contact has changed.
+    ///
+    /// @param data1 (u32) contact_id of the contact for which the location has changed.
+    ///     If the locations of several contacts have been changed,
+    ///     eg. after calling dc_delete_all_locations(), this parameter is set to `None`.
+    LocationChanged(Option<ContactId>),
+
+    /// Inform about the configuration progress started by configure().
+    ConfigureProgress {
+        /// Progress.
+        ///
+        /// 0=error, 1-999=progress in permille, 1000=success and done
+        progress: usize,
+
+        /// Progress comment or error, something to display to the user.
+        comment: Option<String>,
+    },
+
+    /// Inform about the import/export progress started by imex().
+    ///
+    /// @param data1 (usize) 0=error, 1-999=progress in permille, 1000=success and done
+    /// @param data2 0
+    ImexProgress(usize),
+
+    /// A file has been exported. A file has been written by imex().
+    /// This event may be sent multiple times by a single call to imex().
+    ///
+    /// A typical purpose for a handler of this event may be to make the file public to some system
+    /// services.
+    ///
+    /// @param data2 0
+    ImexFileWritten(PathBuf),
+
+    /// Progress information of a secure-join handshake from the view of the inviter
+    /// (Alice, the person who shows the QR code).
+    ///
+    /// These events are typically sent after a joiner has scanned the QR code
+    /// generated by dc_get_securejoin_qr().
+    SecurejoinInviterProgress {
+        /// ID of the contact that wants to join.
+        contact_id: ContactId,
+
+        /// Progress as:
+        /// 300=vg-/vc-request received, typically shown as "bob@addr joins".
+        /// 600=vg-/vc-request-with-auth received, vg-member-added/vc-contact-confirm sent, typically shown as "bob@addr verified".
+        /// 800=contact added to chat, shown as "bob@addr securely joined GROUP". Only for the verified-group-protocol.
+        /// 1000=Protocol finished for this contact.
+        progress: usize,
+    },
+
+    /// Progress information of a secure-join handshake from the view of the joiner
+    /// (Bob, the person who scans the QR code).
+    /// The events are typically sent while dc_join_securejoin(), which
+    /// may take some time, is executed.
+    SecurejoinJoinerProgress {
+        /// ID of the inviting contact.
+        contact_id: ContactId,
+
+        /// Progress as:
+        /// 400=vg-/vc-request-with-auth sent, typically shown as "alice@addr verified, introducing myself."
+        /// (Bob has verified alice and waits until Alice does the same for him)
+        /// 1000=vg-member-added/vc-contact-confirm received
+        progress: usize,
+    },
+
+    /// The connectivity to the server changed.
+    /// This means that you should refresh the connectivity view
+    /// and possibly the connectivtiy HTML; see dc_get_connectivity() and
+    /// dc_get_connectivity_html() for details.
+    ConnectivityChanged,
+
+    /// The user's avatar changed.
+    /// Deprecated by `ConfigSynced`.
+    SelfavatarChanged,
+
+    /// A multi-device synced config value changed. Maybe the app needs to refresh smth. For
+    /// uniformity this is emitted on the source device too. The value isn't here, otherwise it
+    /// would be logged which might not be good for privacy.
+    ConfigSynced {
+        /// Configuration key.
+        key: Config,
+    },
+
+    /// Webxdc status update received.
+    WebxdcStatusUpdate {
+        /// Message ID.
+        msg_id: MsgId,
+
+        /// Status update ID.
+        status_update_serial: StatusUpdateSerial,
+    },
+
+    /// Data received over an ephemeral peer channel.
+    WebxdcRealtimeData {
+        /// Message ID.
+        msg_id: MsgId,
+
+        /// Realtime data.
+        data: Vec<u8>,
+    },
+
+    /// Inform that a message containing a webxdc instance has been deleted.
+    WebxdcInstanceDeleted {
+        /// ID of the deleted message.
+        msg_id: MsgId,
+    },
+
+    /// Tells that the Background fetch was completed (or timed out).
+    /// This event acts as a marker, when you reach this event you can be sure
+    /// that all events emitted during the background fetch were processed.
+    ///
+    /// This event is only emitted by the account manager
+    AccountsBackgroundFetchDone,
+    /// Inform that set of chats or the order of the chats in the chatlist has changed.
+    ///
+    /// Sometimes this is emitted together with `UIChatlistItemChanged`.
+    ChatlistChanged,
+
+    /// Inform that a single chat list item changed and needs to be rerendered.
+    /// If `chat_id` is set to None, then all currently visible chats need to be rerendered, and all not-visible items need to be cleared from cache if the UI has a cache.
+    ChatlistItemChanged {
+        /// ID of the changed chat
+        chat_id: Option<ChatId>,
+    },
+
+    /// Event for using in tests, e.g. as a fence between normally generated events.
+    #[cfg(test)]
+    Test,
+
+    /// Inform than some events have been skipped due to event channel overflow.
+    EventChannelOverflow {
+        /// Number of events skipped.
+        n: u64,
+    },
+}
+
+
+
+pub fn try_recv(&self) -> Result<Event> {
+        // Using `try_lock` instead of `lock`
+        // to avoid blocking
+        // in case there is a concurrent call to `recv`.
+        let mut lock = self.0.try_lock()?;
+        match lock.try_recv() {
+            Err(async_broadcast::TryRecvError::Overflowed(n)) => {
+                // Some events have been lost,
+                // but the channel is not closed.
+                Ok(Event {
+                    id: 0,
+                    typ: EventType::EventChannelOverflow { n },
+                })
+            }
+            res @ (Err(async_broadcast::TryRecvError::Empty)
+            | Err(async_broadcast::TryRecvError::Closed)
+            | Ok(_)) => Ok(res?),
+        }
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: Option<String>,
+) -> Result<()> {
+    let cancel = context.alloc_ongoing().await?;
+
+    let res = {
+        let _guard = context.scheduler.pause(context.clone()).await?;
+        imex_inner(context, what, path, passphrase)
+            .race(async {
+                cancel.recv().await.ok();
+                Err(format_err!("canceled"))
+            })
+            .await
+    };
+    context.free_ongoing().await;
+
+    if let Err(err) = res.as_ref() {
+        // We are using Anyhow's .context() and to show the inner error, too, we need the {:#}:
+        error!(context, "IMEX failed to complete: {:#}", err);
+        context.emit_event(EventType::ImexProgress(0));
+    } else {
+        info!(context, "IMEX successfully completed");
+        context.emit_event(EventType::ImexProgress(1000));
+    }
+
+    res
+}
+</function>
+<translated function>
+Here is the translated Rust function:
+
+```rust
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: OptionString,
+) -> Result()
+{
+    info!(context, "{} path: {}", match what {
+        ImexMode::ExportSelfKeys | Imex::ExportBackup => "Export",
+        ImexMode::ImportSelfKeys | Imex::ImportBackup => "Import",
+    }, path.display());
+
+    ensure!(context.sql.is_open().await, "Database not opened.");
+
+    context.emit_event(EventType::ImexProgress(10));
+
+    if what == Imex::ExportBackup || what == Imex::ExportSelfKeys {
+        // before we export anything, make sure the private key exists
+        e2ee::ensure_secret_key_exists(context).await.context("Cannot create private key or private key not available")?;
+        create_folder(context, path).await?;
+    }
+
+    match what {
+        Imex::ExportSelfKeys => ex_self_keys(context, path).await,
+        Imex::ImportKeys => import_self_keys(context, path).await,
+        Imex::ExportBackup => ex_backup(context, path, passphrase.unwrap_or_default()).await,
+        Imex::ImportBackup => import_backup(context, path, passphrase.unwrap_or_default()).await,
+    }
+}
+```
+
+Note that I've assumed that `dc_param_new`, `dc_param_set_int`, `dc_param_set`, `dc_job_kill_action`, `dc_job_add`, `dc_job_do`, `param_unref` are not needed in the Rust version, as they are not present in the provided Rust code.</translated function>Here is the translated Rust function:
+
+```rust
+pub async fn imex(
+    context: &Context,
+    what: ImexMode,
+    path: &Path,
+    passphrase: OptionString,
+) -> Result()
+{
+    info!(context, "{} path: {}", match what {
+        ImexMode::ExportSelfKeys | Imex::ExportBackup => "Export",
+        ImexMode::ImportSelfKeys | Imex::ImportBackup => "Import",
+    }, path.display());
+
+    ensure!(context.sql.is_open().await, "Database not opened.");
+
+    context.emit_event(EventType::ImexProgress(10));
+
+    if what == Imex::ExportBackup || what == Imex::ExportSelfKeys {
+        // before we export anything, make sure the private key exists
+        e2ee::ensure_secret_key_exists(context).await.context("Cannot create private key or private key not available")?;
+        create_folder(context, path).await?;
+    }
+
+    match what {
+        Imex::ExportSelfKeys => ex_self_keys(context, path).await,
+        Imex::ImportKeys => import_self_keys(context, path).await,
+        Imex::ExportBackup => ex_backup(context, path, passphrase.unwrap_or_default()).await,
+        Imex::ImportBackup => import_backup(context, path, passphrase.unwrap_or_default()).await,
+    }
+}
+```
+
+Note that I've assumed that `dc_param_new`, `dc_param_set_int`, `dc_param_set`, `dc_job_kill_action`, `dc_job_add`, `dc_job_do`, `param_unref` are not needed in the Rust version, as they are not present in the provided Rust code.

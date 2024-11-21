@@ -1,0 +1,325 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public static int ENCODING(RAND rng,byte[] E)
+	{
+		int rn,m,su,sv;
+		byte[] T=new byte[EFS];
+
+		for (int i=0;i<EFS;i++) T[i]=E[i+1];
+		BIG u=BIG.fromBytes(T);
+		for (int i=0;i<EFS;i++) T[i]=E[i+EFS+1];
+		BIG v=BIG.fromBytes(T);
+		
+		ECP P=new ECP(u,v);
+		if (P.is_infinity()) return INVALID_POINT;
+
+		BIG p=new BIG(ROM.Modulus);
+		u=BIG.randomnum(p,rng);
+
+		su=rng.getByte(); /*if (su<0) su=-su;*/ su%=2;
+		
+		ECP W=map(u,su);
+		P.sub(W); //P.affine();
+		sv=P.getS();
+		rn=unmap(v,P);
+		m=rng.getByte(); /*if (m<0) m=-m;*/ m%=rn;
+		v.inc(m+1);
+		E[0]=(byte)(su+2*sv);
+		u.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+1]=T[i];
+		v.toBytes(T);
+		for (int i=0;i<EFS;i++) E[i+EFS+1]=T[i];		
+		
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn new_bigs(ix: &Big, iy: &Big) -> ECP {
+        let mut E = ECP::new();
+        E.x.bcopy(ix);
+        E.y.bcopy(iy);
+        E.z.one();
+        E.x.norm();
+        let rhs = ECP::rhs(&E.x);
+        if CURVETYPE == CurveType::Montgomery {
+            if rhs.jacobi() != 1 {
+                E.inf();
+            }
+        } else {
+            let mut y2 = E.y.clone();
+            y2.sqr();
+            if !y2.equals(&rhs) {
+                E.inf();
+            }
+        }
+        return E;
+    }
+pub fn new_ints(a: &[Chunk]) -> Big {
+        let mut s = Big::new();
+        for i in 0..NLEN {
+            s.w[i] = a[i]
+        }
+        s
+    }
+pub fn randomnum(q: &Big, rng: &mut RAND) -> Big {
+        let mut d = DBig::new();
+        let mut j = 0;
+        let mut r: u8 = 0;
+        let t = q.clone();
+        for _ in 0..2 * t.nbits() {
+            if j == 0 {
+                r = rng.getbyte();
+            } else {
+                r >>= 1
+            }
+
+            let b = (r as Chunk) & 1;
+            d.shl(1);
+            d.w[0] += b;
+            j += 1;
+            j &= 7;
+        }
+        let m = d.dmod(q);
+        m
+    }
+fn emap(u: &Big, cb: isize) -> ECP {
+    let mut P: ECP;
+    let mut x = u.clone();
+    let mut p = Big::new_ints(&rom::MODULUS);
+    x.rmod(&mut p);
+    loop {
+        P = ECP::new_bigint(&x, cb);
+        if !P.is_infinity() {
+            break;
+        }
+        x.inc(1);
+        x.norm();
+    }
+    return P;
+}
+pub fn inc(&mut self, x: isize) {
+        self.norm();
+        self.w[0] += x as Chunk;
+    }
+pub fn getbyte(&mut self) -> u8 {
+        let r = self.pool[self.pool_ptr];
+        self.pool_ptr += 1;
+        if self.pool_ptr >= 32 {
+            self.fill_pool()
+        }
+        return u8::from(r);
+    }
+pub fn sub(&mut self, b: &FP) {
+        let mut n = b.clone();
+        n.neg();
+        self.add(&n);
+    }
+fn unmap(u: &mut Big, P: &mut ECP) -> isize {
+    let s = P.gets();
+    let mut R: ECP;
+    let mut r = 0;
+    let x = P.getx();
+    *u = x.clone();
+    loop {
+        u.dec(1);
+        u.norm();
+        r += 1;
+        R = ECP::new_bigint(u, s);
+        if !R.is_infinity() {
+            break;
+        }
+    }
+    return r as isize;
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let mut t: [u8; EFS] = [0; EFS];
+
+    for i in 0..EFS {
+        t[i] = e[i + 1]
+    }
+    let mut u = Big::from_bytes(&t);
+    for i in 0..EFS {
+        t[i] = e[i + EFS + 1]
+    }
+    let mut v = Big::from_bytes(&t);
+
+    let mut P = ECP::new_bigs(&u, &v);
+    if P.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let p = Big::new_ints(&rom::MODULUS);
+    u = Big::randomnum(&p, rng);
+
+    let mut su = rng.getbyte() as isize;
+    su %= 2;
+
+    let mut W = emap(&mut u, su);
+    P.sub(&mut W);
+    let sv = P.gets();
+    let rn = unmap(&mut v, &mut P);
+    let mut m = rng.getbyte() as isize;
+    m %= rn;
+    v.inc(m + 1);
+    e[0] = (su + 2 * sv) as u8;
+    u.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + 1] = t[i]
+    }
+    v.to_bytes(&mut t);
+    for i in 0..EFS {
+        e[i + EFS + 1] = t[i]
+    }
+
+    return 0;
+}
+</function>
+<translated function>
+Here is the translated Rust code for the given Java function.
+
+<rust function>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let efs = e.len();
+    let mut rn: isize;
+    let mut su: isize;
+    let mut sv: isize;
+    let mut m: isize;
+    
+    let mut t = vec![0; efs];
+
+    for i in 0..efs {
+        t[i] = e[i+1];
+    }
+    let mut u = Big::frombytes(&t);
+
+    for i in 0..efs {
+        t[i] = e[i+efs+1];
+    }
+    let mut v = Big::frombytes(&t);
+
+    let mut p = ECP::new_bigs(&u, &v);
+    if p.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut big_p = Big::new_ints(&ROM::Modulus);
+    u = randomnum(&big_p, rng);
+
+    su = rng.getbyte() as isize;
+    // if su<0 {
+    //     su = -su;
+    // }
+    su %= 2;
+    
+    let mut w = emap(&u, su);
+    p.sub(&w); //p.affine();
+    sv = p.gets() as isize;
+    rn = unmap(&mut v, &mut p);
+    m = rng.getbyte() as isize; 
+    // if m<0 {
+    //     m = -m;
+    // }
+    m %= rn;
+    v.inc(m+1);
+    e[0] = su as u8 + 2 * sv as u8;
+    u.tobytes(&mut t);
+    for i in 0..efs {
+        e[i+1] = t[i];
+    }
+    v.tobytes(&mut t);
+    for i in 0..efs {
+        e[i+efs+1] = t[i];        
+    }
+
+    return 0;
+}
+</rust function></translated function>Here is the translated Rust code for the given Java function.
+
+<rust function>
+pub fn encoding(rng: &mut RAND, e: &mut [u8]) -> isize {
+    let efs = e.len();
+    let mut rn: isize;
+    let mut su: isize;
+    let mut sv: isize;
+    let mut m: isize;
+    
+    let mut t = vec![0; efs];
+
+    for i in 0..efs {
+        t[i] = e[i+1];
+    }
+    let mut u = Big::frombytes(&t);
+
+    for i in 0..efs {
+        t[i] = e[i+efs+1];
+    }
+    let mut v = Big::frombytes(&t);
+
+    let mut p = ECP::new_bigs(&u, &v);
+    if p.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    let mut big_p = Big::new_ints(&ROM::Modulus);
+    u = randomnum(&big_p, rng);
+
+    su = rng.getbyte() as isize;
+    // if su<0 {
+    //     su = -su;
+    // }
+    su %= 2;
+    
+    let mut w = emap(&u, su);
+    p.sub(&w); //p.affine();
+    sv = p.gets() as isize;
+    rn = unmap(&mut v, &mut p);
+    m = rng.getbyte() as isize; 
+    // if m<0 {
+    //     m = -m;
+    // }
+    m %= rn;
+    v.inc(m+1);
+    e[0] = su as u8 + 2 * sv as u8;
+    u.tobytes(&mut t);
+    for i in 0..efs {
+        e[i+1] = t[i];
+    }
+    v.tobytes(&mut t);
+    for i in 0..efs {
+        e[i+efs+1] = t[i];        
+    }
+
+    return 0;
+}
+</rust function>

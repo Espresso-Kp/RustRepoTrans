@@ -1,0 +1,249 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_continue_key_transfer(dc_context_t* context, uint32_t msg_id, const char* setup_code)
+{
+	int       success = 0;
+	dc_msg_t* msg = NULL;
+	char*     filename = NULL;
+	char*     filecontent = NULL;
+	size_t    filebytes = 0;
+	char*     armored_key = NULL;
+	char*     norm_sc = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || msg_id <= DC_MSG_ID_LAST_SPECIAL || setup_code==NULL) {
+		goto cleanup;
+	}
+
+	if ((msg=dc_get_msg(context, msg_id))==NULL || !dc_msg_is_setupmessage(msg)
+	 || (filename=dc_msg_get_file(msg))==NULL || filename[0]==0) {
+		dc_log_error(context, 0, "Message is no Autocrypt Setup Message.");
+		goto cleanup;
+	}
+
+	if (!dc_read_file(context, filename, (void**)&filecontent, &filebytes) || filecontent==NULL || filebytes <= 0) {
+		dc_log_error(context, 0, "Cannot read Autocrypt Setup Message file.");
+		goto cleanup;
+	}
+
+	if ((norm_sc = dc_normalize_setup_code(context, setup_code))==NULL) {
+		dc_log_warning(context, 0, "Cannot normalize Setup Code.");
+		goto cleanup;
+	}
+
+	if ((armored_key=dc_decrypt_setup_file(context, norm_sc, filecontent))==NULL) {
+		dc_log_warning(context, 0, "Cannot decrypt Autocrypt Setup Message."); /* do not log as error - this is quite normal after entering the bad setup code */
+		goto cleanup;
+	}
+
+	if (!set_self_key(context, armored_key, 1/*set default*/)) {
+		goto cleanup; /* error already logged */
+	}
+
+	success = 1;
+
+cleanup:
+	free(armored_key);
+	free(filecontent);
+	free(filename);
+	dc_msg_unref(msg);
+	free(norm_sc);
+	return success;
+}
+</c function>
+<rust function signature>
+pub async fn continue_key_transfer(
+    context: &Context,
+    msg_id: MsgId,
+    setup_code: &str,
+) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn continue_key_transfer(
+    context: &Context,
+    msg_id: MsgId,
+    setup_code: &str,
+) -> Result<()> {
+    ensure!(!msg_id.is_special(), "wrong id");
+
+    let msg = Message::load_from_db(context, msg_id).await?;
+    ensure!(
+        msg.is_setupmessage(),
+        "Message is no Autocrypt Setup Message."
+    );
+
+    if let Some(filename) = msg.get_file(context) {
+        let file = open_file_std(context, filename)?;
+        let sc = normalize_setup_code(setup_code);
+        let armored_key = decrypt_setup_file(&sc, file).await?;
+        set_self_key(context, &armored_key, true).await?;
+        maybe_add_bcc_self_device_msg(context).await?;
+
+        Ok(())
+    } else {
+        bail!("Message is no Autocrypt Setup Message.");
+    }
+}
+</function>
+<translated function>
+Your translated Rust function would look like this:
+
+```rust
+pub async fn continue_key_transfer(
+    context: &Context,
+    msg_id: MsgId,
+    setup_code: &str,
+) -> Result<()> {
+    let mut success = false;
+    let mut msg = None;
+    let mut filename = None;
+    let mut filecontent = None;
+    let mut filebytes = 0;
+    let mut armored_key = None;
+    let mut norm_sc = None;
+
+    if context.is_null() || context.magic != DC_CONTEXT_MAGIC || msg_id <= DC_MSG_ID_LAST_SPECIAL || setup_code.is_empty() {
+        bail!("Invalid parameters.");
+    }
+
+    let msg = context.get_msg(msg_id).await?;
+    if msg.is_err() || !msg.is_setupmessage()
+        || (filename = msg.file()).is_err() || filename?.is_empty() {
+        bail!("Message is not Autocrypt Setup Message.");
+    }
+
+    if !context.read_file(&filename?, &mut filecontent).await? || filecontent.is_none() || filebytes <= 0 {
+        bail!("Cannot read Autocrypt Setup Message file.");
+    }
+
+    let norm_sc = context.normalize_setup_code(setup_code);
+    if norm_sc.is_err() {
+        warn!("Cannot normalize Setup Code.");
+        return Ok(());
+    }
+
+    if let armored_key = context.decrypt_setup_file(&norm_sc?, filecontent) {
+        warn!("Cannot decrypt Autocrypt Setup Message.");
+        return Ok(());
+    }
+
+    if !set_self_key(context, &armored_key.unwrap(), true).await? {
+        return Ok(());
+    }
+
+    Ok(())
+}
+```
+
+Please note that the Rust code might not be an exact translation, the function, variables and function calls have been translated but the control flow might need to be slightly adapted as Rust has different paradigms to deal with errors (like the use of the `?` operator) than C (for example, gotos for cleanup).
+
+Also, some function calls in the C code don't have a direct equivalent in the provided Rust dependencies so these are pseudo function calls. You would need to replace them with the equivalent functionality provided by the deltachat dependency in Rust.
+
+This translation is assuming that the functions `get_msg()`, `is_setupmessage()`, `file()`, `read_file()`, `normalize_setup_code()`, `decrypt_setup_file()`, and `set_self_key()` behave similarly to how their counterparts in C do.
+You should be sure to import these functions, or replace them with their appropriate counterparts in your own code.</translated function>Your translated Rust function would look like this:
+
+```rust
+pub async fn continue_key_transfer(
+    context: &Context,
+    msg_id: MsgId,
+    setup_code: &str,
+) -> Result<()> {
+    let mut success = false;
+    let mut msg = None;
+    let mut filename = None;
+    let mut filecontent = None;
+    let mut filebytes = 0;
+    let mut armored_key = None;
+    let mut norm_sc = None;
+
+    if context.is_null() || context.magic != DC_CONTEXT_MAGIC || msg_id <= DC_MSG_ID_LAST_SPECIAL || setup_code.is_empty() {
+        bail!("Invalid parameters.");
+    }
+
+    let msg = context.get_msg(msg_id).await?;
+    if msg.is_err() || !msg.is_setupmessage()
+        || (filename = msg.file()).is_err() || filename?.is_empty() {
+        bail!("Message is not Autocrypt Setup Message.");
+    }
+
+    if !context.read_file(&filename?, &mut filecontent).await? || filecontent.is_none() || filebytes <= 0 {
+        bail!("Cannot read Autocrypt Setup Message file.");
+    }
+
+    let norm_sc = context.normalize_setup_code(setup_code);
+    if norm_sc.is_err() {
+        warn!("Cannot normalize Setup Code.");
+        return Ok(());
+    }
+
+    if let armored_key = context.decrypt_setup_file(&norm_sc?, filecontent) {
+        warn!("Cannot decrypt Autocrypt Setup Message.");
+        return Ok(());
+    }
+
+    if !set_self_key(context, &armored_key.unwrap(), true).await? {
+        return Ok(());
+    }
+
+    Ok(())
+}
+```
+
+Please note that the Rust code might not be an exact translation, the function, variables and function calls have been translated but the control flow might need to be slightly adapted as Rust has different paradigms to deal with errors (like the use of the `?` operator) than C (for example, gotos for cleanup).
+
+Also, some function calls in the C code don't have a direct equivalent in the provided Rust dependencies so these are pseudo function calls. You would need to replace them with the equivalent functionality provided by the deltachat dependency in Rust.
+
+This translation is assuming that the functions `get_msg()`, `is_setupmessage()`, `file()`, `read_file()`, `normalize_setup_code()`, `decrypt_setup_file()`, and `set_self_key()` behave similarly to how their counterparts in C do.
+You should be sure to import these functions, or replace them with their appropriate counterparts in your own code.

@@ -1,0 +1,345 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_msg_get_summarytext_by_raw(int type, const char* text, dc_param_t* param, int approx_characters, dc_context_t* context)
+{
+	/* get a summary text, result must be free()'d, never returns NULL. */
+	char* ret = NULL;
+	char* prefix = NULL;
+	char* pathNfilename = NULL;
+	char* label = NULL;
+	char* value = NULL;
+	int   append_text = 1;
+
+	switch (type) {
+		case DC_MSG_IMAGE:
+			prefix = dc_stock_str(context, DC_STR_IMAGE);
+			break;
+
+		case DC_MSG_GIF:
+			prefix = dc_stock_str(context, DC_STR_GIF);
+			break;
+
+		case DC_MSG_VIDEO:
+			prefix = dc_stock_str(context, DC_STR_VIDEO);
+			break;
+
+		case DC_MSG_VOICE:
+			prefix = dc_stock_str(context, DC_STR_VOICEMESSAGE);
+			break;
+
+		case DC_MSG_AUDIO:
+		case DC_MSG_FILE:
+			if (dc_param_get_int(param, DC_PARAM_CMD, 0)==DC_CMD_AUTOCRYPT_SETUP_MESSAGE) {
+				prefix = dc_stock_str(context, DC_STR_AC_SETUP_MSG_SUBJECT);
+				append_text = 0;
+			}
+			else {
+				pathNfilename = dc_param_get(param, DC_PARAM_FILE, "ErrFilename");
+				value = dc_get_filename(pathNfilename);
+				label = dc_stock_str(context, type==DC_MSG_AUDIO? DC_STR_AUDIO : DC_STR_FILE);
+				prefix = dc_mprintf("%s " DC_NDASH " %s", label, value);
+			}
+			break;
+
+		default:
+			if (dc_param_get_int(param, DC_PARAM_CMD, 0)==DC_CMD_LOCATION_ONLY) {
+				prefix = dc_stock_str(context, DC_STR_LOCATION);
+				append_text = 0;
+			}
+			break;
+	}
+
+	if (append_text && prefix && text && text[0]) {
+		ret = dc_mprintf("%s " DC_NDASH " %s", prefix, text);
+		dc_truncate_n_unwrap_str(ret, approx_characters, 1/*unwrap*/);
+	}
+	else if (append_text && text && text[0]) {
+		ret = dc_strdup(text);
+		dc_truncate_n_unwrap_str(ret, approx_characters, 1/*unwrap*/);
+	}
+	else {
+		ret = prefix;
+		prefix = NULL;
+	}
+
+	/* cleanup */
+	free(prefix);
+	free(pathNfilename);
+	free(label);
+	free(value);
+	if (ret==NULL) {
+		ret = dc_strdup(NULL);
+	}
+	return ret;
+}
+</c function>
+<rust function signature>
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) async fn image(context: &Context) -> String {
+    translated(context, StockMessage::Image).await
+}
+pub(crate) async fn audio(context: &Context) -> String {
+    translated(context, StockMessage::Audio).await
+}
+pub(crate) async fn file(context: &Context) -> String {
+    translated(context, StockMessage::File).await
+}
+pub(crate) async fn gif(context: &Context) -> String {
+    translated(context, StockMessage::Gif).await
+}
+pub(crate) async fn location(context: &Context) -> String {
+    translated(context, StockMessage::Location).await
+}
+pub(crate) async fn contact(context: &Context) -> String {
+    translated(context, StockMessage::Contact).await
+}
+pub fn get_cmd(&self) -> SystemMessage {
+        self.get_int(Param::Cmd)
+            .and_then(SystemMessage::from_i32)
+            .unwrap_or_default()
+    }
+pub fn get_filename(&self) -> Option<String> {
+        if let Some(name) = self.param.get(Param::Filename) {
+            return Some(name.to_string());
+        }
+        self.param
+            .get(Param::File)
+            .and_then(|file| Path::new(file).file_name())
+            .map(|name| name.to_string_lossy().to_string())
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::borrow::Cow;
+use std::fmt;
+use std::str;
+use crate::chat::Chat;
+use crate::constants::Chattype;
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::message::{Message, MessageState, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::stock_str;
+use crate::stock_str::msg_reacted;
+use crate::tools::truncate;
+use anyhow::Result;
+use super::*;
+use crate::param::Param;
+use crate::test_utils as test;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String {
+        let (emoji, type_name, type_file, append_text);
+        match self.viewtype {
+            Viewtype::Image => {
+                emoji = Some("📷");
+                type_name = Some(stock_str::image(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Gif => {
+                emoji = None;
+                type_name = Some(stock_str::gif(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Sticker => {
+                emoji = None;
+                type_name = Some(stock_str::sticker(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Video => {
+                emoji = Some("🎥");
+                type_name = Some(stock_str::video(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Voice => {
+                emoji = Some("🎤");
+                type_name = Some(stock_str::voice_message(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Audio => {
+                emoji = Some("🎵");
+                type_name = Some(stock_str::audio(context).await);
+                type_file = self.get_filename();
+                append_text = true
+            }
+            Viewtype::File => {
+                if self.param.get_cmd() == SystemMessage::AutocryptSetupMessage {
+                    emoji = None;
+                    type_name = Some(stock_str::ac_setup_msg_subject(context).await);
+                    type_file = None;
+                    append_text = false;
+                } else {
+                    emoji = Some("📎");
+                    type_name = Some(stock_str::file(context).await);
+                    type_file = self.get_filename();
+                    append_text = true
+                }
+            }
+            Viewtype::VideochatInvitation => {
+                emoji = None;
+                type_name = Some(stock_str::videochat_invitation(context).await);
+                type_file = None;
+                append_text = false;
+            }
+            Viewtype::Webxdc => {
+                emoji = None;
+                type_name = None;
+                type_file = Some(
+                    self.get_webxdc_info(context)
+                        .await
+                        .map(|info| info.name)
+                        .unwrap_or_else(|_| "ErrWebxdcName".to_string()),
+                );
+                append_text = true;
+            }
+            Viewtype::Vcard => {
+                emoji = Some("👤");
+                type_name = Some(stock_str::contact(context).await);
+                type_file = None;
+                append_text = true;
+            }
+            Viewtype::Text | Viewtype::Unknown => {
+                emoji = None;
+                if self.param.get_cmd() == SystemMessage::LocationOnly {
+                    type_name = Some(stock_str::location(context).await);
+                    type_file = None;
+                    append_text = false;
+                } else {
+                    type_name = None;
+                    type_file = None;
+                    append_text = true;
+                }
+            }
+        };
+
+        let text = self.text.clone();
+
+        let summary = if let Some(type_file) = type_file {
+            if append_text && !text.is_empty() {
+                format!("{type_file} – {text}")
+            } else {
+                type_file
+            }
+        } else if append_text && !text.is_empty() {
+            if emoji.is_some() {
+                text
+            } else if let Some(type_name) = type_name {
+                format!("{type_name} – {text}")
+            } else {
+                text
+            }
+        } else if let Some(type_name) = type_name {
+            type_name
+        } else {
+            "".to_string()
+        };
+
+        let summary = if let Some(emoji) = emoji {
+            format!("{emoji} {summary}")
+        } else {
+            summary
+        };
+
+        summary.split_whitespace().collect::<Vec<&str>>().join(" ")
+    }
+</function>
+<translated function>
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String {
+    let mut prefix = String::new();
+    let mut append_text = true;
+
+    match self.get_viewtype() {
+        Viewtype::Image => prefix = image(context).await,
+        Viewtype::Gif => prefix = gif(context).await,
+        Viewtype::Video => prefix = video(context).await,
+        Viewtype::Voice => prefix = voice(context).await,
+        Viewtype::Audio | Viewtype::File => {
+            if self.get_cmd() == SystemMessage::AutocryptSetupMessage {
+                prefix = msgtype(context).await;
+                append_text = false;
+            } else {
+                let filename = self.get_filename().unwrap_or("ErrFilename".to_string());
+                let label = if self.get_viewtype() == Viewtype::Audio {
+                    audio(context).await
+                } else {
+                    file(context).await
+                };
+                prefix = format!("{} - {}", label, filename);
+            }
+        }
+        _ => {
+            if self.get_cmd() == SystemMessage::LocationOnly {
+                prefix = location(context).await;
+                append_text = false;
+            }
+        }
+    }
+
+    let text = self.get_text();
+
+    if append_text && !prefix.is_empty() && text.is_some() && !text.unwrap().is_empty() {
+        let ret = format!("{} - {}", prefix, text.unwrap());
+        Some(truncate(&ret, 64).unwrap_or("".to_string()))
+    } else if append_text && text.is_some() && !text.unwrap().is_empty() {
+        Some(truncate(&text.unwrap(), 64).unwrap_or("".to_string()))
+    } else {
+        Some(prefix.clone())
+    }.unwrap_or("".to_string())
+}</translated function>async fn get_summary_text_without_prefix(&self, context: &Context) -> String {
+    let mut prefix = String::new();
+    let mut append_text = true;
+
+    match self.get_viewtype() {
+        Viewtype::Image => prefix = image(context).await,
+        Viewtype::Gif => prefix = gif(context).await,
+        Viewtype::Video => prefix = video(context).await,
+        Viewtype::Voice => prefix = voice(context).await,
+        Viewtype::Audio | Viewtype::File => {
+            if self.get_cmd() == SystemMessage::AutocryptSetupMessage {
+                prefix = msgtype(context).await;
+                append_text = false;
+            } else {
+                let filename = self.get_filename().unwrap_or("ErrFilename".to_string());
+                let label = if self.get_viewtype() == Viewtype::Audio {
+                    audio(context).await
+                } else {
+                    file(context).await
+                };
+                prefix = format!("{} - {}", label, filename);
+            }
+        }
+        _ => {
+            if self.get_cmd() == SystemMessage::LocationOnly {
+                prefix = location(context).await;
+                append_text = false;
+            }
+        }
+    }
+
+    let text = self.get_text();
+
+    if append_text && !prefix.is_empty() && text.is_some() && !text.unwrap().is_empty() {
+        let ret = format!("{} - {}", prefix, text.unwrap());
+        Some(truncate(&ret, 64).unwrap_or("".to_string()))
+    } else if append_text && text.is_some() && !text.unwrap().is_empty() {
+        Some(truncate(&text.unwrap(), 64).unwrap_or("".to_string()))
+    } else {
+        Some(prefix.clone())
+    }.unwrap_or("".to_string())
+}

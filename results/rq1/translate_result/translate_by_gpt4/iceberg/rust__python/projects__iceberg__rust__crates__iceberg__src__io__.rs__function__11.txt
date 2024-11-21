@@ -1,0 +1,163 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def read(self, n: int) -> bytes:
+        """Read n bytes."""
+        if n < 0:
+            raise ValueError(f"Requested {n} bytes to read, expected positive integer.")
+        data: List[bytes] = []
+
+        n_remaining = n
+        while n_remaining > 0:
+            data_read = self._input_stream.read(n_remaining)
+            read_len = len(data_read)
+            if read_len == n:
+                # If we read everything, we return directly
+                # otherwise we'll continue to fetch the rest
+                return data_read
+            elif read_len <= 0:
+                raise EOFError(f"EOF: read {read_len} bytes")
+            data.append(data_read)
+            n_remaining -= read_len
+
+        return b"".join(data)
+</python function>
+<rust function signature>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct InputFile {
+    op: Operator,
+    // Absolution path of file.
+    path: String,
+    // Relative path of file to uri, starts at [`relative_path_pos`]
+    relative_path_pos: usize,
+}
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+        Ok(opendal::Reader::read(self, range).await?.to_bytes())
+    }
+</function>
+<translated function>
+Here is the equivalent Rust code for the given Python.
+
+```rust
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+pub struct InputFile {
+    op: Operator,
+    // Absolution path of file.
+    path: String,
+    // Relative path of file to uri, starts at [`relative_path_pos`]
+    relative_path_pos: usize,
+}
+
+impl InputFile {
+    async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+        if range.end <= range.start {
+            return Err(Box::new(std::io::ErrorKind::InvalidData));
+        }
+        let mut data : Vec<u8> = vec![];
+        let mut remaining = range.clone();
+        
+        loop {
+            let mut buffer = vec![0; (remaining.end - remaining.start) as usize];
+            let data_read = self.read(&buffer).await?;
+            let read_len = data_read.len() as u64;
+            if read_len == (range.end - range.start) {
+                return Ok(Bytes::copy_from_slice(&buffer[..read_len as usize]));
+            } else if read_len <= 0 {
+                return Err(Box::new(std::io::ErrorKind::UnexpectedEof));
+            }
+            data.append(&mut buffer[..read_len as usize].to_vec());
+            remaining.start += read_len;
+        }
+    }
+}
+```
+In the rust code, `.await?` is used to handle async read operation which doesn't exist in Python. Since Python code is synchronous, it doesn't specify any error handling related to asynchronous operations. That's why in the Rust code, we need to use `.await` to wait for the operation to finish and `?` to propagate any error that could occur during this operation. If the error occurs, it will be returned immediately from the function.
+
+We hope this explanation makes sense and please let us know if you have any other questions. Thank you.</translated function>Here is the equivalent Rust code for the given Python.
+
+```rust
+use bytes::Bytes;
+use std::ops::Range;
+use std::{collections::HashMap, sync::Arc};
+use crate::{error::Result, Error, ErrorKind};
+use once_cell::sync::Lazy;
+use opendal::{Operator, Scheme};
+use url::Url;
+use std::io::Write;
+use std::{fs::File, path::Path};
+use futures::io::AllowStdIo;
+use futures::AsyncReadExt;
+use tempfile::TempDir;
+use super::{FileIO, FileIOBuilder};
+
+pub struct InputFile {
+    op: Operator,
+    // Absolution path of file.
+    path: String,
+    // Relative path of file to uri, starts at [`relative_path_pos`]
+    relative_path_pos: usize,
+}
+
+impl InputFile {
+    async fn read(&self, range: Range<u64>) -> Result<Bytes> {
+        if range.end <= range.start {
+            return Err(Box::new(std::io::ErrorKind::InvalidData));
+        }
+        let mut data : Vec<u8> = vec![];
+        let mut remaining = range.clone();
+        
+        loop {
+            let mut buffer = vec![0; (remaining.end - remaining.start) as usize];
+            let data_read = self.read(&buffer).await?;
+            let read_len = data_read.len() as u64;
+            if read_len == (range.end - range.start) {
+                return Ok(Bytes::copy_from_slice(&buffer[..read_len as usize]));
+            } else if read_len <= 0 {
+                return Err(Box::new(std::io::ErrorKind::UnexpectedEof));
+            }
+            data.append(&mut buffer[..read_len as usize].to_vec());
+            remaining.start += read_len;
+        }
+    }
+}
+```
+In the rust code, `.await?` is used to handle async read operation which doesn't exist in Python. Since Python code is synchronous, it doesn't specify any error handling related to asynchronous operations. That's why in the Rust code, we need to use `.await` to wait for the operation to finish and `?` to propagate any error that could occur during this operation. If the error occurs, it will be returned immediately from the function.
+
+We hope this explanation makes sense and please let us know if you have any other questions. Thank you.

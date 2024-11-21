@@ -1,0 +1,219 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def language(self) -> str:
+        """
+        Most probable language found in decoded sequence. If none were detected or inferred, the property will return
+        "Unknown".
+        """
+        if not self._languages:
+            # Trying to infer the language based on the given encoding
+            # Its either English or we should not pronounce ourselves in certain cases.
+            if "ascii" in self.could_be_from_charset:
+                return "English"
+
+            # doing it there to avoid circular import
+            from charset_normalizer.cd import encoding_languages, mb_encoding_languages
+
+            languages = (
+                mb_encoding_languages(self.encoding)
+                if is_multi_byte_encoding(self.encoding)
+                else encoding_languages(self.encoding)
+            )
+
+            if len(languages) == 0 or "Latin Based" in languages:
+                return "Unknown"
+
+            return languages[0]
+
+        return self._languages[0][0]
+</python function>
+<rust function signature>
+pub fn most_probably_language(&self) -> &'static Language 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn suitable_encodings(&self) -> Vec<String> {
+        std::iter::once(self.encoding.clone())
+            .chain(self.submatch.iter().map(|s| s.encoding.clone()))
+            .collect()
+    }
+
+pub(crate) fn mb_encoding_languages(iana_name: &str) -> Vec<&'static Language> {
+    ENCODING_TO_LANGUAGE
+        .get(iana_name)
+        .map_or(vec![], |found| vec![found])
+}
+
+pub(crate) fn encoding_languages(iana_name: String) -> Vec<&'static Language> {
+    match encoding_unicode_range(&iana_name)
+        .unwrap_or_default()
+        .iter()
+        .find(|&&range| !range.contains("Latin"))
+    {
+        Some(&range) => unicode_range_languages(range),
+        None => vec![&Language::Unknown],
+    }
+}
+
+pub struct CharsetMatch {
+    payload: Vec<u8>,
+    encoding: String,
+
+    mean_mess_ratio: f32,
+    coherence_matches: CoherenceMatches,
+
+    has_sig_or_bom: bool,
+
+    submatch: Vec<CharsetMatch>,
+    decoded_payload: Option<String>,
+}
+
+pub enum Language {
+    English,
+    German,
+    French,
+    Dutch,
+    Italian,
+    Polish,
+    Spanish,
+    Russian,
+    Japanese,
+    Portuguese,
+    Swedish,
+    Chinese,
+    Ukrainian,
+    Norwegian,
+    Finnish,
+    Vietnamese,
+    Czech,
+    Hungarian,
+    Korean,
+    Indonesian,
+    Turkish,
+    Romanian,
+    Farsi,
+    Arabic,
+    Danish,
+    Serbian,
+    Lithuanian,
+    Slovene,
+    Slovak,
+    Hebrew,
+    Bulgarian,
+    Croatian,
+    Hindi,
+    Estonian,
+    Thai,
+    Greek,
+    Tamil,
+    Kazakh,
+    Unknown,
+}
+
+pub struct CoherenceMatch {
+    pub language: &'static Language,
+    pub score: f32,
+}
+
+pub type CoherenceMatches = Vec<CoherenceMatch>;
+
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use crate::cd::{encoding_languages, mb_encoding_languages};
+use crate::consts::{IANA_SUPPORTED_ALIASES, TOO_BIG_SEQUENCE};
+use crate::utils::{decode, iana_name, is_multi_byte_encoding, range_scan};
+use clap::Parser;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use serde::Serialize;
+use std::cmp::Ordering;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::Hash;
+use std::ops::Index;
+use std::path::PathBuf;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn most_probably_language(&self) -> &'static Language {
+        self.coherence_matches.first().map_or_else(
+            // Default case: Trying to infer the language based on the given encoding
+            || {
+                if self.suitable_encodings().contains(&String::from("ascii")) {
+                    &Language::English
+                } else {
+                    let languages = if is_multi_byte_encoding(&self.encoding) {
+                        mb_encoding_languages(&self.encoding)
+                    } else {
+                        encoding_languages(self.encoding.clone())
+                    };
+                    languages.first().copied().unwrap_or(&Language::Unknown)
+                }
+            },
+            |lang| lang.language,
+        )
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and data type declarations:
+
+```rust
+pub fn most_probably_language(&self) -> &'static Language {
+    if self.coherence_matches.is_empty() {
+        // Trying to infer the language based on the given encoding
+        // It's either English or we should not pronounce ourselves in certain cases.
+        if self.suitable_encodings().iter().any(|e| e == "ascii") {
+            return &Language::English;
+        }
+
+        let languages = if is_multi_byte_encoding(&self.encoding) {
+            mb_encoding_languages(&self.encoding)
+        } else {
+            encoding_languages(self.encoding.clone())
+        };
+
+        if languages.is_empty() || languages.contains(&&Language::Unknown) {
+            return &Language::Unknown;
+        }
+
+        return languages[0];
+    }
+
+    &self.coherence_matches[0].language
+}
+```
+
+This Rust function translates the functionality of the given Python function while adhering to the provided Rust function signature and using the available dependencies and data types. The function attempts to determine the most probable language based on the encoding and coherence matches, returning a reference to a static `Language` enum value.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and data type declarations:
+
+```rust
+pub fn most_probably_language(&self) -> &'static Language {
+    if self.coherence_matches.is_empty() {
+        // Trying to infer the language based on the given encoding
+        // It's either English or we should not pronounce ourselves in certain cases.
+        if self.suitable_encodings().iter().any(|e| e == "ascii") {
+            return &Language::English;
+        }
+
+        let languages = if is_multi_byte_encoding(&self.encoding) {
+            mb_encoding_languages(&self.encoding)
+        } else {
+            encoding_languages(self.encoding.clone())
+        };
+
+        if languages.is_empty() || languages.contains(&&Language::Unknown) {
+            return &Language::Unknown;
+        }
+
+        return languages[0];
+    }
+
+    &self.coherence_matches[0].language
+}
+```
+
+This Rust function translates the functionality of the given Python function while adhering to the provided Rust function signature and using the available dependencies and data types. The function attempts to determine the most probable language based on the encoding and coherence matches, returning a reference to a static `Language` enum value.

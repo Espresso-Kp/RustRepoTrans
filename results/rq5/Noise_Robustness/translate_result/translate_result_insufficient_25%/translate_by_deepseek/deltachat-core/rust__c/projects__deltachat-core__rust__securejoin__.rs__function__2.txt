@@ -1,0 +1,557 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_get_securejoin_qr(dc_context_t* context, uint32_t group_chat_id)
+{
+	/* =========================================================
+	   ====             Alice - the inviter side            ====
+	   ====   Step 1 in "Setup verified contact" protocol   ====
+	   ========================================================= */
+
+	char*      qr = NULL;
+	char*      self_addr = NULL;
+	char*      self_addr_urlencoded = NULL;
+	char*      self_name = NULL;
+	char*      self_name_urlencoded = NULL;
+	char*      fingerprint = NULL;
+	char*      invitenumber = NULL;
+	char*      auth = NULL;
+	dc_chat_t* chat = NULL;
+	char*      group_name = NULL;
+	char*      group_name_urlencoded= NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	dc_ensure_secret_key_exists(context);
+
+		// invitenumber will be used to allow starting the handshake, auth will be used to verify the fingerprint
+		invitenumber = dc_token_lookup(context, DC_TOKEN_INVITENUMBER, group_chat_id);
+		if (invitenumber==NULL) {
+			invitenumber = dc_create_id();
+			dc_token_save(context, DC_TOKEN_INVITENUMBER, group_chat_id, invitenumber);
+		}
+
+		auth = dc_token_lookup(context, DC_TOKEN_AUTH, group_chat_id);
+		if (auth==NULL) {
+			auth = dc_create_id();
+			dc_token_save(context, DC_TOKEN_AUTH, group_chat_id, auth);
+		}
+
+		if ((self_addr = dc_sqlite3_get_config(context->sql, "configured_addr", NULL))==NULL) {
+			dc_log_error(context, 0, "Not configured, cannot generate QR code.");
+			goto cleanup;
+		}
+
+		self_name = dc_sqlite3_get_config(context->sql, "displayname", "");
+
+	if ((fingerprint=get_self_fingerprint(context))==NULL) {
+		goto cleanup;
+	}
+
+	self_addr_urlencoded = dc_urlencode(self_addr);
+	self_name_urlencoded = dc_urlencode(self_name);
+
+	if (group_chat_id)
+	{
+		// parameters used: a=g=x=i=s=
+		chat = dc_get_chat(context, group_chat_id);
+		if (chat==NULL) {
+			dc_log_error(context, 0, "Cannot get QR-code for chat-id %i", group_chat_id);
+			goto cleanup;
+		}
+		group_name = dc_chat_get_name(chat);
+		group_name_urlencoded = dc_urlencode(group_name);
+		qr = dc_mprintf(DC_OPENPGP4FPR_SCHEME "%s#a=%s&g=%s&x=%s&i=%s&s=%s", fingerprint, self_addr_urlencoded, group_name_urlencoded, chat->grpid, invitenumber, auth);
+	}
+	else
+	{
+		// parameters used: a=n=i=s=
+		qr = dc_mprintf(DC_OPENPGP4FPR_SCHEME "%s#a=%s&n=%s&i=%s&s=%s", fingerprint, self_addr_urlencoded, self_name_urlencoded, invitenumber, auth);
+	}
+
+	dc_log_info(context, 0, "Generated QR code: %s", qr);
+
+cleanup:
+	free(self_addr_urlencoded);
+	free(self_addr);
+	free(self_name);
+	free(self_name_urlencoded);
+	free(fingerprint);
+	free(invitenumber);
+	free(auth);
+	dc_chat_unref(chat);
+	free(group_name);
+	free(group_name_urlencoded);
+	return qr? qr : dc_strdup(NULL);
+}
+</c function>
+<rust function signature>
+pub async fn get_securejoin_qr(context: &Context, group: Option<ChatId>) -> Result<String> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub async fn lookup(
+    context: &Context,
+    namespace: Namespace,
+    chat: Option<ChatId>,
+) -> Result<Option<String>> {
+    let token = match chat {
+        Some(chat_id) => {
+            context
+                .sql
+                .query_get_value(
+                    "SELECT token FROM tokens WHERE namespc=? AND foreign_id=? ORDER BY timestamp DESC LIMIT 1;",
+                    (namespace, chat_id),
+                )
+                .await?
+        }
+        // foreign_id is declared as `INTEGER DEFAULT 0` in the schema.
+        None => {
+            context
+                .sql
+                .query_get_value(
+                    "SELECT token FROM tokens WHERE namespc=? AND foreign_id=0 ORDER BY timestamp DESC LIMIT 1;",
+                    (namespace,),
+                )
+                .await?
+        }
+    };
+    Ok(token)
+}
+pub async fn get_config(&self, key: Config) -> Result<Option<String>> {
+        let env_key = format!("DELTACHAT_{}", key.as_ref().to_uppercase());
+        if let Ok(value) = env::var(env_key) {
+            return Ok(Some(value));
+        }
+
+        let value = match key {
+            Config::Selfavatar => {
+                let rel_path = self.sql.get_raw_config(key.as_ref()).await?;
+                rel_path.map(|p| {
+                    get_abs_path(self, Path::new(&p))
+                        .to_string_lossy()
+                        .into_owned()
+                })
+            }
+            Config::SysVersion => Some((*DC_VERSION_STR).clone()),
+            Config::SysMsgsizeMaxRecommended => Some(format!("{RECOMMENDED_FILE_SIZE}")),
+            Config::SysConfigKeys => Some(get_config_keys_string()),
+            _ => self.sql.get_raw_config(key.as_ref()).await?,
+        };
+
+        if value.is_some() {
+            return Ok(value);
+        }
+
+        // Default values
+        match key {
+            Config::ConfiguredInboxFolder => Ok(Some("INBOX".to_owned())),
+            _ => Ok(key.get_str("default").map(|s| s.to_string())),
+        }
+    }
+pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+pub(crate) async fn sync_qr_code_tokens(&self, chat_id: Option<ChatId>) -> Result<()> {
+        if !self.get_config_bool(Config::SyncMsgs).await? {
+            return Ok(());
+        }
+
+        if let (Some(invitenumber), Some(auth)) = (
+            token::lookup(self, Namespace::InviteNumber, chat_id).await?,
+            token::lookup(self, Namespace::Auth, chat_id).await?,
+        ) {
+            let grpid = if let Some(chat_id) = chat_id {
+                let chat = Chat::load_from_db(self, chat_id).await?;
+                if !chat.is_promoted() {
+                    info!(
+                        self,
+                        "group '{}' not yet promoted, do not sync tokens yet.", chat.grpid
+                    );
+                    return Ok(());
+                }
+                Some(chat.grpid)
+            } else {
+                None
+            };
+            self.add_sync_item(SyncData::AddQrToken(QrTokenData {
+                invitenumber,
+                auth,
+                grpid,
+            }))
+            .await?;
+        }
+        Ok(())
+    }
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use anyhow::{bail, Context as _, Error, Result};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use crate::aheader::EncryptPreference;
+use crate::chat::{self, Chat, ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::e2ee::ensure_secret_key_exists;
+use crate::events::EventType;
+use crate::headerdef::HeaderDef;
+use crate::key::{load_self_public_key, DcKey, Fingerprint};
+use crate::message::{Message, Viewtype};
+use crate::mimeparser::{MimeMessage, SystemMessage};
+use crate::param::Param;
+use crate::peerstate::Peerstate;
+use crate::qr::check_qr;
+use crate::securejoin::bob::JoinerProgress;
+use crate::stock_str;
+use crate::sync::Sync::*;
+use crate::token;
+use crate::tools::time;
+use bobstate::BobState;
+use qrinvite::QrInvite;
+use crate::token::Namespace;
+use deltachat_contact_tools::{ContactAddress, EmailAddress};
+use super::*;
+use crate::chat::{remove_contact_from_chat, CantSendReason};
+use crate::chatlist::Chatlist;
+use crate::constants::{self, Chattype};
+use crate::imex::{imex, ImexMode};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::{self, chat_protection_enabled};
+use crate::test_utils::get_chat_msg;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+use std::collections::HashSet;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_securejoin_qr(context: &Context, group: Option<ChatId>) -> Result<String> {
+    /*=======================================================
+    ====             Alice - the inviter side            ====
+    ====   Step 1 in "Setup verified contact" protocol   ====
+    =======================================================*/
+
+    ensure_secret_key_exists(context).await.ok();
+
+    // invitenumber will be used to allow starting the handshake,
+    // auth will be used to verify the fingerprint
+    let sync_token = token::lookup(context, Namespace::InviteNumber, group)
+        .await?
+        .is_none();
+    let invitenumber = token::lookup_or_new(context, Namespace::InviteNumber, group).await?;
+    let auth = token::lookup_or_new(context, Namespace::Auth, group).await?;
+    let self_addr = context.get_primary_self_addr().await?;
+    let self_name = context
+        .get_config(Config::Displayname)
+        .await?
+        .unwrap_or_default();
+
+    let fingerprint: Fingerprint = match get_self_fingerprint(context).await {
+        Some(fp) => fp,
+        None => {
+            bail!("No fingerprint, cannot generate QR code.");
+        }
+    };
+
+    let self_addr_urlencoded =
+        utf8_percent_encode(&self_addr, NON_ALPHANUMERIC_WITHOUT_DOT).to_string();
+    let self_name_urlencoded =
+        utf8_percent_encode(&self_name, NON_ALPHANUMERIC_WITHOUT_DOT).to_string();
+
+    let qr = if let Some(group) = group {
+        // parameters used: a=g=x=i=s=
+        let chat = Chat::load_from_db(context, group).await?;
+        if chat.grpid.is_empty() {
+            bail!(
+                "can't generate securejoin QR code for ad-hoc group {}",
+                group
+            );
+        }
+        let group_name = chat.get_name();
+        let group_name_urlencoded = utf8_percent_encode(group_name, NON_ALPHANUMERIC).to_string();
+        if sync_token {
+            context.sync_qr_code_tokens(Some(chat.id)).await?;
+        }
+        format!(
+            "OPENPGP4FPR:{}#a={}&g={}&x={}&i={}&s={}",
+            fingerprint.hex(),
+            self_addr_urlencoded,
+            &group_name_urlencoded,
+            &chat.grpid,
+            &invitenumber,
+            &auth,
+        )
+    } else {
+        // parameters used: a=n=i=s=
+        if sync_token {
+            context.sync_qr_code_tokens(None).await?;
+        }
+        format!(
+            "OPENPGP4FPR:{}#a={}&n={}&i={}&s={}",
+            fingerprint.hex(),
+            self_addr_urlencoded,
+            self_name_urlencoded,
+            &invitenumber,
+            &auth,
+        )
+    };
+
+    info!(context, "Generated QR code.");
+    Ok(qr)
+}
+</function>
+<translated function>
+ ```rust
+use anyhow::{bail, Context as _, Error, Result};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use crate::aheader::EncryptPreference;
+use crate::chat::{self, Chat, ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::e2ee::ensure_secret_key_exists;
+use crate::events::EventType;
+use crate::headerdef::HeaderDef;
+use crate::key::{load_self_public_key, DcKey, Fingerprint};
+use crate::message::{Message, Viewtype};
+use crate::mimeparser::{MimeMessage, SystemMessage};
+use crate::param::Param;
+use crate::peerstate::Peerstate;
+use crate::qr::check_qr;
+use crate::securejoin::bob::JoinerProgress;
+use crate::stock_str;
+use crate::sync::Sync::*;
+use crate::token;
+use crate::tools::time;
+use bobstate::BobState;
+use qrinvite::QrInvite;
+use crate::token::Namespace;
+use deltachat_contact_tools::{ContactAddress, EmailAddress};
+use super::*;
+use crate::chat::{remove_contact_from_chat, CantSendReason};
+use crate::chatlist::Chatlist;
+use crate::constants::{self, Chattype};
+use crate::imex::{imex, ImexMode};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::{self, chat_protection_enabled};
+use crate::test_utils::get_chat_msg;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+use std::collections::HashSet;
+use std::time::Duration;
+
+pub async fn get_securejoin_qr(context: &Context, group: Option<ChatId>) -> Result<String> {
+    let mut qr: Option<String> = None;
+    let mut self_addr: Option<String> = None;
+    let mut self_addr_urlencoded: Option<String> = None;
+    let mut self_name: Option<String> = None;
+    let mut self_name_urlencoded: Option<String> = None;
+    let mut fingerprint: Option<String> = None;
+    let mut invitenumber: Option<String> = None;
+    let mut auth: Option<String> = None;
+    let mut chat: Option<Chat> = None;
+    let mut group_name: Option<String> = None;
+    let mut group_name_urlencoded: Option<String> = None;
+
+    if context.magic != DC_CONTEXT_MAGIC {
+        bail!("Invalid context");
+    }
+
+    ensure_secret_key_exists(context).await?;
+
+    invitenumber = token::lookup(context, Namespace::InviteNumber, group).await?;
+    if invitenumber.is_none() {
+        invitenumber = Some(dc_create_id());
+        token::save(context, Namespace::InviteNumber, group, invitenumber.as_ref().unwrap()).await?;
+    }
+
+    auth = token::lookup(context, Namespace::Auth, group).await?;
+    if auth.is_none() {
+        auth = Some(dc_create_id());
+        token::save(context, Namespace::Auth, group, auth.as_ref().unwrap()).await?;
+    }
+
+    self_addr = context.sql.get_config("configured_addr").await?.map(|s| s.to_string());
+    if self_addr.is_none() {
+        dc_log_error(context, 0, "Not configured, cannot generate QR code.");
+        return Ok(String::new());
+    }
+
+    self_name = context.sql.get_config("displayname").await?.map(|s| s.to_string());
+
+    fingerprint = get_self_fingerprint(context).await?;
+    if fingerprint.is_none() {
+        return Ok(String::new());
+    }
+
+    self_addr_urlencoded = Some(dc_urlencode(&self_addr.as_ref().unwrap()));
+    self_name_urlencoded = Some(dc_urlencode(&self_name.as_ref().unwrap()));
+
+    if let Some(group_chat_id) = group {
+        chat = Chat::load_from_db(context, group_chat_id).await?;
+        if chat.is_none() {
+            dc_log_error(context, 0, "Cannot get QR-code for chat-id {}", group_chat_id);
+            return Ok(String::new());
+        }
+        group_name = Some(chat.as_ref().unwrap().get_name());
+        group_name_urlencoded = Some(dc_urlencode(&group_name.as_ref().unwrap()));
+        qr = Some(dc_mprintf(
+            DC_OPENPGP4FPR_SCHEME,
+            "{}#a={}&g={}&x={}&i={}&s={}",
+            fingerprint.as_ref().unwrap(),
+            self_addr_urlencoded.as_ref().unwrap(),
+            group_name_urlencoded.as_ref().unwrap(),
+            chat.as_ref().unwrap().grpid,
+            invitenumber.as_ref().unwrap(),
+            auth.as_ref().unwrap(),
+        ));
+    } else {
+        qr = Some(dc_mprintf(
+            DC_OPENPGP4FPR_SCHEME,
+            "{}#a={}&n={}&i={}&s={}",
+            fingerprint.as_ref().unwrap(),
+            self_addr_urlencoded.as_ref().unwrap(),
+            self_name_urlencoded.as_ref().unwrap(),
+            invitenumber.as_ref().unwrap(),
+            auth.as_ref().unwrap(),
+        ));
+    }
+
+    dc_log_info(context, 0, "Generated QR code: {}", qr.as_ref().unwrap());
+
+    Ok(qr.unwrap_or_default())
+}
+```</translated function> ```rust
+use anyhow::{bail, Context as _, Error, Result};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use crate::aheader::EncryptPreference;
+use crate::chat::{self, Chat, ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::e2ee::ensure_secret_key_exists;
+use crate::events::EventType;
+use crate::headerdef::HeaderDef;
+use crate::key::{load_self_public_key, DcKey, Fingerprint};
+use crate::message::{Message, Viewtype};
+use crate::mimeparser::{MimeMessage, SystemMessage};
+use crate::param::Param;
+use crate::peerstate::Peerstate;
+use crate::qr::check_qr;
+use crate::securejoin::bob::JoinerProgress;
+use crate::stock_str;
+use crate::sync::Sync::*;
+use crate::token;
+use crate::tools::time;
+use bobstate::BobState;
+use qrinvite::QrInvite;
+use crate::token::Namespace;
+use deltachat_contact_tools::{ContactAddress, EmailAddress};
+use super::*;
+use crate::chat::{remove_contact_from_chat, CantSendReason};
+use crate::chatlist::Chatlist;
+use crate::constants::{self, Chattype};
+use crate::imex::{imex, ImexMode};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::{self, chat_protection_enabled};
+use crate::test_utils::get_chat_msg;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+use std::collections::HashSet;
+use std::time::Duration;
+
+pub async fn get_securejoin_qr(context: &Context, group: Option<ChatId>) -> Result<String> {
+    let mut qr: Option<String> = None;
+    let mut self_addr: Option<String> = None;
+    let mut self_addr_urlencoded: Option<String> = None;
+    let mut self_name: Option<String> = None;
+    let mut self_name_urlencoded: Option<String> = None;
+    let mut fingerprint: Option<String> = None;
+    let mut invitenumber: Option<String> = None;
+    let mut auth: Option<String> = None;
+    let mut chat: Option<Chat> = None;
+    let mut group_name: Option<String> = None;
+    let mut group_name_urlencoded: Option<String> = None;
+
+    if context.magic != DC_CONTEXT_MAGIC {
+        bail!("Invalid context");
+    }
+
+    ensure_secret_key_exists(context).await?;
+
+    invitenumber = token::lookup(context, Namespace::InviteNumber, group).await?;
+    if invitenumber.is_none() {
+        invitenumber = Some(dc_create_id());
+        token::save(context, Namespace::InviteNumber, group, invitenumber.as_ref().unwrap()).await?;
+    }
+
+    auth = token::lookup(context, Namespace::Auth, group).await?;
+    if auth.is_none() {
+        auth = Some(dc_create_id());
+        token::save(context, Namespace::Auth, group, auth.as_ref().unwrap()).await?;
+    }
+
+    self_addr = context.sql.get_config("configured_addr").await?.map(|s| s.to_string());
+    if self_addr.is_none() {
+        dc_log_error(context, 0, "Not configured, cannot generate QR code.");
+        return Ok(String::new());
+    }
+
+    self_name = context.sql.get_config("displayname").await?.map(|s| s.to_string());
+
+    fingerprint = get_self_fingerprint(context).await?;
+    if fingerprint.is_none() {
+        return Ok(String::new());
+    }
+
+    self_addr_urlencoded = Some(dc_urlencode(&self_addr.as_ref().unwrap()));
+    self_name_urlencoded = Some(dc_urlencode(&self_name.as_ref().unwrap()));
+
+    if let Some(group_chat_id) = group {
+        chat = Chat::load_from_db(context, group_chat_id).await?;
+        if chat.is_none() {
+            dc_log_error(context, 0, "Cannot get QR-code for chat-id {}", group_chat_id);
+            return Ok(String::new());
+        }
+        group_name = Some(chat.as_ref().unwrap().get_name());
+        group_name_urlencoded = Some(dc_urlencode(&group_name.as_ref().unwrap()));
+        qr = Some(dc_mprintf(
+            DC_OPENPGP4FPR_SCHEME,
+            "{}#a={}&g={}&x={}&i={}&s={}",
+            fingerprint.as_ref().unwrap(),
+            self_addr_urlencoded.as_ref().unwrap(),
+            group_name_urlencoded.as_ref().unwrap(),
+            chat.as_ref().unwrap().grpid,
+            invitenumber.as_ref().unwrap(),
+            auth.as_ref().unwrap(),
+        ));
+    } else {
+        qr = Some(dc_mprintf(
+            DC_OPENPGP4FPR_SCHEME,
+            "{}#a={}&n={}&i={}&s={}",
+            fingerprint.as_ref().unwrap(),
+            self_addr_urlencoded.as_ref().unwrap(),
+            self_name_urlencoded.as_ref().unwrap(),
+            invitenumber.as_ref().unwrap(),
+            auth.as_ref().unwrap(),
+        ));
+    }
+
+    dc_log_info(context, 0, "Generated QR code: {}", qr.as_ref().unwrap());
+
+    Ok(qr.unwrap_or_default())
+}
+```

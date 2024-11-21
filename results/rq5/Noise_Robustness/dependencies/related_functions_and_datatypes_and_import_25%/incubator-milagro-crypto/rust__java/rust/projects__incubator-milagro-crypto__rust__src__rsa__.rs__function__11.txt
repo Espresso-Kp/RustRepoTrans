@@ -1,0 +1,65 @@
+pub fn getlen(&self) -> usize {
+        return self.length;
+    }
+pub fn to_bytes(&self, b: &mut [u8]) {
+        self.to_byte_array(b, 0)
+    }
+pub fn skpow(&mut self, e: &FF, p: &FF) {
+        let n = p.length;
+        let mut r0 = FF::new_int(n);
+        let mut r1 = FF::new_int(n);
+        let nd = p.invmod2m();
+
+        self.rmod(p);
+        r0.one();
+        r1.copy(&self);
+        r0.nres(p);
+        r1.nres(p);
+
+        let mut i = 8 * (big::MODBYTES as usize) * n - 1;
+        loop {
+            let b = (e.v[i / (big::BIGBITS as usize)]).bit(i % (big::BIGBITS as usize)) as isize;
+            self.copy(&r0);
+            self.modmul(&r1, p, &nd);
+
+            FF::cswap(&mut r0, &mut r1, b);
+            r0.modsqr(p, &nd);
+
+            r1.copy(&self);
+            FF::cswap(&mut r0, &mut r1, b);
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+        self.copy(&r0);
+        self.redc(p, &nd);
+    }
+pub fn comp(a: &FF, b: &FF) -> isize {
+        let mut i = a.length - 1;
+
+        loop {
+            let j = Big::comp(&a.v[i], &b.v[i]);
+            if j != 0 {
+                return j;
+            }
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+        return 0;
+    }
+------
+
+
+
+use super::big;
+use super::ff;
+use super::ff::FF;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

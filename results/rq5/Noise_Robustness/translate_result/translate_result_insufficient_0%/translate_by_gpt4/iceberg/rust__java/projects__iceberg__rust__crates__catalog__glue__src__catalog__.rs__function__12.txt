@@ -1,0 +1,313 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public Table loadTable(SessionContext context, TableIdentifier identifier) {
+    checkIdentifierIsValid(identifier);
+
+    MetadataTableType metadataType;
+    LoadTableResponse response;
+    TableIdentifier loadedIdent;
+    try {
+      response = loadInternal(context, identifier, snapshotMode);
+      loadedIdent = identifier;
+      metadataType = null;
+
+    } catch (NoSuchTableException original) {
+      metadataType = MetadataTableType.from(identifier.name());
+      if (metadataType != null) {
+        // attempt to load a metadata table using the identifier's namespace as the base table
+        TableIdentifier baseIdent = TableIdentifier.of(identifier.namespace().levels());
+        try {
+          response = loadInternal(context, baseIdent, snapshotMode);
+          loadedIdent = baseIdent;
+        } catch (NoSuchTableException ignored) {
+          // the base table does not exist
+          throw original;
+        }
+      } else {
+        // name is not a metadata table
+        throw original;
+      }
+    }
+
+    TableIdentifier finalIdentifier = loadedIdent;
+    AuthSession session = tableSession(response.config(), session(context));
+    TableMetadata tableMetadata;
+
+    if (snapshotMode == SnapshotMode.REFS) {
+      tableMetadata =
+          TableMetadata.buildFrom(response.tableMetadata())
+              .withMetadataLocation(response.metadataLocation())
+              .setPreviousFileLocation(null)
+              .setSnapshotsSupplier(
+                  () ->
+                      loadInternal(context, finalIdentifier, SnapshotMode.ALL)
+                          .tableMetadata()
+                          .snapshots())
+              .discardChanges()
+              .build();
+    } else {
+      tableMetadata = response.tableMetadata();
+    }
+
+    RESTTableOperations ops =
+        new RESTTableOperations(
+            client,
+            paths.table(finalIdentifier),
+            session::headers,
+            tableFileIO(context, response.config()),
+            tableMetadata);
+
+    trackFileIO(ops);
+
+    BaseTable table =
+        new BaseTable(
+            ops,
+            fullTableName(finalIdentifier),
+            metricsReporter(paths.metrics(finalIdentifier), session::headers));
+    if (metadataType != null) {
+      return MetadataTableUtils.createMetadataTableInstance(table, metadataType);
+    }
+
+    return table;
+  }
+</java function>
+<rust function signature>
+async fn load_table(&self, table: &TableIdent) -> Result<Table> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn load_table(&self, table: &TableIdent) -> Result<Table> {
+        let db_name = validate_namespace(table.namespace())?;
+        let table_name = table.name();
+
+        let builder = self
+            .client
+            .0
+            .get_table()
+            .database_name(&db_name)
+            .name(table_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        let glue_table_output = builder.send().await.map_err(from_aws_sdk_error)?;
+
+        match glue_table_output.table() {
+            None => Err(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "Table object for database: {} and table: {} does not exist",
+                    db_name, table_name
+                ),
+            )),
+            Some(table) => {
+                let metadata_location = get_metadata_location(&table.parameters)?;
+
+                let input_file = self.file_io.new_input(&metadata_location)?;
+                let metadata_content = input_file.read().await?;
+                let metadata = serde_json::from_slice::<TableMetadata>(&metadata_content)?;
+
+                let table = Table::builder()
+                    .file_io(self.file_io())
+                    .metadata_location(metadata_location)
+                    .metadata(metadata)
+                    .identifier(TableIdent::new(
+                        NamespaceIdent::new(db_name),
+                        table_name.to_owned(),
+                    ))
+                    .build();
+
+                Ok(table)
+            }
+        }
+    }
+</function>
+<translated function>
+Here is the rust version of the given Java function:
+
+```rust
+async fn load_table(&self, table: &TableIdent) -> Result<Table, Error> {
+    let metadata_type: Option<MetadataTableType>;
+    let mut response: LoadTableResponse;
+    let mut loaded_ident: TableIdent = table.clone();
+
+    response = match metadata_type {
+        Ok(res) => {
+            metadata_type = None;
+            res
+        }
+        Err(e) => {
+            metadata_type = MetadataTableType::from(table.table());
+            if let Some(ty) = &metadata_type {
+                let base_ident = Namespace::levels(&table.namespace());
+                match self.load_internal(&base_ident, SnapshotMode).await {
+                    Ok(res) => res,
+                    Err(_) => return Err(e),
+                }
+            } else {
+                return Err(e);
+            }
+        }
+    };
+
+    let final_identifier = loaded_ident.clone();
+    let table_metadata: TableMetadata;
+    if snapshot_mode == SnapshotMode::Refs {
+        table_metadata = TableMetadataBuilder::from(response.table_metadata())
+            .with_metadata_location(Some(response.metadata_location().to_owned()))
+            .set_previous_file_location(None)
+            .set_snapshots_supplier(|| loadInternal(&final_identifier, SnapshotMode::All)
+                .await
+                .unwrap()
+                .table_metadata()
+                .snapshots())
+            .discard_changes()
+            .build();
+    } else {
+        table_metadata = response.table_metadata().clone();
+    }
+
+    let ops = RESTTableOperations::new(
+        &self.client,
+        &paths.table(&final_identifier),
+        &session.headers(),
+        &table_file_io(&response.config()),
+        &table_metadata,
+    );
+
+    self.track_file_io(ops);
+
+    let table = BaseTable::new(
+        ops,
+        &self.full_table_name(&final_identifier),
+        &metrics_reporter(paths.metrics(&final_identifier), &session.headers()),
+    );
+
+    if let Some(metadata_type) = metadata_type {
+        return MetadataTableUtils::create_metadata_table_instance(&mut table, &metadata_type).await;
+    }
+
+    result_table = Ok(table);
+    result_table
+}
+```
+
+Note: 
+
+Please replace the function `load_internal` with the appropriate handler function in the rust code. I was not sure what the rust function would be for the given java function `loadInternal`. I have assumed it from its usage in java code.
+
+This version of the Rust code doesn't include the equivalent of `session = tableSession(response.config(), session(context));` from the 
+Java code. As the required functions, Session and SessionContext were not provided. 
+
+The Java function contains some throwable exceptions which could not be represented exactly due to unavailability of namespaces and non-support for exceptions in rust.
+
+Also, I presumed that the actual database calls or file read and write operations are performed internally in the functions used in the code and we don't need to write that in load_table function. If they are needed, those async calls need to be added as .await at the place they are being called.
+
+Finally, Rust doesn't have Null or None handling exactly like Java. So some options are wrapped as Options which need to be unwrapped before they are used.</translated function>Here is the rust version of the given Java function:
+
+```rust
+async fn load_table(&self, table: &TableIdent) -> Result<Table, Error> {
+    let metadata_type: Option<MetadataTableType>;
+    let mut response: LoadTableResponse;
+    let mut loaded_ident: TableIdent = table.clone();
+
+    response = match metadata_type {
+        Ok(res) => {
+            metadata_type = None;
+            res
+        }
+        Err(e) => {
+            metadata_type = MetadataTableType::from(table.table());
+            if let Some(ty) = &metadata_type {
+                let base_ident = Namespace::levels(&table.namespace());
+                match self.load_internal(&base_ident, SnapshotMode).await {
+                    Ok(res) => res,
+                    Err(_) => return Err(e),
+                }
+            } else {
+                return Err(e);
+            }
+        }
+    };
+
+    let final_identifier = loaded_ident.clone();
+    let table_metadata: TableMetadata;
+    if snapshot_mode == SnapshotMode::Refs {
+        table_metadata = TableMetadataBuilder::from(response.table_metadata())
+            .with_metadata_location(Some(response.metadata_location().to_owned()))
+            .set_previous_file_location(None)
+            .set_snapshots_supplier(|| loadInternal(&final_identifier, SnapshotMode::All)
+                .await
+                .unwrap()
+                .table_metadata()
+                .snapshots())
+            .discard_changes()
+            .build();
+    } else {
+        table_metadata = response.table_metadata().clone();
+    }
+
+    let ops = RESTTableOperations::new(
+        &self.client,
+        &paths.table(&final_identifier),
+        &session.headers(),
+        &table_file_io(&response.config()),
+        &table_metadata,
+    );
+
+    self.track_file_io(ops);
+
+    let table = BaseTable::new(
+        ops,
+        &self.full_table_name(&final_identifier),
+        &metrics_reporter(paths.metrics(&final_identifier), &session.headers()),
+    );
+
+    if let Some(metadata_type) = metadata_type {
+        return MetadataTableUtils::create_metadata_table_instance(&mut table, &metadata_type).await;
+    }
+
+    result_table = Ok(table);
+    result_table
+}
+```
+
+Note: 
+
+Please replace the function `load_internal` with the appropriate handler function in the rust code. I was not sure what the rust function would be for the given java function `loadInternal`. I have assumed it from its usage in java code.
+
+This version of the Rust code doesn't include the equivalent of `session = tableSession(response.config(), session(context));` from the 
+Java code. As the required functions, Session and SessionContext were not provided. 
+
+The Java function contains some throwable exceptions which could not be represented exactly due to unavailability of namespaces and non-support for exceptions in rust.
+
+Also, I presumed that the actual database calls or file read and write operations are performed internally in the functions used in the code and we don't need to write that in load_table function. If they are needed, those async calls need to be added as .await at the place they are being called.
+
+Finally, Rust doesn't have Null or None handling exactly like Java. So some options are wrapped as Options which need to be unwrapped before they are used.

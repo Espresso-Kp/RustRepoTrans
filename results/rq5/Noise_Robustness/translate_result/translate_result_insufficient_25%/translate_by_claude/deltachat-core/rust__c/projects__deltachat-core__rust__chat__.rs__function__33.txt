@@ -1,0 +1,239 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+* See dc_set_draft() for more details about drafts.
+ *
+ * @memberof dc_context_t
+ * @param context The context as created by dc_context_new().
+ * @param chat_id The chat ID to get the draft for.
+ * @return Message object.
+ *     Can be passed directly to dc_send_msg().
+ *     Must be freed using dc_msg_unref() after usage.
+ *     If there is no draft, NULL is returned.
+ */
+dc_msg_t* dc_get_draft(dc_context_t* context, uint32_t chat_id)
+{
+	uint32_t  draft_msg_id = 0;
+	dc_msg_t* draft_msg = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || chat_id<=DC_CHAT_ID_LAST_SPECIAL) {
+		return NULL;
+	}
+
+	draft_msg_id = get_draft_msg_id(context, chat_id);
+	if (draft_msg_id==0) {
+		return NULL;
+	}
+
+	draft_msg = dc_msg_new_untyped(context);
+	if (!dc_msg_load_from_db(draft_msg, context, draft_msg_id)) {
+		dc_msg_unref(draft_msg);
+		return NULL;
+	}
+
+	return draft_msg;
+}
+</c function>
+<rust function signature>
+pub async fn get_draft(self, context: &Context) -> Result<Option<Message>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct ChatId(u32);
+pub struct Message {
+    /// Message ID.
+    pub(crate) id: MsgId,
+
+    /// `From:` contact ID.
+    pub(crate) from_id: ContactId,
+
+    /// ID of the first contact in the `To:` header.
+    pub(crate) to_id: ContactId,
+
+    /// ID of the chat message belongs to.
+    pub(crate) chat_id: ChatId,
+
+    /// Type of the message.
+    pub(crate) viewtype: Viewtype,
+
+    /// State of the message.
+    pub(crate) state: MessageState,
+    pub(crate) download_state: DownloadState,
+
+    /// Whether the message is hidden.
+    pub(crate) hidden: bool,
+    pub(crate) timestamp_sort: i64,
+    pub(crate) timestamp_sent: i64,
+    pub(crate) timestamp_rcvd: i64,
+    pub(crate) ephemeral_timer: EphemeralTimer,
+    pub(crate) ephemeral_timestamp: i64,
+    pub(crate) text: String,
+
+    /// Message subject.
+    ///
+    /// If empty, a default subject will be generated when sending.
+    pub(crate) subject: String,
+
+    /// `Message-ID` header value.
+    pub(crate) rfc724_mid: String,
+
+    /// `In-Reply-To` header value.
+    pub(crate) in_reply_to: Option<String>,
+    pub(crate) is_dc_message: MessengerMessage,
+    pub(crate) mime_modified: bool,
+    pub(crate) chat_blocked: Blocked,
+    pub(crate) location_id: u32,
+    pub(crate) error: Option<String>,
+    pub(crate) param: Params,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_draft(self, context: &Context) -> Result<Option<Message>> {
+        if self.is_special() {
+            return Ok(None);
+        }
+        match self.get_draft_msg_id(context).await? {
+            Some(draft_msg_id) => {
+                let msg = Message::load_from_db(context, draft_msg_id).await?;
+                Ok(Some(msg))
+            }
+            None => Ok(None),
+        }
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn get_draft(self, context: &Context) -> Result<Option<Message>> {
+    let chat_id = self.0;
+
+    if chat_id <= DC_CHAT_ID_LAST_SPECIAL {
+        return Ok(None);
+    }
+
+    let draft_msg_id = self.get_draft_msg_id(context).await?;
+    if draft_msg_id == 0 {
+        return Ok(None);
+    }
+
+    let mut draft_msg = Message::new_untyped();
+    if !draft_msg.load_from_db(context, draft_msg_id).await? {
+        return Ok(None);
+    }
+
+    Ok(Some(draft_msg))
+}
+```
+
+This Rust translation attempts to maintain the logic of the original C function while adapting it to the provided Rust function signature and using the available dependencies. Here are some key points:
+
+1. The function now returns a `Result<Option<Message>>` instead of a raw pointer.
+2. We use `self.0` to get the `chat_id` from the `ChatId` struct.
+3. The `context` magic check is omitted as it's likely handled differently in the Rust implementation.
+4. We assume that `get_draft_msg_id` is an async method on `self` (ChatId).
+5. `Message::new_untyped()` is used instead of `dc_msg_new_untyped`.
+6. `load_from_db` is assumed to be an async method on the `Message` struct.
+7. Error handling is done using the `Result` type, and `None` is returned when appropriate.
+
+Note that this translation makes some assumptions about the available methods and error handling in the Rust codebase. You may need to adjust it slightly to fit your exact implementation details.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn get_draft(self, context: &Context) -> Result<Option<Message>> {
+    let chat_id = self.0;
+
+    if chat_id <= DC_CHAT_ID_LAST_SPECIAL {
+        return Ok(None);
+    }
+
+    let draft_msg_id = self.get_draft_msg_id(context).await?;
+    if draft_msg_id == 0 {
+        return Ok(None);
+    }
+
+    let mut draft_msg = Message::new_untyped();
+    if !draft_msg.load_from_db(context, draft_msg_id).await? {
+        return Ok(None);
+    }
+
+    Ok(Some(draft_msg))
+}
+```
+
+This Rust translation attempts to maintain the logic of the original C function while adapting it to the provided Rust function signature and using the available dependencies. Here are some key points:
+
+1. The function now returns a `Result<Option<Message>>` instead of a raw pointer.
+2. We use `self.0` to get the `chat_id` from the `ChatId` struct.
+3. The `context` magic check is omitted as it's likely handled differently in the Rust implementation.
+4. We assume that `get_draft_msg_id` is an async method on `self` (ChatId).
+5. `Message::new_untyped()` is used instead of `dc_msg_new_untyped`.
+6. `load_from_db` is assumed to be an async method on the `Message` struct.
+7. Error handling is done using the `Result` type, and `None` is returned when appropriate.
+
+Note that this translation makes some assumptions about the available methods and error handling in the Rust codebase. You may need to adjust it slightly to fit your exact implementation details.

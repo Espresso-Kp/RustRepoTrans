@@ -1,0 +1,228 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+uint32_t dc_get_chat_id_by_grpid(dc_context_t* context, const char* grpid, int* ret_blocked, int* ret_verified)
+{
+	uint32_t      chat_id = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if(ret_blocked)  { *ret_blocked = 0;  }
+	if(ret_verified) { *ret_verified = 0; }
+
+	if (context==NULL || grpid==NULL) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT id, blocked, protected FROM chats WHERE grpid=?;");
+	sqlite3_bind_text (stmt, 1, grpid, -1, SQLITE_STATIC);
+	if (sqlite3_step(stmt)==SQLITE_ROW) {
+		                    chat_id      =  sqlite3_column_int(stmt, 0);
+		if(ret_blocked)  { *ret_blocked  =  sqlite3_column_int(stmt, 1); }
+		if(ret_verified) { *ret_verified = (sqlite3_column_int(stmt, 2)==DC_CHAT_PROTECTIONSTATUS_PROTECTED); }
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return chat_id;
+}
+</c function>
+<rust function signature>
+pub(crate) async fn get_chat_id_by_grpid(
+    context: &Context,
+    grpid: &str,
+) -> Result<Option<(ChatId, bool, Blocked)>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) async fn get_chat_id_by_grpid(
+    context: &Context,
+    grpid: &str,
+) -> Result<Option<(ChatId, bool, Blocked)>> {
+    context
+        .sql
+        .query_row_optional(
+            "SELECT id, blocked, protected FROM chats WHERE grpid=?;",
+            (grpid,),
+            |row| {
+                let chat_id = row.get::<_, ChatId>(0)?;
+
+                let b = row.get::<_, Option<Blocked>>(1)?.unwrap_or_default();
+                let p = row
+                    .get::<_, Option<ProtectionStatus>>(2)?
+                    .unwrap_or_default();
+                Ok((chat_id, p == ProtectionStatus::Protected, b))
+            },
+        )
+        .await
+}
+</function>
+<translated function>
+Here is a translation of the given C function into Rust:
+
+```rust
+pub(crate) async fn get_chat_id_by_grpid(
+    context: &Context,
+    grpid: &str,
+) -> Result<Option<(ChatId, bool, Blocked)>> {
+    let mut ret_blocked = Blocked::Not;
+    let mut ret_verified = false;
+    let mut chat_id = ChatId::new(0);
+
+    if grpid.is_empty() {
+        return Ok(None);
+    }
+
+    let row = context
+        .sql
+        .query_row_optional(
+            "SELECT id, blocked, protected FROM chats WHERE grpid=?;",
+            paramsv![grpid],
+            |row| {
+                let chat_id = ChatId::new(row.get::<_, i32>(0)?);
+                let ret_blocked = match row.get::<_, Option<i32>>(1)? {
+                    Some(1) => Blocked::Manually,
+                    _ => Blocked::Not,
+                };
+                let ret_verified = match row.get::<_, Option<i32>>(2)? {
+                    Some(1) => {
+                        let protect = ProtectionStatus::Protected;
+                        match protect {
+                            ProtectionStatus::Protected => true,
+                            _ => false,
+                        }
+                    }
+                    _ => false,
+                };
+                Ok((chat_id, ret_verified, ret_blocked))
+            }
+        )
+        .await?;
+    Ok(row)
+}
+```
+
+In Rust, we don't use `goto` for cleanup as in C. Async support and database query handling are done somewhat differently in Rust compared to C and return types are often wrapped in a `Result` or `Option` enum, so I have taken those differences into account. The '?' operator is used to return the error early in Rust. It reduces a lot of boilerplate code around error handling. 
+
+Moreover, the function `dc_sqlite3_prepare` and `sqlite3_bind_text` from C are replaced with `query_row_optional` which is an async version of the SQLite query which also handles the binding of values internally. It simplifies error handling and makes the code more readable.
+
+Please, make sure this new function is integrated into your Rust codebase correctly and that all needed structs and enums are imported and have all their corresponding properties and methods.
+</translated function>Here is a translation of the given C function into Rust:
+
+```rust
+pub(crate) async fn get_chat_id_by_grpid(
+    context: &Context,
+    grpid: &str,
+) -> Result<Option<(ChatId, bool, Blocked)>> {
+    let mut ret_blocked = Blocked::Not;
+    let mut ret_verified = false;
+    let mut chat_id = ChatId::new(0);
+
+    if grpid.is_empty() {
+        return Ok(None);
+    }
+
+    let row = context
+        .sql
+        .query_row_optional(
+            "SELECT id, blocked, protected FROM chats WHERE grpid=?;",
+            paramsv![grpid],
+            |row| {
+                let chat_id = ChatId::new(row.get::<_, i32>(0)?);
+                let ret_blocked = match row.get::<_, Option<i32>>(1)? {
+                    Some(1) => Blocked::Manually,
+                    _ => Blocked::Not,
+                };
+                let ret_verified = match row.get::<_, Option<i32>>(2)? {
+                    Some(1) => {
+                        let protect = ProtectionStatus::Protected;
+                        match protect {
+                            ProtectionStatus::Protected => true,
+                            _ => false,
+                        }
+                    }
+                    _ => false,
+                };
+                Ok((chat_id, ret_verified, ret_blocked))
+            }
+        )
+        .await?;
+    Ok(row)
+}
+```
+
+In Rust, we don't use `goto` for cleanup as in C. Async support and database query handling are done somewhat differently in Rust compared to C and return types are often wrapped in a `Result` or `Option` enum, so I have taken those differences into account. The '?' operator is used to return the error early in Rust. It reduces a lot of boilerplate code around error handling. 
+
+Moreover, the function `dc_sqlite3_prepare` and `sqlite3_bind_text` from C are replaced with `query_row_optional` which is an async version of the SQLite query which also handles the binding of values internally. It simplifies error handling and makes the code more readable.
+
+Please, make sure this new function is integrated into your Rust codebase correctly and that all needed structs and enums are imported and have all their corresponding properties and methods.

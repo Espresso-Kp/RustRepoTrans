@@ -1,0 +1,65 @@
+<path>
+projects/deltachat-core/rust/contact.rs
+</path>
+<function>
+    pub async fn block(context: &Context, id: ContactId) -> Result<()> {
+        set_blocked(context, Sync, id, true).await
+    }
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_contact.c
+</path>
+<function>
+void dc_block_contact(dc_context_t* context, uint32_t contact_id, int new_blocking)
+{
+	int           send_event = 0;
+	dc_contact_t* contact = dc_contact_new(context);
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || contact_id<=DC_CONTACT_ID_LAST_SPECIAL) {
+		goto cleanup;
+	}
+
+		if (dc_contact_load_from_db(contact, context->sql, contact_id)
+		 && contact->blocked!=new_blocking)
+		{
+			stmt = dc_sqlite3_prepare(context->sql,
+				"UPDATE contacts SET blocked=? WHERE id=?;");
+			sqlite3_bind_int(stmt, 1, new_blocking);
+			sqlite3_bind_int(stmt, 2, contact_id);
+			if (sqlite3_step(stmt)!=SQLITE_DONE) {
+				goto cleanup;
+			}
+			sqlite3_finalize(stmt);
+			stmt = NULL;
+
+			/* also (un)block all chats with _only_ this contact - we do not delete them to allow a non-destructive blocking->unblocking.
+			(Maybe, beside normal chats (type=100) we should also block group chats with only this user.
+			However, I'm not sure about this point; it may be confusing if the user wants to add other people;
+			this would result in recreating the same group...) */
+			stmt = dc_sqlite3_prepare(context->sql,
+				"UPDATE chats SET blocked=? WHERE type=? AND id IN (SELECT chat_id FROM chats_contacts WHERE contact_id=?);");
+			sqlite3_bind_int(stmt, 1, new_blocking);
+			sqlite3_bind_int(stmt, 2, DC_CHAT_TYPE_SINGLE);
+			sqlite3_bind_int(stmt, 3, contact_id);
+			if (sqlite3_step(stmt)!=SQLITE_DONE) {
+				goto cleanup;
+			}
+
+			/* mark all messages from the blocked contact as being noticed (this is to remove the deaddrop popup) */
+			dc_marknoticed_contact(context, contact_id);
+
+			send_event = 1;
+		}
+
+	if (send_event) {
+		context->cb(context, DC_EVENT_CONTACTS_CHANGED, 0, 0);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	dc_contact_unref(contact);
+}
+</function>

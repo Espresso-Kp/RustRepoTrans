@@ -1,0 +1,57 @@
+<path>
+projects/charset-normalizer/rust/src/utils.rs
+</path>
+<function>
+pub(crate) fn cp_similarity(iana_name_a: &str, iana_name_b: &str) -> f32 {
+    // we don't want to compare multi-byte encodings
+    if is_multi_byte_encoding(iana_name_a) || is_multi_byte_encoding(iana_name_b) {
+        return 0.0;
+    }
+
+    if let (Some(encoder_a), Some(encoder_b)) = (
+        encoding_from_whatwg_label(iana_name_a),
+        encoding_from_whatwg_label(iana_name_b),
+    ) {
+        let character_match_count = (1..255u8)
+            .filter(|&ch| {
+                let res_a = encoder_a.decode(&[ch], DecoderTrap::Ignore).ok();
+                let res_b = encoder_b.decode(&[ch], DecoderTrap::Ignore).ok();
+                res_a.is_some() && res_a == res_b //check that they aren't none and equal
+            })
+            .count();
+        return character_match_count as f32 / 254.0;
+    }
+    0.0 // Return 0.0 if encoders could not be retrieved.
+}
+</function>
+------
+
+<path>
+projects/charset-normalizer/python/utils.py
+</path>
+<function>
+def cp_similarity(iana_name_a: str, iana_name_b: str) -> float:
+    if is_multi_byte_encoding(iana_name_a) or is_multi_byte_encoding(iana_name_b):
+        return 0.0
+
+    decoder_a = importlib.import_module(
+        "encodings.{}".format(iana_name_a)
+    ).IncrementalDecoder
+    decoder_b = importlib.import_module(
+        "encodings.{}".format(iana_name_b)
+    ).IncrementalDecoder
+
+    id_a: IncrementalDecoder = decoder_a(errors="ignore")
+    id_b: IncrementalDecoder = decoder_b(errors="ignore")
+
+    character_match_count: int = 0
+
+    for i in range(255):
+        to_be_decoded: bytes = bytes([i])
+        if id_a.decode(to_be_decoded) == id_b.decode(to_be_decoded):
+            character_match_count += 1
+
+    return character_match_count / 254
+
+
+</function>

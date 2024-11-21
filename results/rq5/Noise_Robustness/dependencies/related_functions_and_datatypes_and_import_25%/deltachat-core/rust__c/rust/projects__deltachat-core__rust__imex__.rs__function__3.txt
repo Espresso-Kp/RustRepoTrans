@@ -1,0 +1,242 @@
+pub fn set_int(&mut self, key: Param, value: i32) -> &mut Self {
+        self.set(key, format!("{value}"));
+        self
+    }
+pub async fn render_setup_file(context: &Context, passphrase: &str) -> Result<String> {
+    let passphrase_begin = if let Some(passphrase_begin) = passphrase.get(..2) {
+        passphrase_begin
+    } else {
+        bail!("Passphrase must be at least 2 chars long.");
+    };
+    let private_key = load_self_secret_key(context).await?;
+    let ac_headers = match context.get_config_bool(Config::E2eeEnabled).await? {
+        false => None,
+        true => Some(("Autocrypt-Prefer-Encrypt", "mutual")),
+    };
+    let private_key_asc = private_key.to_asc(ac_headers);
+    let encr = pgp::symm_encrypt(passphrase, private_key_asc.as_bytes())
+        .await?
+        .replace('\n', "\r\n");
+
+    let replacement = format!(
+        concat!(
+            "-----BEGIN PGP MESSAGE-----\r\n",
+            "Passphrase-Format: numeric9x4\r\n",
+            "Passphrase-Begin: {}"
+        ),
+        passphrase_begin
+    );
+    let pgp_msg = encr.replace("-----BEGIN PGP MESSAGE-----", &replacement);
+
+    let msg_subj = stock_str::ac_setup_msg_subject(context).await;
+    let msg_body = stock_str::ac_setup_msg_body(context).await;
+    let msg_body_html = msg_body.replace('\r', "").replace('\n', "<br>");
+    Ok(format!(
+        concat!(
+            "<!DOCTYPE html>\r\n",
+            "<html>\r\n",
+            "  <head>\r\n",
+            "    <title>{}</title>\r\n",
+            "  </head>\r\n",
+            "  <body>\r\n",
+            "    <h1>{}</h1>\r\n",
+            "    <p>{}</p>\r\n",
+            "    <pre>\r\n{}\r\n</pre>\r\n",
+            "  </body>\r\n",
+            "</html>\r\n"
+        ),
+        msg_subj, msg_subj, msg_body_html, pgp_msg
+    ))
+}
+pub async fn create(
+        context: &'a Context,
+        suggested_name: &str,
+        data: &[u8],
+    ) -> Result<BlobObject<'a>> {
+        let blobdir = context.get_blobdir();
+        let (stem, ext) = BlobObject::sanitise_name(suggested_name);
+        let (name, mut file) = BlobObject::create_new_file(context, blobdir, &stem, &ext).await?;
+        file.write_all(data).await.context("file write failure")?;
+
+        // workaround a bug in async-std
+        // (the executor does not handle blocking operation in Drop correctly,
+        // see <https://github.com/async-rs/async-std/issues/900>)
+        let _ = file.flush().await;
+
+        let blob = BlobObject {
+            blobdir,
+            name: format!("$BLOBDIR/{name}"),
+        };
+        context.emit_event(EventType::NewBlobFile(blob.as_name().to_string()));
+        Ok(blob)
+    }
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+pub enum SystemMessage {
+    /// Unknown type of system message.
+    #[default]
+    Unknown = 0,
+
+    /// Group name changed.
+    GroupNameChanged = 2,
+
+    /// Group avatar changed.
+    GroupImageChanged = 3,
+
+    /// Member was added to the group.
+    MemberAddedToGroup = 4,
+
+    /// Member was removed from the group.
+    MemberRemovedFromGroup = 5,
+
+    /// Autocrypt Setup Message.
+    AutocryptSetupMessage = 6,
+
+    /// Secure-join message.
+    SecurejoinMessage = 7,
+
+    /// Location streaming is enabled.
+    LocationStreamingEnabled = 8,
+
+    /// Location-only message.
+    LocationOnly = 9,
+
+    /// Chat ephemeral message timer is changed.
+    EphemeralTimerChanged = 10,
+
+    /// "Messages are guaranteed to be end-to-end encrypted from now on."
+    ChatProtectionEnabled = 11,
+
+    /// "%1$s sent a message from another device."
+    ChatProtectionDisabled = 12,
+
+    /// Message can't be sent because of `Invalid unencrypted mail to <>`
+    /// which is sent by chatmail servers.
+    InvalidUnencryptedMail = 13,
+
+    /// 1:1 chats info message telling that SecureJoin has started and the user should wait for it
+    /// to complete.
+    SecurejoinWait = 14,
+
+    /// 1:1 chats info message telling that SecureJoin is still running, but the user may already
+    /// send messages.
+    SecurejoinWaitTimeout = 15,
+
+    /// Self-sent-message that contains only json used for multi-device-sync;
+    /// if possible, we attach that to other messages as for locations.
+    MultiDeviceSync = 20,
+
+    /// Sync message that contains a json payload
+    /// sent to the other webxdc instances
+    /// These messages are not shown in the chat.
+    WebxdcStatusUpdate = 30,
+
+    /// Webxdc info added with `info` set in `send_webxdc_status_update()`.
+    WebxdcInfoMessage = 32,
+
+    /// This message contains a users iroh node address.
+    IrohNodeAddr = 40,
+}
+------
+
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};

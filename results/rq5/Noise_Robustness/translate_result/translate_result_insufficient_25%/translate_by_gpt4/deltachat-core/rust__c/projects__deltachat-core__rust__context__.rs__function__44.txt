@@ -1,0 +1,233 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+dc_array_t* dc_get_fresh_msgs(dc_context_t* context)
+{
+	int           show_deaddrop = 0;
+	dc_array_t*   ret = dc_array_new(context, 128);
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || ret==NULL) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT m.id"
+		" FROM msgs m"
+		" LEFT JOIN contacts ct ON m.from_id=ct.id"
+		" LEFT JOIN chats c ON m.chat_id=c.id"
+		" WHERE m.state=?"
+		"   AND m.hidden=0"
+		"   AND m.chat_id>?"
+		"   AND ct.blocked=0"
+        "   AND c.blocked=0"
+		"   AND NOT(c.muted_until=-1 OR c.muted_until>?)"
+		" ORDER BY m.timestamp DESC,m.id DESC;");
+	sqlite3_bind_int(stmt, 1, DC_STATE_IN_FRESH);
+	sqlite3_bind_int(stmt, 2, DC_CHAT_ID_LAST_SPECIAL);
+	sqlite3_bind_int(stmt, 3, show_deaddrop? DC_CHAT_DEADDROP_BLOCKED : 0);
+
+	while (sqlite3_step(stmt)==SQLITE_ROW) {
+		dc_array_add_id(ret, sqlite3_column_int(stmt, 0));
+	}
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_fresh_msgs(&self) -> Result<Vec<MsgId>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub(crate) fn time() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+pub async fn query_map<T, F, G, H>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+        mut g: G,
+    ) -> Result<H>
+    where
+        F: Send + FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+        G: Send + FnMut(rusqlite::MappedRows<F>) -> Result<H>,
+        H: Send + 'static,
+    {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let res = stmt.query_map(params, f)?;
+            g(res)
+        })
+        .await
+    }
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use pgp::SignedPublicKey;
+use ratelimit::Ratelimit;
+use tokio::sync::{Mutex, Notify, OnceCell, RwLock};
+use crate::aheader::EncryptPreference;
+use crate::chat::{get_chat_cnt, ChatId, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    self, DC_BACKGROUND_FETCH_QUOTA_CHECK_RATELIMIT, DC_CHAT_ID_TRASH, DC_VERSION_STR,
+};
+use crate::contact::{Contact, ContactId};
+use crate::debug_logging::DebugLogging;
+use crate::download::DownloadState;
+use crate::events::{Event, EventEmitter, EventType, Events};
+use crate::imap::{FolderMeaning, Imap, ServerMetadata};
+use crate::key::{load_self_public_key, load_self_secret_key, DcKey as _};
+use crate::login_param::LoginParam;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::param::{Param, Params};
+use crate::peer_channels::Iroh;
+use crate::peerstate::Peerstate;
+use crate::push::PushSubscriber;
+use crate::quota::QuotaInfo;
+use crate::scheduler::{convert_folder_meaning, SchedulerState};
+use crate::sql::Sql;
+use crate::stock_str::StockStrings;
+use crate::timesmearing::SmearedTimestamp;
+use crate::tools::{self, create_id, duration_to_str, time, time_elapsed};
+use anyhow::Context as _;
+use strum::IntoEnumIterator;
+use tempfile::tempdir;
+use super::*;
+use crate::chat::{get_chat_contacts, get_chat_msgs, send_msg, set_muted, Chat, MuteDuration};
+use crate::chatlist::Chatlist;
+use crate::constants::Chattype;
+use crate::mimeparser::SystemMessage;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{get_chat_msg, TestContext};
+use crate::tools::{create_outgoing_rfc724_mid, SystemTime};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_fresh_msgs(&self) -> Result<Vec<MsgId>> {
+        let list = self
+            .sql
+            .query_map(
+                concat!(
+                    "SELECT m.id",
+                    " FROM msgs m",
+                    " LEFT JOIN contacts ct",
+                    "        ON m.from_id=ct.id",
+                    " LEFT JOIN chats c",
+                    "        ON m.chat_id=c.id",
+                    " WHERE m.state=?",
+                    "   AND m.hidden=0",
+                    "   AND m.chat_id>9",
+                    "   AND ct.blocked=0",
+                    "   AND c.blocked=0",
+                    "   AND NOT(c.muted_until=-1 OR c.muted_until>?)",
+                    " ORDER BY m.timestamp DESC,m.id DESC;"
+                ),
+                (MessageState::InFresh, time()),
+                |row| row.get::<_, MsgId>(0),
+                |rows| {
+                    let mut list = Vec::new();
+                    for row in rows {
+                        list.push(row?);
+                    }
+                    Ok(list)
+                },
+            )
+            .await?;
+        Ok(list)
+    }
+</function>
+<translated function>
+Here is your function translated from C to Rust:
+
+```rust
+pub async fn get_fresh_msgs(&self) -> Result<Vec<MsgId>> {
+    let show_deaddrop = 0;
+
+    let msgs: Vec<MsgId> = self
+        .query_map(
+            "SELECT m.id
+             FROM msgs m
+             LEFT JOIN contacts ct ON m.from_id=ct.id
+             LEFT JOIN chats c ON m.chat_id=c.id
+             WHERE m.state=?
+               AND m.hidden=0
+               AND m.chat_id>?
+               AND ct.blocked=0
+               AND c.blocked=0
+               AND NOT(c.muted_until=-1 OR c.muted_until>?)
+             ORDER BY m.timestamp DESC,m.id DESC",
+            paramsv![
+                DC_STATE_IN_FRESH, 
+                DC_CHAT_ID_LAST_SPECIAL, 
+                if show_deaddrop { DC_CHAT_DEADDROP_BLOCKED } else { 0 }
+            ],
+            |row| Ok(row.get(0)?),
+            |ids| Ok(ids.collect::<rusqlite::Result<Vec<_>>>()?)
+        )
+        .await?;
+
+    Ok(msgs)
+}
+```
+In this translation, the function `dc_get_fresh_msgs(dc_context_t* context)` is translated to `get_fresh_msgs(&self) -> Result<Vec<MsgId>>`. The use of the `paramsv!` macro is used to simplify the function parameters binding within the prepared statement. The `query_map` function is asynchronous and takes care of the preparation and finalization of the SQLite statement, apart from executing the statement and gathering the results using a provided closure.
+
+Please note:
+- I did the translation assuming the Rust constants `DC_STATE_IN_FRESH`, `DC_CHAT_ID_LAST_SPECIAL` and `DC_CHAT_DEADDROP_BLOCKED` exist and have the same semantic as in the original C code.
+- The rusqlite crate must be already included in your Cargo.toml for this translation to work.</translated function>Here is your function translated from C to Rust:
+
+```rust
+pub async fn get_fresh_msgs(&self) -> Result<Vec<MsgId>> {
+    let show_deaddrop = 0;
+
+    let msgs: Vec<MsgId> = self
+        .query_map(
+            "SELECT m.id
+             FROM msgs m
+             LEFT JOIN contacts ct ON m.from_id=ct.id
+             LEFT JOIN chats c ON m.chat_id=c.id
+             WHERE m.state=?
+               AND m.hidden=0
+               AND m.chat_id>?
+               AND ct.blocked=0
+               AND c.blocked=0
+               AND NOT(c.muted_until=-1 OR c.muted_until>?)
+             ORDER BY m.timestamp DESC,m.id DESC",
+            paramsv![
+                DC_STATE_IN_FRESH, 
+                DC_CHAT_ID_LAST_SPECIAL, 
+                if show_deaddrop { DC_CHAT_DEADDROP_BLOCKED } else { 0 }
+            ],
+            |row| Ok(row.get(0)?),
+            |ids| Ok(ids.collect::<rusqlite::Result<Vec<_>>>()?)
+        )
+        .await?;
+
+    Ok(msgs)
+}
+```
+In this translation, the function `dc_get_fresh_msgs(dc_context_t* context)` is translated to `get_fresh_msgs(&self) -> Result<Vec<MsgId>>`. The use of the `paramsv!` macro is used to simplify the function parameters binding within the prepared statement. The `query_map` function is asynchronous and takes care of the preparation and finalization of the SQLite statement, apart from executing the statement and gathering the results using a provided closure.
+
+Please note:
+- I did the translation assuming the Rust constants `DC_STATE_IN_FRESH`, `DC_CHAT_ID_LAST_SPECIAL` and `DC_CHAT_DEADDROP_BLOCKED` exist and have the same semantic as in the original C code.
+- The rusqlite crate must be already included in your Cargo.toml for this translation to work.

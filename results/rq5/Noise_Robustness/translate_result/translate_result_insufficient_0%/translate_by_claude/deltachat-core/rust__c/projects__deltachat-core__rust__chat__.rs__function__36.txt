@@ -1,0 +1,192 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+int dc_get_msg_cnt(dc_context_t* context, uint32_t chat_id)
+{
+	int           ret = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+		"SELECT COUNT(*) FROM msgs WHERE chat_id=?;");
+	sqlite3_bind_int(stmt, 1, chat_id);
+	if (sqlite3_step(stmt)!=SQLITE_ROW) {
+		goto cleanup;
+	}
+
+	ret = sqlite3_column_int(stmt, 0);
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_msg_cnt(self, context: &Context) -> Result<usize> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_msg_cnt(self, context: &Context) -> Result<usize> {
+        let count = context
+            .sql
+            .count(
+                "SELECT COUNT(*) FROM msgs WHERE hidden=0 AND chat_id=?",
+                (self,),
+            )
+            .await?;
+        Ok(count)
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn get_msg_cnt(self, context: &Context) -> Result<usize> {
+    let sql = context.sql.clone();
+    let chat_id = self.id;
+
+    task::spawn_blocking(move || {
+        let mut stmt = sql.prepare(
+            "SELECT COUNT(*) FROM msgs WHERE chat_id=?;"
+        )?;
+        stmt.bind_param(1, chat_id as i64)?;
+
+        let count = if let Some(row) = stmt.next()? {
+            row.get(0)?
+        } else {
+            0
+        };
+
+        Ok(count)
+    })
+    .await
+    .context("Failed to execute database query")?
+}
+```
+
+This Rust function follows the provided signature and uses the available dependencies. It performs the following steps:
+
+1. Clones the SQL connection from the context.
+2. Spawns a blocking task to execute the database query.
+3. Prepares an SQL statement to count messages for the given chat ID.
+4. Binds the chat ID parameter to the statement.
+5. Executes the query and retrieves the count.
+6. Returns the result as a `Result<usize>`.
+
+Note that this translation assumes that:
+- The `Context` struct has a `sql` field of a type compatible with the `prepare` method.
+- The `self` parameter in the function signature refers to a struct with an `id` field representing the chat ID.
+- The necessary error handling and conversion traits are in scope.
+
+The function uses `task::spawn_blocking` to run the database query in a separate thread, which is a common pattern in async Rust when dealing with blocking operations.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, and dependencies:
+
+```rust
+pub async fn get_msg_cnt(self, context: &Context) -> Result<usize> {
+    let sql = context.sql.clone();
+    let chat_id = self.id;
+
+    task::spawn_blocking(move || {
+        let mut stmt = sql.prepare(
+            "SELECT COUNT(*) FROM msgs WHERE chat_id=?;"
+        )?;
+        stmt.bind_param(1, chat_id as i64)?;
+
+        let count = if let Some(row) = stmt.next()? {
+            row.get(0)?
+        } else {
+            0
+        };
+
+        Ok(count)
+    })
+    .await
+    .context("Failed to execute database query")?
+}
+```
+
+This Rust function follows the provided signature and uses the available dependencies. It performs the following steps:
+
+1. Clones the SQL connection from the context.
+2. Spawns a blocking task to execute the database query.
+3. Prepares an SQL statement to count messages for the given chat ID.
+4. Binds the chat ID parameter to the statement.
+5. Executes the query and retrieves the count.
+6. Returns the result as a `Result<usize>`.
+
+Note that this translation assumes that:
+- The `Context` struct has a `sql` field of a type compatible with the `prepare` method.
+- The `self` parameter in the function signature refers to a struct with an `id` field representing the chat ID.
+- The necessary error handling and conversion traits are in scope.
+
+The function uses `task::spawn_blocking` to run the database query in a separate thread, which is a common pattern in async Rust when dealing with blocking operations.

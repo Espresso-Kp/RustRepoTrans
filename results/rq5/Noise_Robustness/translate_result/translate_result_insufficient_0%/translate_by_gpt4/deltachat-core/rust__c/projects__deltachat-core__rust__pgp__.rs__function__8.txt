@@ -1,0 +1,328 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+int dc_pgp_create_keypair(dc_context_t* context, const char* addr, dc_key_t* ret_public_key, dc_key_t* ret_private_key)
+{
+	int              success = 0;
+	pgp_key_t        seckey;
+	pgp_key_t        pubkey;
+	pgp_key_t        subkey;
+	uint8_t          subkeyid[PGP_KEY_ID_SIZE];
+	uint8_t*         user_id = NULL;
+	pgp_memory_t*    pubmem = pgp_memory_new();
+	pgp_memory_t*    secmem = pgp_memory_new();
+	pgp_output_t*    pubout = pgp_output_new();
+	pgp_output_t*    secout = pgp_output_new();
+
+	memset(&seckey, 0, sizeof(pgp_key_t));
+	memset(&pubkey, 0, sizeof(pgp_key_t));
+	memset(&subkey, 0, sizeof(pgp_key_t));
+
+	if (context==NULL || addr==NULL || ret_public_key==NULL || ret_private_key==NULL
+	 || pubmem==NULL || secmem==NULL || pubout==NULL || secout==NULL) {
+		goto cleanup;
+	}
+
+	/* Generate User ID.
+	By convention, this is the e-mail-address in angle brackets.
+
+	As the user-id is only decorative in Autocrypt and not needed for Delta Chat,
+	so we _could_ just use sth. that looks like an e-mail-address.
+	This would protect the user's privacy if someone else uploads the keys to keyservers.
+
+	However, as eg. Enigmail displayes the user-id in "Good signature from <user-id>,
+	for now, we decided to leave the address in the user-id */
+	#if 0
+		user_id = (uint8_t*)dc_mprintf("<%08X@%08X.org>", (int)random(), (int)random());
+	#else
+		user_id = (uint8_t*)dc_mprintf("<%s>", addr);
+	#endif
+
+
+	/* generate two keypairs */
+	if (!pgp_rsa_generate_keypair(&seckey, DC_KEYGEN_BITS, DC_KEYGEN_E, NULL, NULL, NULL, 0)
+	 || !pgp_rsa_generate_keypair(&subkey, DC_KEYGEN_BITS, DC_KEYGEN_E, NULL, NULL, NULL, 0)) {
+		goto cleanup;
+	}
+
+
+	/* Create public key, bind public subkey to public key */
+
+	pubkey.type = PGP_PTAG_CT_PUBLIC_KEY;
+	pgp_pubkey_dup(&pubkey.key.pubkey, &seckey.key.pubkey);
+	memcpy(pubkey.pubkeyid, seckey.pubkeyid, PGP_KEY_ID_SIZE);
+	pgp_fingerprint(&pubkey.pubkeyfpr, &seckey.key.pubkey, 0);
+	add_selfsigned_userid(&seckey, &pubkey, (const uint8_t*)user_id, 0/*never expire*/);
+
+	EXPAND_ARRAY((&pubkey), subkey);
+	{
+		pgp_subkey_t* p = &pubkey.subkeys[pubkey.subkeyc++];
+		pgp_pubkey_dup(&p->key.pubkey, &subkey.key.pubkey);
+		pgp_keyid(subkeyid, PGP_KEY_ID_SIZE, &pubkey.key.pubkey, PGP_HASH_SHA1);
+		memcpy(p->id, subkeyid, PGP_KEY_ID_SIZE);
+	}
+
+	EXPAND_ARRAY((&pubkey), subkeysig);
+	add_subkey_binding_signature(&pubkey.subkeysigs[pubkey.subkeysigc++], &pubkey, &subkey, &seckey);
+
+
+	/* Create secret key, bind secret subkey to secret key */
+
+	EXPAND_ARRAY((&seckey), subkey);
+	{
+		pgp_subkey_t* p = &seckey.subkeys[seckey.subkeyc++];
+		pgp_seckey_dup(&p->key.seckey, &subkey.key.seckey);
+		pgp_keyid(subkeyid, PGP_KEY_ID_SIZE, &seckey.key.pubkey, PGP_HASH_SHA1);
+		memcpy(p->id, subkeyid, PGP_KEY_ID_SIZE);
+	}
+
+	EXPAND_ARRAY((&seckey), subkeysig);
+	add_subkey_binding_signature(&seckey.subkeysigs[seckey.subkeysigc++], &seckey, &subkey, &seckey);
+
+
+	/* Done with key generation, write binary keys to memory */
+
+	pgp_writer_set_memory(pubout, pubmem);
+	if (!pgp_write_xfer_key(pubout, &pubkey, 0/*armored*/)
+	 || pubmem->buf==NULL || pubmem->length <= 0) {
+		goto cleanup;
+	}
+
+	pgp_writer_set_memory(secout, secmem);
+	if (!pgp_write_xfer_key(secout, &seckey, 0/*armored*/)
+	 || secmem->buf==NULL || secmem->length <= 0) {
+		goto cleanup;
+	}
+
+	dc_key_set_from_binary(ret_public_key, pubmem->buf, pubmem->length, DC_KEY_PUBLIC);
+	dc_key_set_from_binary(ret_private_key, secmem->buf, secmem->length, DC_KEY_PRIVATE);
+
+	success = 1;
+
+cleanup:
+	if (pubout) { pgp_output_delete(pubout); }
+	if (secout) { pgp_output_delete(secout); }
+	if (pubmem) { pgp_memory_free(pubmem); }
+	if (secmem) { pgp_memory_free(secmem); }
+	pgp_key_free(&seckey); /* not: pgp_keydata_free() which will also free the pointer itself (we created it on the stack) */
+	pgp_key_free(&pubkey);
+	pgp_key_free(&subkey);
+	free(user_id);
+	return success;
+}
+</c function>
+<rust function signature>
+pub(crate) fn create_keypair(addr: EmailAddress, keygen_type: KeyGenType) -> Result<KeyPair> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use std::collections::{BTreeMap, HashSet};
+use std::io;
+use std::io::Cursor;
+use anyhow::{bail, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use pgp::armor::BlockType;
+use pgp::composed::{
+    Deserializable, KeyType as PgpKeyType, Message, SecretKeyParamsBuilder, SignedPublicKey,
+    SignedPublicSubKey, SignedSecretKey, StandaloneSignature, SubkeyParamsBuilder,
+};
+use pgp::crypto::hash::HashAlgorithm;
+use pgp::crypto::sym::SymmetricKeyAlgorithm;
+use pgp::types::{
+    CompressionAlgorithm, KeyTrait, Mpi, PublicKeyTrait, SecretKeyTrait, StringToKey,
+};
+use rand::{thread_rng, CryptoRng, Rng};
+use tokio::runtime::Handle;
+use crate::constants::KeyGenType;
+use crate::key::{DcKey, Fingerprint};
+use std::io::Read;
+use once_cell::sync::Lazy;
+use tokio::sync::OnceCell;
+use super::*;
+use crate::test_utils::{alice_keypair, bob_keypair};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn create_keypair(addr: EmailAddress, keygen_type: KeyGenType) -> Result<KeyPair> {
+    let (signing_key_type, encryption_key_type) = match keygen_type {
+        KeyGenType::Rsa2048 => (PgpKeyType::Rsa(2048), PgpKeyType::Rsa(2048)),
+        KeyGenType::Rsa4096 => (PgpKeyType::Rsa(4096), PgpKeyType::Rsa(4096)),
+        KeyGenType::Ed25519 | KeyGenType::Default => (PgpKeyType::EdDSA, PgpKeyType::ECDH),
+    };
+
+    let user_id = format!("<{addr}>");
+    let key_params = SecretKeyParamsBuilder::default()
+        .key_type(signing_key_type)
+        .can_certify(true)
+        .can_sign(true)
+        .primary_user_id(user_id)
+        .passphrase(None)
+        .preferred_symmetric_algorithms(smallvec![
+            SymmetricKeyAlgorithm::AES256,
+            SymmetricKeyAlgorithm::AES192,
+            SymmetricKeyAlgorithm::AES128,
+        ])
+        .preferred_hash_algorithms(smallvec![
+            HashAlgorithm::SHA2_256,
+            HashAlgorithm::SHA2_384,
+            HashAlgorithm::SHA2_512,
+            HashAlgorithm::SHA2_224,
+            HashAlgorithm::SHA1,
+        ])
+        .preferred_compression_algorithms(smallvec![
+            CompressionAlgorithm::ZLIB,
+            CompressionAlgorithm::ZIP,
+        ])
+        .subkey(
+            SubkeyParamsBuilder::default()
+                .key_type(encryption_key_type)
+                .can_encrypt(true)
+                .passphrase(None)
+                .build()
+                .context("failed to build subkey parameters")?,
+        )
+        .build()
+        .context("failed to build key parameters")?;
+
+    let secret_key = key_params
+        .generate()
+        .context("failed to generate the key")?
+        .sign(|| "".into())
+        .context("failed to sign secret key")?;
+    secret_key
+        .verify()
+        .context("invalid secret key generated")?;
+
+    let public_key = secret_key
+        .public_key()
+        .sign(&secret_key, || "".into())
+        .context("failed to sign public key")?;
+    public_key
+        .verify()
+        .context("invalid public key generated")?;
+
+    Ok(KeyPair {
+        addr,
+        public: public_key,
+        secret: secret_key,
+    })
+}
+</function>
+<translated function>
+Sure! Here is the function translated to Rust.
+
+```rust
+pub(crate) fn create_keypair(addr: EmailAddress, keygen_type: KeyGenType) -> Result<KeyPair> {
+    if addr.is_empty() {
+        bail!("empty addr");
+    }
+    
+    let mut seckey = PgpKeyType::new();
+    let mut pubkey = PgpKeyType::new();
+    let mut subkey = PgpKeyType::new();
+    let mut subkeyid = [0u8; PGP_KEY_ID_SIZE];
+    let mut user_id : Option<String> = None;
+    let mut pubmem = pgp::composed::signed_message::SignedPublicKey::new();
+    let mut secmem = pgp::composed::signed_message::SignedSecretKey::new();
+
+    let mut pubout = io::Cursor::new(Vec::new());
+    let mut secout = io::Cursor::new(Vec::new());
+
+    user_id = Some(format!("<{}>", addr));
+
+    if !seckey.generate_keypair(&mut pubkey, DC_KEYGEN_BITS, DC_KEYGEN_E, None, None, None, 0)
+       || !subkey.generate_keypair(&mut seckey, DC_KEYGEN_BITS, DC_KEYGEN_E, None, None, None, 0) {
+        bail!("error generating keypairs");
+    }
+
+    pubkey.dup(&mut pubkey, &seckey);
+    pubkey.fingerprint(&pubkey, &seckey, 0);
+
+    add_selfsigned_userid(&seckey, &pubkey, user_id.as_ref().map(|s| s.as_bytes()), 0).unwrap();
+    add_subkey_binding_signature(&mut pubkey, &mut subkey, &mut seckey).unwrap();
+    
+    pgp_writer_set_memory(&mut pubout, &mut pubmem);
+    krb5_write_key(&mut pubout, &pubkey, false).unwrap();
+    
+    pgp_writer_set_memory(&mut secout, &mut secmem);
+    krb5_write_key(&mut secout, &seckey, false).unwrap();
+
+    if pubmem.buf.is_empty() || secmem.buf.is_empty() {
+        bail!("public or secret key is empty");
+    }
+
+    let ret_public_key = DcKey::from_slice(&pubmem.buf, DC_KEY_PUBLIC);
+    let ret_private_key = DcKey::from_slice(&secmem.buf, DC_KEY_PRIVATE);
+
+    Ok(KeyPair {
+        addr,
+        public: ret_public_key,
+        secret: ret_private_key,
+    })
+}
+```
+Please, keep in mind that I did my best to keep functionality similar but there will be nuances that will need to be reviewed and tested in modern Rust. Writing low level cryptographic functions in high level and safe programming languages like Rust is quite different and some C style things are best to be avoided in Rust.
+
+In addition, I assumed DC_KEYGEN_BITS and DC_KEYGEN_E are global constants and DC_KEY_PUBLIC and DC_KEY_PRIVATE are enum values. I used appropriate Rust idioms like `unwrap()`, `?` for error handling, and `bail!` for raising errors. Adaption of the code may be needed depending on your actual code. Please also add appropriate `use` statements where necessary.</translated function>Sure! Here is the function translated to Rust.
+
+```rust
+pub(crate) fn create_keypair(addr: EmailAddress, keygen_type: KeyGenType) -> Result<KeyPair> {
+    if addr.is_empty() {
+        bail!("empty addr");
+    }
+    
+    let mut seckey = PgpKeyType::new();
+    let mut pubkey = PgpKeyType::new();
+    let mut subkey = PgpKeyType::new();
+    let mut subkeyid = [0u8; PGP_KEY_ID_SIZE];
+    let mut user_id : Option<String> = None;
+    let mut pubmem = pgp::composed::signed_message::SignedPublicKey::new();
+    let mut secmem = pgp::composed::signed_message::SignedSecretKey::new();
+
+    let mut pubout = io::Cursor::new(Vec::new());
+    let mut secout = io::Cursor::new(Vec::new());
+
+    user_id = Some(format!("<{}>", addr));
+
+    if !seckey.generate_keypair(&mut pubkey, DC_KEYGEN_BITS, DC_KEYGEN_E, None, None, None, 0)
+       || !subkey.generate_keypair(&mut seckey, DC_KEYGEN_BITS, DC_KEYGEN_E, None, None, None, 0) {
+        bail!("error generating keypairs");
+    }
+
+    pubkey.dup(&mut pubkey, &seckey);
+    pubkey.fingerprint(&pubkey, &seckey, 0);
+
+    add_selfsigned_userid(&seckey, &pubkey, user_id.as_ref().map(|s| s.as_bytes()), 0).unwrap();
+    add_subkey_binding_signature(&mut pubkey, &mut subkey, &mut seckey).unwrap();
+    
+    pgp_writer_set_memory(&mut pubout, &mut pubmem);
+    krb5_write_key(&mut pubout, &pubkey, false).unwrap();
+    
+    pgp_writer_set_memory(&mut secout, &mut secmem);
+    krb5_write_key(&mut secout, &seckey, false).unwrap();
+
+    if pubmem.buf.is_empty() || secmem.buf.is_empty() {
+        bail!("public or secret key is empty");
+    }
+
+    let ret_public_key = DcKey::from_slice(&pubmem.buf, DC_KEY_PUBLIC);
+    let ret_private_key = DcKey::from_slice(&secmem.buf, DC_KEY_PRIVATE);
+
+    Ok(KeyPair {
+        addr,
+        public: ret_public_key,
+        secret: ret_private_key,
+    })
+}
+```
+Please, keep in mind that I did my best to keep functionality similar but there will be nuances that will need to be reviewed and tested in modern Rust. Writing low level cryptographic functions in high level and safe programming languages like Rust is quite different and some C style things are best to be avoided in Rust.
+
+In addition, I assumed DC_KEYGEN_BITS and DC_KEYGEN_E are global constants and DC_KEY_PUBLIC and DC_KEY_PRIVATE are enum values. I used appropriate Rust idioms like `unwrap()`, `?` for error handling, and `bail!` for raising errors. Adaption of the code may be needed depending on your actual code. Please also add appropriate `use` statements where necessary.

@@ -1,0 +1,305 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def encoding_unicode_range(iana_name: str) -> List[str]:
+    """
+    Return associated unicode ranges in a single byte code page.
+    """
+    if is_multi_byte_encoding(iana_name):
+        raise IOError("Function not supported on multi-byte code page")
+
+    decoder = importlib.import_module(
+        "encodings.{}".format(iana_name)
+    ).IncrementalDecoder
+
+    p: IncrementalDecoder = decoder(errors="ignore")
+    seen_ranges: Dict[str, int] = {}
+    character_count: int = 0
+
+    for i in range(0x40, 0xFF):
+        chunk: str = p.decode(bytes([i]))
+
+        if chunk:
+            character_range: Optional[str] = unicode_range(chunk)
+
+            if character_range is None:
+                continue
+
+            if is_unicode_range_secondary(character_range) is False:
+                if character_range not in seen_ranges:
+                    seen_ranges[character_range] = 0
+                seen_ranges[character_range] += 1
+                character_count += 1
+
+    return sorted(
+        [
+            character_range
+            for character_range in seen_ranges
+            if seen_ranges[character_range] / character_count >= 0.15
+        ]
+    )
+</python function>
+<rust function signature>
+pub(crate) fn encoding_unicode_range(iana_name: &str) -> Result<Vec<&str>, String> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn is_multi_byte_encoding(name: &str) -> bool {
+    [
+        "utf-8",
+        "utf-16le",
+        "utf-16be",
+        "euc-jp",
+        "euc-kr",
+        "iso-2022-jp",
+        "gbk",
+        "gb18030",
+        "hz",
+        "big5",
+        "shift_jis",
+    ]
+    .contains(&name)
+}
+pub fn decode(
+    input: &[u8],
+    from_encoding: &str,
+    how_process_errors: DecoderTrap,
+    only_test: bool,
+    is_chunk: bool,
+) -> Result<String, String> {
+    let encoder = encoding_from_whatwg_label(from_encoding)
+        .ok_or(format!("Encoding '{}' not found", from_encoding))?;
+
+    let mut buf = DecodeTestResult {
+        only_test,
+        data: String::new(),
+    };
+    let mut err = CodecError {
+        upto: 0,
+        cause: Cow::from(String::new()),
+    };
+    let chunk_len = input.len();
+    let mut begin_offset: usize = 0;
+    let mut end_offset: usize = chunk_len;
+    let mut error_occured: bool;
+    loop {
+        let res = decode_to(
+            encoder,
+            &input[begin_offset..end_offset],
+            how_process_errors,
+            &mut buf,
+        );
+        error_occured = res.is_err();
+        if let DecoderTrap::Strict = how_process_errors {
+            if !is_chunk || res.is_ok() || !is_multi_byte_encoding(from_encoding) {
+                break;
+            }
+            err = res.unwrap_err();
+            if err.cause.contains("invalid sequence") {
+                begin_offset += 1;
+            } else if err.cause.contains("incomplete sequence") {
+                end_offset -= 1;
+            }
+            if end_offset - begin_offset < 1 || begin_offset > 3 || (chunk_len - end_offset) > 3 {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    if error_occured {
+        return Err(format!("{} at index {}", err.cause, err.upto));
+    }
+    Ok(String::from(buf.get_buffer()))
+}
+pub fn len(&self) -> usize {
+        self.items.len()
+    }
+fn next(&mut self) -> Option<Self::Item> {
+        self.items.next()
+    }
+pub fn iter(&self) -> CharsetMatchesIter {
+        CharsetMatchesIter {
+            items: self.items.iter(),
+        }
+    }
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn encoding_unicode_range(iana_name: &str) -> Result<Vec<&str>, String> {
+    if is_multi_byte_encoding(iana_name) {
+        return Err("Function not supported on multi-byte code page".to_string());
+    }
+    let encoder = encoding_from_whatwg_label(iana_name)
+        .ok_or("No decoder found for this encoding".to_string())?;
+
+    let byte_range = 0x40..0xFF; // utf8 range. range.len()==191
+    let mut result: HashMap<&str, u8> = HashMap::with_capacity(byte_range.len());
+
+    byte_range.for_each(|i| {
+        if let Some(range) = encoder
+            .decode(&[i], DecoderTrap::Ignore)
+            .ok()
+            .and_then(|chunk| chunk.chars().next())
+            .and_then(unicode_range)
+            .filter(|&range| !is_unicode_range_secondary(range))
+        {
+            *result.entry(range).or_insert(0) += 1;
+        }
+    });
+    let character_count: u8 = result.values().sum();
+    let threshold = 0.15;
+    let mut result: Vec<&str> = result
+        .iter()
+        .filter(|(_, &value)| (value as f32 / character_count as f32) >= threshold)
+        .map(|(&name, _)| name)
+        .collect();
+    result.sort_unstable();
+    Ok(result)
+}
+</function>
+<translated function>
+Here is your Python function translated to Rust, this function will return Error if it gets any issue during the execution:
+
+```rust
+pub(crate) fn encoding_unicode_range(iana_name: &str) -> Result<Vec<&str>, String> {
+    // Return associated unicode ranges in a single byte code page
+    if is_multi_byte_encoding(iana_name) {
+        return Err("Function not supported on multi-byte code page".to_string());
+    }
+
+    let mut seen_ranges: HashMap<String, i32> = HashMap::new();
+    let mut character_count: i32 = 0;
+    let mut character_range: Option<String> = None;
+
+    for i in 0x40..0xFF {
+        match decode(&[i as u8], iana_name, DecoderTrap::Ignore, false, true) {
+            Ok(chunk) => {
+                if !chunk.is_empty() {
+                    character_range = unicode_range(&chunk);
+
+                    if let Some(char_range) = &character_range {
+                        if !is_unicode_range_secondary(char_range) {
+                            if !seen_ranges.contains_key(char_range) {
+                                seen_ranges.insert(char_range.to_string(), 0);
+                            }
+
+                            if let Some(v) = seen_ranges.get_mut(char_range) {
+                                *v += 1;
+                            }
+
+                            character_count += 1;
+                        }
+                    }
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    let mut result: Vec<&str> = vec![];
+    for (key, val) in &seen_ranges {
+        if *val as f32 / character_count as f32 >= 0.15 {
+            result.push(key);
+        }
+    }
+
+    result.sort();
+
+    Ok(result)
+}
+```
+
+This function does the following:
+
+1. Checks if the provided character encoding supports multi-byte. If it does, return an error.
+2. For a range of decimal values between 64 and 255:
+   - Tries to decode the decimal value into a string using the provided encoding.
+   - If the result string is empty, skips the current step of the loop.
+   - Otherwise, determines the unicode range of the result string.
+   - If the unicode range is secondary, skips the current step of the loop.
+   - If the unicode range hasn't been seen before, adds it to `seen_ranges` map.
+   - Increments the count of the current unicode range in the `seen_ranges` map.
+   - Increment the `character_count` by 1.
+3. Returns a sorted list of unicode ranges where the count in `seen_ranges` is greater than or equal to 15% of `character_count`.</translated function>Here is your Python function translated to Rust, this function will return Error if it gets any issue during the execution:
+
+```rust
+pub(crate) fn encoding_unicode_range(iana_name: &str) -> Result<Vec<&str>, String> {
+    // Return associated unicode ranges in a single byte code page
+    if is_multi_byte_encoding(iana_name) {
+        return Err("Function not supported on multi-byte code page".to_string());
+    }
+
+    let mut seen_ranges: HashMap<String, i32> = HashMap::new();
+    let mut character_count: i32 = 0;
+    let mut character_range: Option<String> = None;
+
+    for i in 0x40..0xFF {
+        match decode(&[i as u8], iana_name, DecoderTrap::Ignore, false, true) {
+            Ok(chunk) => {
+                if !chunk.is_empty() {
+                    character_range = unicode_range(&chunk);
+
+                    if let Some(char_range) = &character_range {
+                        if !is_unicode_range_secondary(char_range) {
+                            if !seen_ranges.contains_key(char_range) {
+                                seen_ranges.insert(char_range.to_string(), 0);
+                            }
+
+                            if let Some(v) = seen_ranges.get_mut(char_range) {
+                                *v += 1;
+                            }
+
+                            character_count += 1;
+                        }
+                    }
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    let mut result: Vec<&str> = vec![];
+    for (key, val) in &seen_ranges {
+        if *val as f32 / character_count as f32 >= 0.15 {
+            result.push(key);
+        }
+    }
+
+    result.sort();
+
+    Ok(result)
+}
+```
+
+This function does the following:
+
+1. Checks if the provided character encoding supports multi-byte. If it does, return an error.
+2. For a range of decimal values between 64 and 255:
+   - Tries to decode the decimal value into a string using the provided encoding.
+   - If the result string is empty, skips the current step of the loop.
+   - Otherwise, determines the unicode range of the result string.
+   - If the unicode range is secondary, skips the current step of the loop.
+   - If the unicode range hasn't been seen before, adds it to `seen_ranges` map.
+   - Increments the count of the current unicode range in the `seen_ranges` map.
+   - Increment the `character_count` by 1.
+3. Returns a sorted list of unicode ranges where the count in `seen_ranges` is greater than or equal to 15% of `character_count`.

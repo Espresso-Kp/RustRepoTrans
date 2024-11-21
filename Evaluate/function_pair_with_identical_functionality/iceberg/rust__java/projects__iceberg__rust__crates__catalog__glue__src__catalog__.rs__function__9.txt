@@ -1,0 +1,64 @@
+<path>
+projects/iceberg/rust/crates/catalog/glue/src/catalog.rs
+</path>
+<function>
+    async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+        let db_name = validate_namespace(namespace)?;
+        let table_list = self.list_tables(namespace).await?;
+
+        if !table_list.is_empty() {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} is not empty", &db_name),
+            ));
+        }
+
+        let builder = self.client.0.delete_database().name(db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+------
+
+<path>
+projects/iceberg/java/aws/src/main/java/org/apache/iceberg/aws/glue/GlueCatalog.java
+</path>
+<function>
+  public boolean dropNamespace(Namespace namespace) throws NamespaceNotEmptyException {
+    namespaceExists(namespace);
+
+    GetTablesResponse response =
+        glue.getTables(
+            GetTablesRequest.builder()
+                .catalogId(awsProperties.glueCatalogId())
+                .databaseName(
+                    IcebergToGlueConverter.toDatabaseName(
+                        namespace, awsProperties.glueCatalogSkipNameValidation()))
+                .build());
+
+    if (response.hasTableList() && !response.tableList().isEmpty()) {
+      Table table = response.tableList().get(0);
+      if (isGlueIcebergTable(table)) {
+        throw new NamespaceNotEmptyException(
+            "Cannot drop namespace %s because it still contains Iceberg tables", namespace);
+      } else {
+        throw new NamespaceNotEmptyException(
+            "Cannot drop namespace %s because it still contains non-Iceberg tables", namespace);
+      }
+    }
+
+    glue.deleteDatabase(
+        DeleteDatabaseRequest.builder()
+            .catalogId(awsProperties.glueCatalogId())
+            .name(
+                IcebergToGlueConverter.toDatabaseName(
+                    namespace, awsProperties.glueCatalogSkipNameValidation()))
+            .build());
+    LOG.info("Dropped namespace: {}", namespace);
+    // Always successful, otherwise exception is thrown
+    return true;
+  }
+</function>

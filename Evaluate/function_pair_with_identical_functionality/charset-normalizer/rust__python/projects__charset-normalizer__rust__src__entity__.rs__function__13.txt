@@ -1,0 +1,57 @@
+<path>
+projects/charset-normalizer/rust/src/entity.rs
+</path>
+<function>
+    pub fn most_probably_language(&self) -> &'static Language {
+        self.coherence_matches.first().map_or_else(
+            // Default case: Trying to infer the language based on the given encoding
+            || {
+                if self.suitable_encodings().contains(&String::from("ascii")) {
+                    &Language::English
+                } else {
+                    let languages = if is_multi_byte_encoding(&self.encoding) {
+                        mb_encoding_languages(&self.encoding)
+                    } else {
+                        encoding_languages(self.encoding.clone())
+                    };
+                    languages.first().copied().unwrap_or(&Language::Unknown)
+                }
+            },
+            |lang| lang.language,
+        )
+    }
+</function>
+------
+
+<path>
+projects/charset-normalizer/python/models.py
+</path>
+<function>
+    def language(self) -> str:
+        """
+        Most probable language found in decoded sequence. If none were detected or inferred, the property will return
+        "Unknown".
+        """
+        if not self._languages:
+            # Trying to infer the language based on the given encoding
+            # Its either English or we should not pronounce ourselves in certain cases.
+            if "ascii" in self.could_be_from_charset:
+                return "English"
+
+            # doing it there to avoid circular import
+            from charset_normalizer.cd import encoding_languages, mb_encoding_languages
+
+            languages = (
+                mb_encoding_languages(self.encoding)
+                if is_multi_byte_encoding(self.encoding)
+                else encoding_languages(self.encoding)
+            )
+
+            if len(languages) == 0 or "Latin Based" in languages:
+                return "Unknown"
+
+            return languages[0]
+
+        return self._languages[0][0]
+
+</function>

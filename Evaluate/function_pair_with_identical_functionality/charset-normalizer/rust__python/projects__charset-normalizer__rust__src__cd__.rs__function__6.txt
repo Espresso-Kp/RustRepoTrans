@@ -1,0 +1,67 @@
+<path>
+projects/charset-normalizer/rust/src/cd.rs
+</path>
+<function>
+pub(crate) fn alpha_unicode_split(decoded_sequence: &str) -> Vec<String> {
+    let mut layers: HashMap<&str, String> = HashMap::new();
+
+    for ch in decoded_sequence.chars().filter(|c| c.is_alphabetic()) {
+        if let Some(character_range) = unicode_range(ch) {
+            let layer_key: &str = layers
+                .keys()
+                .find(|key| !is_suspiciously_successive_range(Some(key), Some(character_range)))
+                .copied()
+                .unwrap_or(character_range);
+            let layer = layers.entry(layer_key).or_default();
+            layer.extend(ch.to_lowercase());
+        }
+    }
+    layers.into_values().collect()
+}
+</function>
+------
+
+<path>
+projects/charset-normalizer/python/cd.py
+</path>
+<function>
+def alpha_unicode_split(decoded_sequence: str) -> List[str]:
+    """
+    Given a decoded text sequence, return a list of str. Unicode range / alphabet separation.
+    Ex. a text containing English/Latin with a bit a Hebrew will return two items in the resulting list;
+    One containing the latin letters and the other hebrew.
+    """
+    layers: Dict[str, str] = {}
+
+    for character in decoded_sequence:
+        if character.isalpha() is False:
+            continue
+
+        character_range: Optional[str] = unicode_range(character)
+
+        if character_range is None:
+            continue
+
+        layer_target_range: Optional[str] = None
+
+        for discovered_range in layers:
+            if (
+                is_suspiciously_successive_range(discovered_range, character_range)
+                is False
+            ):
+                layer_target_range = discovered_range
+                break
+
+        if layer_target_range is None:
+            layer_target_range = character_range
+
+        if layer_target_range not in layers:
+            layers[layer_target_range] = character.lower()
+            continue
+
+        layers[layer_target_range] += character.lower()
+
+    return list(layers.values())
+
+
+</function>

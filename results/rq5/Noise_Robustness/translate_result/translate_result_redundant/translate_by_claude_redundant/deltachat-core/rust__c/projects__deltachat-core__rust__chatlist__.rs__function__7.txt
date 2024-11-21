@@ -1,0 +1,338 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<c function>
+dc_lot_t* dc_chatlist_get_summary(const dc_chatlist_t* chatlist, size_t index, dc_chat_t* chat /*may be NULL*/)
+{
+	/* The summary is created by the chat, not by the last message.
+	This is because we may want to display drafts here or stuff as
+	"is typing".
+	Also, sth. as "No messages" would not work if the summary comes from a
+	message. */
+
+	dc_lot_t*      ret = dc_lot_new(); /* the function never returns NULL */
+	uint32_t       lastmsg_id = 0;
+	dc_msg_t*      lastmsg = NULL;
+	dc_contact_t*  lastcontact = NULL;
+	dc_chat_t*     chat_to_delete = NULL;
+
+	if (chatlist==NULL || chatlist->magic!=DC_CHATLIST_MAGIC || index>=chatlist->cnt) {
+		ret->text2 = dc_strdup("ErrBadChatlistIndex");
+		goto cleanup;
+	}
+
+	lastmsg_id = dc_array_get_id(chatlist->chatNlastmsg_ids, index*DC_CHATLIST_IDS_PER_RESULT+1);
+
+	if (chat==NULL) {
+		chat = dc_chat_new(chatlist->context);
+		chat_to_delete = chat;
+		if (!dc_chat_load_from_db(chat, dc_array_get_id(chatlist->chatNlastmsg_ids, index*DC_CHATLIST_IDS_PER_RESULT))) {
+			ret->text2 = dc_strdup("ErrCannotReadChat");
+			goto cleanup;
+		}
+	}
+
+	if (lastmsg_id)
+	{
+		lastmsg = dc_msg_new_untyped(chatlist->context);
+		dc_msg_load_from_db(lastmsg, chatlist->context, lastmsg_id);
+
+		if (lastmsg->from_id!=DC_CONTACT_ID_SELF  &&  DC_CHAT_TYPE_IS_MULTI(chat->type))
+		{
+			lastcontact = dc_contact_new(chatlist->context);
+			dc_contact_load_from_db(lastcontact, chatlist->context->sql, lastmsg->from_id);
+		}
+	}
+
+	if (chat->id==DC_CHAT_ID_ARCHIVED_LINK)
+	{
+		ret->text2 = dc_strdup(NULL);
+	}
+	else if (lastmsg==NULL || lastmsg->from_id==0)
+	{
+		/* no messages */
+		ret->text2 = dc_stock_str(chatlist->context, DC_STR_NOMESSAGES);
+	}
+	else
+	{
+		/* show the last message */
+		dc_lot_fill(ret, lastmsg, chat, lastcontact, chatlist->context);
+	}
+
+cleanup:
+	dc_msg_unref(lastmsg);
+	dc_contact_unref(lastcontact);
+	dc_chat_unref(chat_to_delete);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_summary(
+        &self,
+        context: &Context,
+        index: usize,
+        chat: Option<&Chat>,
+    ) -> Result<Summary> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn get(&self, key: Param) -> Option<&str> {
+        self.inner.get(&key).map(|s| s.as_str())
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct Chatlist {
+    /// Stores pairs of `chat_id, message_id`
+    ids: Vec<(ChatId, Option<MsgId>)>,
+}
+
+pub async fn get_summary2(
+        context: &Context,
+        chat_id: ChatId,
+        lastmsg_id: Option<MsgId>,
+        chat: Option<&Chat>,
+    ) -> Result<Summary> {
+        let chat_loaded: Chat;
+        let chat = if let Some(chat) = chat {
+            chat
+        } else {
+            let chat = Chat::load_from_db(context, chat_id).await?;
+            chat_loaded = chat;
+            &chat_loaded
+        };
+
+        let (lastmsg, lastcontact) = if let Some(lastmsg_id) = lastmsg_id {
+            let lastmsg = Message::load_from_db(context, lastmsg_id)
+                .await
+                .context("loading message failed")?;
+            if lastmsg.from_id == ContactId::SELF {
+                (Some(lastmsg), None)
+            } else {
+                match chat.typ {
+                    Chattype::Group | Chattype::Broadcast | Chattype::Mailinglist => {
+                        let lastcontact = Contact::get_by_id(context, lastmsg.from_id)
+                            .await
+                            .context("loading contact failed")?;
+                        (Some(lastmsg), Some(lastcontact))
+                    }
+                    Chattype::Single => (Some(lastmsg), None),
+                }
+            }
+        } else {
+            (None, None)
+        };
+
+        if chat.id.is_archived_link() {
+            Ok(Default::default())
+        } else if let Some(lastmsg) = lastmsg.filter(|msg| msg.from_id != ContactId::UNDEFINED) {
+            Summary::new_with_reaction_details(context, &lastmsg, chat, lastcontact.as_ref()).await
+        } else {
+            Ok(Summary {
+                text: stock_str::no_messages(context).await,
+                ..Default::default()
+            })
+        }
+    }
+    
+pub struct Summary {
+    /// Part displayed before ":", such as an username or a string "Draft".
+    pub prefix: Option<SummaryPrefix>,
+
+    /// Summary text, always present.
+    pub text: String,
+
+    /// Message timestamp.
+    pub timestamp: i64,
+
+    /// Message state.
+    pub state: MessageState,
+
+    /// Message preview image path
+    pub thumbnail_path: Option<String>,
+}
+
+
+pub fn get_header(&self, headerdef: HeaderDef) -> Option<&str> {
+        self.headers
+            .get(headerdef.get_headername())
+            .map(|s| s.as_str())
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+use anyhow::{ensure, Context as _, Result};
+use once_cell::sync::Lazy;
+use crate::chat::{update_special_chat_names, Chat, ChatId, ChatVisibility};
+use crate::constants::{
+    Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK, DC_GCL_ADD_ALLDONE_HINT,
+    DC_GCL_ARCHIVED_ONLY, DC_GCL_FOR_FORWARDING, DC_GCL_NO_SPECIALS,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::message::{Message, MessageState, MsgId};
+use crate::param::{Param, Params};
+use crate::stock_str;
+use crate::summary::Summary;
+use crate::tools::IsNoneOrEmpty;
+use super::*;
+use crate::chat::{
+        add_contact_to_chat, create_group_chat, get_chat_contacts, remove_contact_from_chat,
+        send_text_msg, ProtectionStatus,
+    };
+use crate::message::Viewtype;
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::TestContext;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn get_summary(
+        &self,
+        context: &Context,
+        index: usize,
+        chat: Option<&Chat>,
+    ) -> Result<Summary> {
+        // The summary is created by the chat, not by the last message.
+        // This is because we may want to display drafts here or stuff as
+        // "is typing".
+        // Also, sth. as "No messages" would not work if the summary comes from a message.
+        let (chat_id, lastmsg_id) = self
+            .ids
+            .get(index)
+            .context("chatlist index is out of range")?;
+        Chatlist::get_summary2(context, *chat_id, *lastmsg_id, chat).await
+    }
+</function>
+<translated function>
+Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn get_summary(
+    &self,
+    context: &Context,
+    index: usize,
+    chat: Option<&Chat>,
+) -> Result<Summary> {
+    if index >= self.ids.len() {
+        return Ok(Summary {
+            text: "ErrBadChatlistIndex".to_string(),
+            ..Default::default()
+        });
+    }
+
+    let (chat_id, lastmsg_id) = self.ids[index];
+
+    let chat = if let Some(chat) = chat {
+        chat
+    } else {
+        Chat::load_from_db(context, chat_id).await?
+    };
+
+    if chat.id.is_archived_link() {
+        return Ok(Default::default());
+    }
+
+    if let Some(lastmsg_id) = lastmsg_id {
+        let lastmsg = Message::load_from_db(context, lastmsg_id)
+            .await
+            .context("loading message failed")?;
+
+        if lastmsg.from_id == ContactId::UNDEFINED {
+            Ok(Summary {
+                text: stock_str::no_messages(context).await,
+                ..Default::default()
+            })
+        } else {
+            let lastcontact = if lastmsg.from_id != ContactId::SELF
+                && matches!(chat.typ, Chattype::Group | Chattype::Broadcast | Chattype::Mailinglist)
+            {
+                Some(
+                    Contact::get_by_id(context, lastmsg.from_id)
+                        .await
+                        .context("loading contact failed")?,
+                )
+            } else {
+                None
+            };
+
+            Summary::new_with_reaction_details(context, &lastmsg, chat, lastcontact.as_ref()).await
+        }
+    } else {
+        Ok(Summary {
+            text: stock_str::no_messages(context).await,
+            ..Default::default()
+        })
+    }
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries specified. It translates the logic of the C function while adapting to Rust's async/await paradigm and error handling approach. The function now returns a `Result<Summary>` to handle potential errors, and it uses the `Context` type for asynchronous operations.</translated function>Here's the translated Rust function based on the provided C function, Rust function signature, dependencies, and libraries:
+
+```rust
+pub async fn get_summary(
+    &self,
+    context: &Context,
+    index: usize,
+    chat: Option<&Chat>,
+) -> Result<Summary> {
+    if index >= self.ids.len() {
+        return Ok(Summary {
+            text: "ErrBadChatlistIndex".to_string(),
+            ..Default::default()
+        });
+    }
+
+    let (chat_id, lastmsg_id) = self.ids[index];
+
+    let chat = if let Some(chat) = chat {
+        chat
+    } else {
+        Chat::load_from_db(context, chat_id).await?
+    };
+
+    if chat.id.is_archived_link() {
+        return Ok(Default::default());
+    }
+
+    if let Some(lastmsg_id) = lastmsg_id {
+        let lastmsg = Message::load_from_db(context, lastmsg_id)
+            .await
+            .context("loading message failed")?;
+
+        if lastmsg.from_id == ContactId::UNDEFINED {
+            Ok(Summary {
+                text: stock_str::no_messages(context).await,
+                ..Default::default()
+            })
+        } else {
+            let lastcontact = if lastmsg.from_id != ContactId::SELF
+                && matches!(chat.typ, Chattype::Group | Chattype::Broadcast | Chattype::Mailinglist)
+            {
+                Some(
+                    Contact::get_by_id(context, lastmsg.from_id)
+                        .await
+                        .context("loading contact failed")?,
+                )
+            } else {
+                None
+            };
+
+            Summary::new_with_reaction_details(context, &lastmsg, chat, lastcontact.as_ref()).await
+        }
+    } else {
+        Ok(Summary {
+            text: stock_str::no_messages(context).await,
+            ..Default::default()
+        })
+    }
+}
+```
+
+This Rust function follows the provided signature and uses the dependencies and libraries specified. It translates the logic of the C function while adapting to Rust's async/await paradigm and error handling approach. The function now returns a `Result<Summary>` to handle potential errors, and it uses the `Context` type for asynchronous operations.

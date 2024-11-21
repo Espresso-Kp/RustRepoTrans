@@ -1,0 +1,228 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def list_namespaces(self, namespace: Union[str, Identifier] = ()) -> List[Identifier]:
+        """List namespaces from the given namespace. If not given, list top-level namespaces from the catalog.
+
+        Returns:
+            List[Identifier]: a List of namespace identifiers.
+        """
+        # Hierarchical namespace is not supported. Return an empty list
+        if namespace:
+            return []
+
+        database_list: List[DatabaseTypeDef] = []
+        next_token: Optional[str] = None
+
+        while True:
+            databases_response = self.glue.get_databases() if not next_token else self.glue.get_databases(NextToken=next_token)
+            database_list.extend(databases_response["DatabaseList"])
+            next_token = databases_response.get("NextToken")
+            if not next_token:
+                break
+
+        return [self.identifier_to_tuple(database["Name"]) for database in database_list]
+</python function>
+<rust function signature>
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+pub fn new(name: String) -> Self {
+        Self(vec![name])
+    }
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+pub struct NamespaceIdent(Vec<String>);
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>> {
+        if parent.is_some() {
+            return Ok(vec![]);
+        }
+
+        let mut database_list: Vec<NamespaceIdent> = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let builder = match &next_token {
+                Some(token) => self.client.0.get_databases().next_token(token),
+                None => self.client.0.get_databases(),
+            };
+            let builder = with_catalog_id!(builder, self.config);
+            let resp = builder.send().await.map_err(from_aws_sdk_error)?;
+
+            let dbs: Vec<NamespaceIdent> = resp
+                .database_list()
+                .iter()
+                .map(|db| NamespaceIdent::new(db.name().to_string()))
+                .collect();
+
+            database_list.extend(dbs);
+
+            next_token = resp.next_token().map(ToOwned::to_owned);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(database_list)
+    }
+</function>
+<translated function>
+Here is the Rust translation of the python function:
+
+```rust
+use aws_sdk_glue::model::{GetDatabasesRequest, GetDatabasesOutput};
+use aws_sdk_glue::error::GetDatabasesError;
+use aws_sdk_glue::model::Database;
+use futures::future::FutureExt;
+use std::error::Error;
+
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>, Box<dyn Error>> {
+
+    // Hierarchical namespace is not supported. Return an empty vector
+    if let Some(_parent) = parent {
+        return Ok(Vec::new());
+    }
+
+    let mut database_list: Vec<Database> = Vec::new();
+    let mut next_token: Option<String> = None;
+
+    loop {
+        let mut get_databases_builder = GetDatabasesRequest::default();
+        let get_database_req = with_catalog_id!(get_databases_builder, self.config);
+        if let Some(token) = &next_token {
+            get_database_req.next_token(token.to_string());
+        }
+
+        let get_databases_future = self.client.get_databases(&get_database_req).map_err(|err|
+            from_aws_sdk_error(err)
+        );
+        let databases_response = get_databases_future.await?;
+
+        if let Some(database_list_output) = databases_response.database_list {
+            database_list.extend(database_list_output);
+        }
+
+        next_token = databases_response.next_token;
+        if next_token.is_none() {
+            break
+        }
+    }
+
+    let mut identifiers = Vec::new();
+    for database in database_list {
+        if let Some(name) = database.name {
+            identifiers.push(NamespaceIdent::new(name));
+        }
+    }
+    Ok(identifiers)
+}
+```</translated function>Here is the Rust translation of the python function:
+
+```rust
+use aws_sdk_glue::model::{GetDatabasesRequest, GetDatabasesOutput};
+use aws_sdk_glue::error::GetDatabasesError;
+use aws_sdk_glue::model::Database;
+use futures::future::FutureExt;
+use std::error::Error;
+
+async fn list_namespaces(
+        &self,
+        parent: Option<&NamespaceIdent>,
+    ) -> Result<Vec<NamespaceIdent>, Box<dyn Error>> {
+
+    // Hierarchical namespace is not supported. Return an empty vector
+    if let Some(_parent) = parent {
+        return Ok(Vec::new());
+    }
+
+    let mut database_list: Vec<Database> = Vec::new();
+    let mut next_token: Option<String> = None;
+
+    loop {
+        let mut get_databases_builder = GetDatabasesRequest::default();
+        let get_database_req = with_catalog_id!(get_databases_builder, self.config);
+        if let Some(token) = &next_token {
+            get_database_req.next_token(token.to_string());
+        }
+
+        let get_databases_future = self.client.get_databases(&get_database_req).map_err(|err|
+            from_aws_sdk_error(err)
+        );
+        let databases_response = get_databases_future.await?;
+
+        if let Some(database_list_output) = databases_response.database_list {
+            database_list.extend(database_list_output);
+        }
+
+        next_token = databases_response.next_token;
+        if next_token.is_none() {
+            break
+        }
+    }
+
+    let mut identifiers = Vec::new();
+    for database in database_list {
+        if let Some(name) = database.name {
+            identifiers.push(NamespaceIdent::new(name));
+        }
+    }
+    Ok(identifiers)
+}
+```

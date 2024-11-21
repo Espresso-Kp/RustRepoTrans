@@ -1,0 +1,319 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<java function>
+public Table create() {
+      CreateTableRequest request =
+          CreateTableRequest.builder()
+              .withName(ident.name())
+              .withSchema(schema)
+              .withPartitionSpec(spec)
+              .withWriteOrder(writeOrder)
+              .withLocation(location)
+              .setProperties(propertiesBuilder.build())
+              .build();
+
+      LoadTableResponse response =
+          client.post(
+              paths.tables(ident.namespace()),
+              request,
+              LoadTableResponse.class,
+              headers(context),
+              ErrorHandlers.tableErrorHandler());
+
+      AuthSession session = tableSession(response.config(), session(context));
+      RESTTableOperations ops =
+          new RESTTableOperations(
+              client,
+              paths.table(ident),
+              session::headers,
+              tableFileIO(context, response.config()),
+              response.tableMetadata());
+
+      trackFileIO(ops);
+
+      return new BaseTable(
+          ops, fullTableName(ident), metricsReporter(paths.metrics(ident), session::headers));
+    }
+</java function>
+<rust function signature>
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn metadata_location(&self) -> Option<&str> {
+        self.metadata_location.as_deref()
+    }
+pub fn new(namespace: NamespaceIdent, name: String) -> Self {
+        Self { namespace, name }
+    }
+async fn query<
+        R: DeserializeOwned,
+        E: DeserializeOwned + Into<Error>,
+        const SUCCESS_CODE: u16,
+    >(
+        &self,
+        request: Request,
+    ) -> Result<R> {
+        let resp = self.0.execute(request).await?;
+
+        if resp.status().as_u16() == SUCCESS_CODE {
+            let text = resp.bytes().await?;
+            Ok(serde_json::from_slice::<R>(&text).map_err(|e| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    "Failed to parse response from rest catalog server!",
+                )
+                .with_context("json", String::from_utf8_lossy(&text))
+                .with_source(e)
+            })?)
+        } else {
+            let code = resp.status();
+            let text = resp.bytes().await?;
+            let e = serde_json::from_slice::<E>(&text).map_err(|e| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    "Failed to parse response from rest catalog server!",
+                )
+                .with_context("json", String::from_utf8_lossy(&text))
+                .with_context("code", code.to_string())
+                .with_source(e)
+            })?;
+            Err(e.into())
+        }
+    }
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+struct HttpClient(Client);
+pub(super) struct CreateTableRequest {
+        pub(super) name: String,
+        pub(super) location: Option<String>,
+        pub(super) schema: Schema,
+        pub(super) partition_spec: Option<UnboundPartitionSpec>,
+        pub(super) write_order: Option<SortOrder>,
+        pub(super) stage_create: Option<bool>,
+        pub(super) properties: Option<HashMap<String, String>>,
+    }
+pub(super) struct ErrorResponse {
+        error: ErrorModel,
+    }
+pub struct RestCatalog {
+    config: RestCatalogConfig,
+    client: HttpClient,
+}
+pub struct TableIdent {
+    /// Namespace of the table.
+    pub namespace: NamespaceIdent,
+    /// Table name.
+    pub name: String,
+}
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::collections::HashMap;
+use std::str::FromStr;
+use async_trait::async_trait;
+use itertools::Itertools;
+use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, Request, Response, StatusCode, Url};
+use serde::de::DeserializeOwned;
+use typed_builder::TypedBuilder;
+use urlencoding::encode;
+use crate::catalog::_serde::{
+    CommitTableRequest, CommitTableResponse, CreateTableRequest, LoadTableResponse,
+};
+use iceberg::io::FileIO;
+use iceberg::table::Table;
+use iceberg::Result;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+};
+use self::_serde::{
+    CatalogConfig, ErrorResponse, ListNamespaceResponse, ListTableResponse, NamespaceSerde,
+    RenameTableRequest, TokenResponse, NO_CONTENT, OK,
+};
+use std::collections::HashMap;
+use serde_derive::{Deserialize, Serialize};
+use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
+use iceberg::{Error, ErrorKind, Namespace, TableIdent, TableRequirement, TableUpdate};
+use chrono::{TimeZone, Utc};
+use iceberg::spec::{
+        FormatVersion, NestedField, NullOrder, Operation, PrimitiveType, Schema, Snapshot,
+        SnapshotLog, SortDirection, SortField, SortOrder, Summary, Transform, Type,
+        UnboundPartitionField, UnboundPartitionSpec,
+    };
+use iceberg::transaction::Transaction;
+use mockito::{Mock, Server, ServerGuard};
+use serde_json::json;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+use uuid::uuid;
+use super::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> {
+        let table_ident = TableIdent::new(namespace.clone(), creation.name.clone());
+
+        let request = self
+            .client
+            .0
+            .post(self.config.tables_endpoint(namespace))
+            .json(&CreateTableRequest {
+                name: creation.name,
+                location: creation.location,
+                schema: creation.schema,
+                partition_spec: creation.partition_spec,
+                write_order: creation.sort_order,
+                // We don't support stage create yet.
+                stage_create: Some(false),
+                properties: if creation.properties.is_empty() {
+                    None
+                } else {
+                    Some(creation.properties)
+                },
+            })
+            .build()?;
+
+        let resp = self
+            .client
+            .query::<LoadTableResponse, ErrorResponse, OK>(request)
+            .await?;
+
+        let file_io = self.load_file_io(resp.metadata_location.as_deref(), resp.config)?;
+
+        let table = Table::builder()
+            .identifier(table_ident)
+            .file_io(file_io)
+            .metadata(resp.metadata)
+            .metadata_location(resp.metadata_location.ok_or_else(|| {
+                Error::new(
+                    ErrorKind::DataInvalid,
+                    "Metadata location missing in create table response!",
+                )
+            })?)
+            .build();
+
+        Ok(table)
+    }
+</function>
+<translated function>
+ ```rust
+async fn create_table(
+    &self,
+    namespace: &NamespaceIdent,
+    creation: TableCreation,
+) -> Result<Table> {
+    let request = CreateTableRequest {
+        name: creation.name,
+        location: creation.location.clone(),
+        schema: creation.schema.clone(),
+        partition_spec: creation.partition_spec.clone(),
+        write_order: creation.write_order.clone(),
+        stage_create: None,
+        properties: creation.properties.clone(),
+    };
+
+    let response = self
+        .client
+        .post(
+            self.paths.tables(namespace),
+            request,
+            LoadTableResponse::class,
+            self.headers(context),
+            ErrorHandlers.tableErrorHandler(),
+        )
+        .await?;
+
+    let session = self.tableSession(response.config(), self.session(context));
+    let ops = RESTTableOperations::new(
+        self.client.clone(),
+        self.paths.table(&ident),
+        session::headers,
+        self.tableFileIO(context, response.config()),
+        response.tableMetadata(),
+    );
+
+    trackFileIO(ops);
+
+    Ok(Box::new(BaseTable::new(
+        ops,
+        self.fullTableName(&ident),
+        self.metricsReporter(self.paths.metrics(&ident), session::headers),
+    )))
+}
+```</translated function> ```rust
+async fn create_table(
+    &self,
+    namespace: &NamespaceIdent,
+    creation: TableCreation,
+) -> Result<Table> {
+    let request = CreateTableRequest {
+        name: creation.name,
+        location: creation.location.clone(),
+        schema: creation.schema.clone(),
+        partition_spec: creation.partition_spec.clone(),
+        write_order: creation.write_order.clone(),
+        stage_create: None,
+        properties: creation.properties.clone(),
+    };
+
+    let response = self
+        .client
+        .post(
+            self.paths.tables(namespace),
+            request,
+            LoadTableResponse::class,
+            self.headers(context),
+            ErrorHandlers.tableErrorHandler(),
+        )
+        .await?;
+
+    let session = self.tableSession(response.config(), self.session(context));
+    let ops = RESTTableOperations::new(
+        self.client.clone(),
+        self.paths.table(&ident),
+        session::headers,
+        self.tableFileIO(context, response.config()),
+        response.tableMetadata(),
+    );
+
+    trackFileIO(ops);
+
+    Ok(Box::new(BaseTable::new(
+        ops,
+        self.fullTableName(&ident),
+        self.metricsReporter(self.paths.metrics(&ident), session::headers),
+    )))
+}
+```

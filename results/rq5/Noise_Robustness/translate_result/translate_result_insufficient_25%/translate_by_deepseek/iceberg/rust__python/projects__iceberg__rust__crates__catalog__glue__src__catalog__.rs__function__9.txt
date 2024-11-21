@@ -1,0 +1,150 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<python function>
+def drop_namespace(self, namespace: Union[str, Identifier]) -> None:
+        """Drop a namespace.
+
+        A Glue namespace can only be dropped if it is empty.
+
+        Args:
+            namespace: Namespace identifier.
+
+        Raises:
+            NoSuchNamespaceError: If a namespace with the given name does not exist, or the identifier is invalid.
+            NamespaceNotEmptyError: If the namespace is not empty.
+        """
+        database_name = self.identifier_to_database(namespace, NoSuchNamespaceError)
+        try:
+            table_list = self.list_tables(namespace=database_name)
+        except NoSuchNamespaceError as e:
+            raise NoSuchNamespaceError(f"Database does not exist: {database_name}") from e
+
+        if len(table_list) > 0:
+            raise NamespaceNotEmptyError(f"Database {database_name} is not empty")
+
+        self.glue.delete_database(Name=database_name)
+</python function>
+<rust function signature>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+        let db_name = validate_namespace(namespace)?;
+        let table_list = self.list_tables(namespace).await?;
+
+        if !table_list.is_empty() {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("Database with name: {} is not empty", &db_name),
+            ));
+        }
+
+        let builder = self.client.0.delete_database().name(db_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+</function>
+<translated function>
+ ```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    let database_name = convert_to_database(&self.identifier_to_database(namespace, NoSuchNamespaceError).await?)?;
+
+    let table_list = match self.list_tables(namespace.clone()).await {
+        Ok(tables) => tables,
+        Err(e) => {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                format!("Database does not exist: {}", database_name),
+            )
+            .with_source(anyhow!("List tables error: {:?}", e)));
+        }
+    };
+
+    if !table_list.is_empty() {
+        return Err(NamespaceNotEmptyError::new(format!(
+            "Database {} is not empty",
+            database_name
+        ))
+        .into());
+    }
+
+    self.glue.delete_database().name(database_name).send().await?;
+    Ok(())
+}
+```</translated function> ```rust
+async fn drop_namespace(&self, namespace: &NamespaceIdent) -> Result<()> {
+    let database_name = convert_to_database(&self.identifier_to_database(namespace, NoSuchNamespaceError).await?)?;
+
+    let table_list = match self.list_tables(namespace.clone()).await {
+        Ok(tables) => tables,
+        Err(e) => {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                format!("Database does not exist: {}", database_name),
+            )
+            .with_source(anyhow!("List tables error: {:?}", e)));
+        }
+    };
+
+    if !table_list.is_empty() {
+        return Err(NamespaceNotEmptyError::new(format!(
+            "Database {} is not empty",
+            database_name
+        ))
+        .into());
+    }
+
+    self.glue.delete_database().name(database_name).send().await?;
+    Ok(())
+}
+```

@@ -1,0 +1,402 @@
+<message>
+please translate the given java function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<java function>
+public static int CLIENT_KEY(int sha,byte[] G1,byte[] G2,int pin,byte[] R,byte[] X,byte[] H,byte[] wCID,byte[] CK)
+	{
+		byte[] t;
+
+		FP24 g1=FP24.fromBytes(G1);
+		FP24 g2=FP24.fromBytes(G2);
+		BIG z=BIG.fromBytes(R);
+		BIG x=BIG.fromBytes(X);
+		BIG h=BIG.fromBytes(H);
+
+		ECP W=ECP.fromBytes(wCID);
+		if (W.is_infinity()) return INVALID_POINT; 
+
+		W=PAIR192.G1mul(W,x);
+
+//		FP2 f=new FP2(new BIG(ROM.Fra),new BIG(ROM.Frb));
+		BIG r=new BIG(ROM.CURVE_Order);
+//		BIG q=new BIG(ROM.Modulus);
+
+		z.add(h);	//new
+		z.mod(r);
+
+		g2.pinpow(pin,PBLEN);
+		g1.mul(g2);
+
+		FP8 c=g1.compow(z,r);
+
+		t=mpin_hash(sha,c,W);
+
+		for (int i=0;i<ECP.AESKEY;i++) CK[i]=t[i];
+
+		return 0;
+	}
+</java function>
+<rust function signature>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn rmod(&mut self, n: &Big) {
+        let mut k = 0;
+        let mut m = n.clone();
+        self.norm();
+        if Big::comp(self, &m) < 0 {
+            return;
+        }
+        loop {
+            m.fshl(1);
+            k += 1;
+            if Big::comp(self, &m) < 0 {
+                break;
+            }
+        }
+
+        while k > 0 {
+            m.fshr(1);
+
+            let mut r = self.clone();
+            r.sub(&m);
+            r.norm();
+            self.cmove(
+                &r,
+                (1 - ((r.w[NLEN - 1] >> (arch::CHUNK - 1)) & 1)) as isize,
+            );
+            k -= 1;
+        }
+    }
+
+pub fn mul(&mut self, b: &FP) {
+        if i64::from(self.xes) * i64::from(b.xes) > i64::from(FEXCESS) {
+            self.reduce()
+        }
+
+        let mut d = Big::mul(&(self.x), &(b.x));
+        self.x = FP::modulo(&mut d);
+        self.xes = 2;
+    }
+
+pub fn pinpow(&mut self, e: i32, bts: i32) {
+        let mut r: [FP24; 2] = [FP24::new_int(1), self.clone()];
+
+        for i in (0..bts).rev() {
+            let b: usize = ((e >> i) & 1) as usize;
+            let t = r[b].clone();
+            r[1 - b].mul(&t);
+            r[b].usqr();
+        }
+        *self = r[0].clone();
+    }
+
+pub fn add(&mut self, b: &FP) {
+        self.x.add(&(b.x));
+        self.xes += b.xes;
+        if self.xes > FEXCESS {
+            self.reduce()
+        }
+    }
+
+fn hash(sha: usize, c: &mut FP8, U: &mut ECP, r: &mut [u8]) -> bool {
+    let mut w: [u8; EFS] = [0; EFS];
+    let mut t: [u8; 10 * EFS] = [0; 10 * EFS];
+
+    c.geta().geta().geta().to_bytes(&mut w);
+    for i in 0..EFS {
+        t[i] = w[i]
+    }
+    c.geta().geta().getb().to_bytes(&mut w);
+    for i in EFS..2 * EFS {
+        t[i] = w[i - EFS]
+    }
+    c.geta().getb().geta().to_bytes(&mut w);
+    for i in 2 * EFS..3 * EFS {
+        t[i] = w[i - 2 * EFS]
+    }
+    c.geta().getb().getb().to_bytes(&mut w);
+    for i in 3 * EFS..4 * EFS {
+        t[i] = w[i - 3 * EFS]
+    }
+    c.getb().geta().geta().to_bytes(&mut w);
+    for i in 4 * EFS..5 * EFS {
+        t[i] = w[i - 4 * EFS]
+    }
+    c.getb().geta().getb().to_bytes(&mut w);
+    for i in 5 * EFS..6 * EFS {
+        t[i] = w[i - 5 * EFS]
+    }
+    c.getb().getb().geta().to_bytes(&mut w);
+    for i in 6 * EFS..7 * EFS {
+        t[i] = w[i - 6 * EFS]
+    }
+    c.getb().getb().getb().to_bytes(&mut w);
+    for i in 7 * EFS..8 * EFS {
+        t[i] = w[i - 7 * EFS]
+    }
+
+    U.getx().to_bytes(&mut w);
+    for i in 8 * EFS..9 * EFS {
+        t[i] = w[i - 8 * EFS]
+    }
+    U.gety().to_bytes(&mut w);
+    for i in 9 * EFS..10 * EFS {
+        t[i] = w[i - 9 * EFS]
+    }
+
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(&t);
+        let sh = h.hash();
+        for i in 0..ecp::AESKEY {
+            r[i] = sh[i]
+        }
+        return true;
+    }
+    return false;
+}
+
+pub fn is_infinity(&self) -> bool {
+        let xx = self.getpx();
+        let zz = self.getpz();
+        return xx.is_zilch() && zz.is_zilch();
+    }
+
+pub fn compow(&mut self, e: &Big, r: &Big) -> FP8 {
+        let f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+        let q = Big::new_ints(&rom::MODULUS);
+
+        let mut g1 = self.clone();
+        let mut g2 = self.clone();
+
+        let mut m = q.clone();
+        m.rmod(&r);
+
+        let mut a = e.clone();
+        a.rmod(&mut m);
+
+        let mut b = e.clone();
+        b.div(&mut m);
+
+        let mut c = g1.trace();
+
+        if b.is_zilch() {
+            c = c.xtr_pow(&mut a);
+            return c;
+        }
+
+        g2.frob(&f, 1);
+        let cp = g2.trace();
+        g1.conj();
+        g2.mul(&g1);
+        let cpm1 = g2.trace();
+        g2.mul(&g1);
+        let cpm2 = g2.trace();
+
+        c = c.xtr_pow2(&cp, &cpm1, &cpm2, &mut a, &mut b);
+
+        return c;
+    }
+
+
+</rust function dependencies, and data type declarations>
+<rust function dependency libraries>
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp4::ECP4;
+use super::fp24::FP24;
+use super::fp8::FP8;
+use super::pair192;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP24::from_bytes(&g1);
+    let mut g2 = FP24::from_bytes(&g2);
+    let mut z = Big::from_bytes(&r);
+    let mut x = Big::from_bytes(&x);
+    let h = Big::from_bytes(&h);
+
+    let mut W = ECP::from_bytes(&wcid);
+    if W.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    W = pair192::g1mul(&mut W, &mut x);
+
+    let mut r = Big::new_ints(&rom::CURVE_ORDER);
+
+    z.add(&h); //new
+    z.rmod(&mut r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&mut g2);
+
+    let mut c = g1.compow(&z, &mut r);
+
+    hash(sha, &mut c, &mut W, ck);
+
+    return 0;
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Java function and Rust function signature:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP24::from_bytes(g1);
+    let mut g2 = FP24::from_bytes(g2);
+    let mut z = Big::from_bytes(r);
+    let x = Big::from_bytes(x);
+    let h = Big::from_bytes(h);
+
+    let mut w = ECP::from_bytes(wcid);
+    if w.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    w = pair192::G1mul(&w, &x);
+
+    let r = Big::new_ints(&rom::CURVE_Order);
+
+    z.add(&h);
+    z.rmod(&r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&g2);
+
+    let c = g1.compow(&z, &r);
+
+    let mut t = [0u8; ECP::AESKEY];
+    hash(sha, &mut c, &mut w, &mut t);
+
+    ck[..ECP::AESKEY].copy_from_slice(&t[..ECP::AESKEY]);
+
+    0
+}
+```
+
+Note that I've made some assumptions and adjustments:
+
+1. I assumed `INVALID_POINT` and `PBLEN` are constants defined elsewhere in your Rust code.
+2. The `mpin_hash` function in Java is replaced with the `hash` function provided in the Rust declarations.
+3. I used `rmod` instead of `mod` as it was provided in the Rust declarations.
+4. I assumed that `ECP::AESKEY` is equivalent to the Java `ECP.AESKEY`.
+5. The `FP2` and `BIG` initializations from ROM values were omitted as they weren't used in the rest of the function.
+
+Please review and adjust as necessary based on your specific Rust implementation details.</translated function>Here's the translated Rust function based on the provided Java function and Rust function signature:
+
+```rust
+pub fn client_key(
+    sha: usize,
+    g1: &[u8],
+    g2: &[u8],
+    pin: usize,
+    r: &[u8],
+    x: &[u8],
+    h: &[u8],
+    wcid: &[u8],
+    ck: &mut [u8],
+) -> isize {
+    let mut g1 = FP24::from_bytes(g1);
+    let mut g2 = FP24::from_bytes(g2);
+    let mut z = Big::from_bytes(r);
+    let x = Big::from_bytes(x);
+    let h = Big::from_bytes(h);
+
+    let mut w = ECP::from_bytes(wcid);
+    if w.is_infinity() {
+        return INVALID_POINT;
+    }
+
+    w = pair192::G1mul(&w, &x);
+
+    let r = Big::new_ints(&rom::CURVE_Order);
+
+    z.add(&h);
+    z.rmod(&r);
+
+    g2.pinpow(pin as i32, PBLEN);
+    g1.mul(&g2);
+
+    let c = g1.compow(&z, &r);
+
+    let mut t = [0u8; ECP::AESKEY];
+    hash(sha, &mut c, &mut w, &mut t);
+
+    ck[..ECP::AESKEY].copy_from_slice(&t[..ECP::AESKEY]);
+
+    0
+}
+```
+
+Note that I've made some assumptions and adjustments:
+
+1. I assumed `INVALID_POINT` and `PBLEN` are constants defined elsewhere in your Rust code.
+2. The `mpin_hash` function in Java is replaced with the `hash` function provided in the Rust declarations.
+3. I used `rmod` instead of `mod` as it was provided in the Rust declarations.
+4. I assumed that `ECP::AESKEY` is equivalent to the Java `ECP.AESKEY`.
+5. The `FP2` and `BIG` initializations from ROM values were omitted as they weren't used in the rest of the function.
+
+Please review and adjust as necessary based on your specific Rust implementation details.

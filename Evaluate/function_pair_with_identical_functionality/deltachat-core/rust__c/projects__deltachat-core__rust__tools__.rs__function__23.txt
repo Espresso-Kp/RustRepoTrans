@@ -1,0 +1,56 @@
+<path>
+projects/deltachat-core/rust/tools.rs
+</path>
+<function>
+pub(crate) async fn write_file(
+    context: &Context,
+    path: impl AsRef<Path>,
+    buf: &[u8],
+) -> Result<(), io::Error> {
+    let path_abs = get_abs_path(context, path.as_ref());
+    fs::write(&path_abs, buf).await.map_err(|err| {
+        warn!(
+            context,
+            "Cannot write {} bytes to \"{}\": {}",
+            buf.len(),
+            path.as_ref().display(),
+            err
+        );
+        err
+    })
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_tools.c
+</path>
+<function>
+int dc_write_file(dc_context_t* context, const char* pathNfilename, const void* buf, size_t buf_bytes)
+{
+	int   success = 0;
+	char* pathNfilename_abs = NULL;
+
+	if ((pathNfilename_abs=dc_get_abs_path(context, pathNfilename))==NULL) {
+		goto cleanup;
+	}
+
+	FILE* f = fopen(pathNfilename_abs, "wb");
+	if (f) {
+		if (fwrite(buf, 1, buf_bytes, f)==buf_bytes) {
+			success = 1;
+		}
+		else {
+			dc_log_warning(context, 0, "Cannot write %lu bytes to \"%s\".", (unsigned long)buf_bytes, pathNfilename);
+		}
+		fclose(f);
+	}
+	else {
+		dc_log_warning(context, 0, "Cannot open \"%s\" for writing.", pathNfilename);
+	}
+
+cleanup:
+	free(pathNfilename_abs);
+	return success;
+}
+</function>

@@ -1,0 +1,263 @@
+<message>
+please translate the given c function to rust according to the rust function signature, rust function realted variable, functions, and data type declarations and rust function dependency libraries I provide(delimited with XML tags). Only response the translated function results.
+<c function>
+char* dc_imex_has_backup(dc_context_t* context, const char* dir_name)
+{
+	char*          ret = NULL;
+	time_t         ret_backup_time = 0;
+	DIR*           dir_handle = NULL;
+	struct dirent* dir_entry = NULL;
+	int            prefix_len = strlen(DC_BAK_PREFIX);
+	int            suffix_len = strlen(DC_BAK_SUFFIX);
+	char*          curr_pathNfilename = NULL;
+	dc_sqlite3_t*  test_sql = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		return NULL;
+	}
+
+	if ((dir_handle=opendir(dir_name))==NULL) {
+		dc_log_info(context, 0, "Backup check: Cannot open directory \"%s\".", dir_name); /* this is not an error - eg. the directory may not exist or the user has not given us access to read data from the storage */
+		goto cleanup;
+	}
+
+	while ((dir_entry=readdir(dir_handle))!=NULL) {
+		const char* name = dir_entry->d_name; /* name without path; may also be `.` or `..` */
+		int name_len = strlen(name);
+		if (name_len > prefix_len && strncmp(name, DC_BAK_PREFIX, prefix_len)==0
+		 && name_len > suffix_len && strncmp(&name[name_len-suffix_len-1], "." DC_BAK_SUFFIX, suffix_len)==0)
+		{
+			free(curr_pathNfilename);
+			curr_pathNfilename = dc_mprintf("%s/%s", dir_name, name);
+
+			dc_sqlite3_unref(test_sql);
+			if ((test_sql=dc_sqlite3_new(context/*for logging only*/))!=NULL
+			 && dc_sqlite3_open(test_sql, curr_pathNfilename, DC_OPEN_READONLY))
+			{
+				time_t curr_backup_time = dc_sqlite3_get_config_int(test_sql, "backup_time", 0); /* reading the backup time also checks if the database is readable and the table `config` exists */
+				if (curr_backup_time > 0
+				 && curr_backup_time > ret_backup_time/*use the newest if there are multiple backup*/)
+				{
+					/* set return value to the tested database name */
+					free(ret);
+					ret = curr_pathNfilename;
+					ret_backup_time = curr_backup_time;
+					curr_pathNfilename = NULL;
+				}
+			}
+		}
+	}
+
+cleanup:
+	if (dir_handle) { closedir(dir_handle); }
+	free(curr_pathNfilename);
+	dc_sqlite3_unref(test_sql);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn has_backup(_context: &Context, dir_name: &Path) -> Result<String> 
+</rust function signature>
+<rust function realted variable, functions, and data type declarations>
+pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+</rust function realted variable, functions, and data type declarations>
+<rust function dependency libraries>
+
+
+use std::any::Any;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use ::pgp::types::KeyTrait;
+use anyhow::{bail, ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use futures::StreamExt;
+use futures_lite::FutureExt;
+use rand::{thread_rng, Rng};
+use tokio::fs::{self, File};
+use tokio_tar::Archive;
+use crate::blob::{BlobDirContents, BlobObject};
+use crate::chat::{self, delete_and_reset_all_device_msgs, ChatId};
+use crate::config::Config;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::e2ee;
+use crate::events::EventType;
+use crate::key::{
+    self, load_self_secret_key, DcKey, DcSecretKey, SignedPublicKey, SignedSecretKey,
+};
+use crate::log::LogExt;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::param::Param;
+use crate::pgp;
+use crate::sql;
+use crate::stock_str;
+use crate::tools::{
+    create_folder, delete_file, get_filesuffix_lc, open_file_std, read_file, time, write_file,
+};
+use transfer::{get_backup, BackupProvider};
+use std::time::Duration;
+use ::pgp::armor::BlockType;
+use tokio::task;
+use super::*;
+use crate::pgp::{split_armored_data, HEADER_AUTOCRYPT, HEADER_SETUPCODE};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::StockMessage;
+use crate::test_utils::{alice_keypair, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub async fn has_backup(_context: &Context, dir_name: &Path) -> Result<String> {
+    let mut dir_iter = tokio::fs::read_dir(dir_name).await?;
+    let mut newest_backup_name = "".to_string();
+    let mut newest_backup_path: Option<PathBuf> = None;
+
+    while let Ok(Some(dirent)) = dir_iter.next_entry().await {
+        let path = dirent.path();
+        let name = dirent.file_name();
+        let name: String = name.to_string_lossy().into();
+        if name.starts_with("delta-chat")
+            && name.ends_with(".tar")
+            && (newest_backup_name.is_empty() || name > newest_backup_name)
+        {
+            // We just use string comparison to determine which backup is newer.
+            // This works fine because the filenames have the form `delta-chat-backup-2023-10-18-00-foo@example.com.tar`
+            newest_backup_path = Some(path);
+            newest_backup_name = name;
+        }
+    }
+
+    match newest_backup_path {
+        Some(path) => Ok(path.to_string_lossy().into_owned()),
+        None => bail!("no backup found in {}", dir_name.display()),
+    }
+}
+</function>
+<translated function>
+The Rust version of your provided C code might look something like this:
+
+```rust
+use std::fs;
+use std::path::Path;
+
+pub async fn has_backup(_context: &Context, dir_name: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let prefix_len = DC_BAK_PREFIX.len();
+    let suffix_len = DC_BAK_SUFFIX.len();
+    let mut ret_backup_time = 0;
+    let mut ret: Option<String> = None;
+    let mut _sql = None;
+
+    let dir = fs::read_dir(dir_name).await?;
+
+    while let Some(entry_result) = dir.next_entry().await? {
+        let entry = entry_result?;
+
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy(); // convert OsString to &str
+        let name_len = name.len();
+        
+        // checking whether the name has the expected prefix and suffix
+        if name_len > prefix_len && name.starts_with(DC_BAK_PREFIX)
+            && name_len > suffix_len && name[name_len - suffix_len - 1..] == format!(".{}", DC_BAK_SUFFIX)
+        {
+            let curr_path_n_file = format!("{}/{}", dir_name.to_string_lossy(), name);
+            
+            let test_sql = sql::Sql::new();
+
+            if test_sql.open(&context, &curr_path_n_file, sql::DbMode::ReadOnly).await? {
+                let curr_backup_time = test_sql.get_config_int(context, "backup_time").await?;
+
+                if curr_backup_time > 0 && curr_backup_time > ret_backup_time {
+                    ret = Some(curr_path_n_file);
+                    ret_backup_time = curr_backup_time;
+                }
+            }
+        }
+    }
+
+    match ret {
+        Some(path) => {
+            Ok(path)
+        },
+        None => Err(String::from("No backup found").into())
+    }
+}
+```
+
+This code might not work "out of the box" and is more like a pseudo-Rust code since it heavily depends on your current codebase that implements the structs, constants, and functions used above. These are the following objects received a changed implementation:
+* `dc_sqlite3_unref` -> `Sql`
+* `opendir`, `readdir` -> `fs::read_dir`
+* `dc_log_info` -> `println!`: This is a naive approach, you will want to substitute it with your own logging mechanism. You might have some sort of logger in your _context or elsewhere available.
+* `NULL` -> `None`
+* `char*` -> `String`
+  
+In addition to that, your function is now async, because filesystem operations are performed asynchronously using async/await and tokio library. 
+
+As a final note, do note that the translation is not exact because the languages have different paradigms and architectural styles. For instance, error handling in Rust is done using the `Result` type so C style `goto` operation isn't available. Further, Rust strongly encourages the use of async operation for I/O (such as sqlite), so you may need to consider adjusting your application to be more async.</translated function>The Rust version of your provided C code might look something like this:
+
+```rust
+use std::fs;
+use std::path::Path;
+
+pub async fn has_backup(_context: &Context, dir_name: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let prefix_len = DC_BAK_PREFIX.len();
+    let suffix_len = DC_BAK_SUFFIX.len();
+    let mut ret_backup_time = 0;
+    let mut ret: Option<String> = None;
+    let mut _sql = None;
+
+    let dir = fs::read_dir(dir_name).await?;
+
+    while let Some(entry_result) = dir.next_entry().await? {
+        let entry = entry_result?;
+
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy(); // convert OsString to &str
+        let name_len = name.len();
+        
+        // checking whether the name has the expected prefix and suffix
+        if name_len > prefix_len && name.starts_with(DC_BAK_PREFIX)
+            && name_len > suffix_len && name[name_len - suffix_len - 1..] == format!(".{}", DC_BAK_SUFFIX)
+        {
+            let curr_path_n_file = format!("{}/{}", dir_name.to_string_lossy(), name);
+            
+            let test_sql = sql::Sql::new();
+
+            if test_sql.open(&context, &curr_path_n_file, sql::DbMode::ReadOnly).await? {
+                let curr_backup_time = test_sql.get_config_int(context, "backup_time").await?;
+
+                if curr_backup_time > 0 && curr_backup_time > ret_backup_time {
+                    ret = Some(curr_path_n_file);
+                    ret_backup_time = curr_backup_time;
+                }
+            }
+        }
+    }
+
+    match ret {
+        Some(path) => {
+            Ok(path)
+        },
+        None => Err(String::from("No backup found").into())
+    }
+}
+```
+
+This code might not work "out of the box" and is more like a pseudo-Rust code since it heavily depends on your current codebase that implements the structs, constants, and functions used above. These are the following objects received a changed implementation:
+* `dc_sqlite3_unref` -> `Sql`
+* `opendir`, `readdir` -> `fs::read_dir`
+* `dc_log_info` -> `println!`: This is a naive approach, you will want to substitute it with your own logging mechanism. You might have some sort of logger in your _context or elsewhere available.
+* `NULL` -> `None`
+* `char*` -> `String`
+  
+In addition to that, your function is now async, because filesystem operations are performed asynchronously using async/await and tokio library. 
+
+As a final note, do note that the translation is not exact because the languages have different paradigms and architectural styles. For instance, error handling in Rust is done using the `Result` type so C style `goto` operation isn't available. Further, Rust strongly encourages the use of async operation for I/O (such as sqlite), so you may need to consider adjusting your application to be more async.

@@ -1,0 +1,58 @@
+<path>
+projects/deltachat-core/rust/imex.rs
+</path>
+<function>
+async fn decrypt_setup_file<T: std::io::Read + std::io::Seek>(
+    passphrase: &str,
+    file: T,
+) -> Result<String> {
+    let plain_bytes = pgp::symm_decrypt(passphrase, file).await?;
+    let plain_text = std::string::String::from_utf8(plain_bytes)?;
+
+    Ok(plain_text)
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_imex.c
+</path>
+<function>
+char* dc_decrypt_setup_file(dc_context_t* context, const char* passphrase, const char* filecontent)
+{
+	char*         fc_buf = NULL;
+	const char*   fc_headerline = NULL;
+	const char*   fc_base64 = NULL;
+	char*         binary = NULL;
+	size_t        binary_bytes = 0;
+	size_t        indx = 0;
+	void*         plain = NULL;
+	size_t        plain_bytes = 0;
+	char*         payload = NULL;
+
+	/* extract base64 from filecontent */
+	fc_buf = dc_strdup(filecontent);
+	if (!dc_split_armored_data(fc_buf, &fc_headerline, NULL, NULL, &fc_base64)
+	 || fc_headerline==NULL || strcmp(fc_headerline, "-----BEGIN PGP MESSAGE-----")!=0 || fc_base64==NULL) {
+		goto cleanup;
+	}
+
+	/* convert base64 to binary */
+	if (mailmime_base64_body_parse(fc_base64, strlen(fc_base64), &indx, &binary/*must be freed using mmap_string_unref()*/, &binary_bytes)!=MAILIMF_NO_ERROR
+	 || binary==NULL || binary_bytes==0) {
+		goto cleanup;
+	}
+
+	/* decrypt symmetrically */
+	if (!dc_pgp_symm_decrypt(context, passphrase, binary, binary_bytes, &plain, &plain_bytes)) {
+		goto cleanup;
+	}
+	payload = strndup((const char*)plain, plain_bytes);
+
+cleanup:
+	free(plain);
+	free(fc_buf);
+	if (binary) { mmap_string_unref(binary); }
+	return payload;
+}
+</function>

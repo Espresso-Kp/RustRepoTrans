@@ -1,0 +1,75 @@
+<path>
+projects/deltachat-core/rust/imex.rs
+</path>
+<function>
+async fn export_key_to_asc_file<T>(
+    context: &Context,
+    dir: &Path,
+    id: Option<i64>,
+    key: &T,
+) -> Result<()>
+where
+    T: DcKey + Any,
+{
+    let file_name = {
+        let any_key = key as &dyn Any;
+        let kind = if any_key.downcast_ref::<SignedPublicKey>().is_some() {
+            "public"
+        } else if any_key.downcast_ref::<SignedSecretKey>().is_some() {
+            "private"
+        } else {
+            "unknown"
+        };
+        let id = id.map_or("default".into(), |i| i.to_string());
+        dir.join(format!("{}-key-{}.asc", kind, &id))
+    };
+    info!(
+        context,
+        "Exporting key {:?} to {}",
+        key.key_id(),
+        file_name.display()
+    );
+
+    // Delete the file if it already exists.
+    delete_file(context, &file_name).await.ok();
+
+    let content = key.to_asc(None).into_bytes();
+    write_file(context, &file_name, &content)
+        .await
+        .with_context(|| format!("cannot write key to {}", file_name.display()))?;
+    context.emit_event(EventType::ImexFileWritten(file_name));
+    Ok(())
+}
+</function>
+------
+
+<path>
+projects/deltachat-core/c/dc_imex.c
+</path>
+<function>
+static int export_key_to_asc_file(dc_context_t* context, const char* dir, int id, const dc_key_t* key, int is_default)
+{
+	int   success = 0;
+	char* file_name = NULL;
+
+	if (is_default) {
+		file_name = dc_mprintf("%s/%s-key-default.asc", dir, key->type==DC_KEY_PUBLIC? "public" : "private");
+	}
+	else {
+		file_name = dc_mprintf("%s/%s-key-%i.asc", dir, key->type==DC_KEY_PUBLIC? "public" : "private", id);
+	}
+	dc_log_info(context, 0, "Exporting key %s", file_name);
+	dc_delete_file(context, file_name);
+	if (!dc_key_render_asc_to_file(key, file_name, context)) {
+		dc_log_error(context, 0, "Cannot write key to %s", file_name);
+		goto cleanup;
+	}
+
+	context->cb(context, DC_EVENT_IMEX_FILE_WRITTEN, (uintptr_t)file_name, 0);
+	success = 1;
+
+cleanup:
+	free(file_name);
+	return success;
+}
+</function>

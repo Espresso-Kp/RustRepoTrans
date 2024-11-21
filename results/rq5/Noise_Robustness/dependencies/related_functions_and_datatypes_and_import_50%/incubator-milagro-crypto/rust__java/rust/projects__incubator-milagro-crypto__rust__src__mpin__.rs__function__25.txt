@@ -1,0 +1,303 @@
+pub fn add(&mut self, Q: &ECP2) -> isize {
+        let b = 3 * rom::CURVE_B_I;
+        let mut t0 = self.x.clone();
+        t0.mul(&Q.x); // x.Q.x
+        let mut t1 = self.y.clone();
+        t1.mul(&Q.y); // y.Q.y
+
+        let mut t2 = self.z.clone();
+        t2.mul(&Q.z);
+        let mut t3 = self.x.clone();
+        t3.add(&self.y);
+        t3.norm(); //t3=X1+Y1
+        let mut t4 = Q.x.clone();
+        t4.add(&Q.y);
+        t4.norm(); //t4=X2+Y2
+        t3.mul(&t4); //t3=(X1+Y1)(X2+Y2)
+        t4 = t0.clone();
+        t4.add(&t1); //t4=X1.X2+Y1.Y2
+
+        t3.sub(&t4);
+        t3.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t3.mul_ip();
+            t3.norm(); //t3=(X1+Y1)(X2+Y2)-(X1.X2+Y1.Y2) = X1.Y2+X2.Y1
+        }
+        t4 = self.getpy();
+        t4.add(&self.z);
+        t4.norm(); //t4=Y1+Z1
+        let mut x3 = Q.y.clone();
+        x3.add(&Q.z);
+        x3.norm(); //x3=Y2+Z2
+
+        t4.mul(&x3); //t4=(Y1+Z1)(Y2+Z2)
+        x3 = t1.clone(); //
+        x3.add(&t2); //X3=Y1.Y2+Z1.Z2
+
+        t4.sub(&x3);
+        t4.norm();
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t4.mul_ip();
+            t4.norm(); //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
+        }
+        x3 = self.getpx();
+        x3.add(&self.z);
+        x3.norm(); // x3=X1+Z1
+        let mut y3 = Q.x.clone();
+        y3.add(&Q.z);
+        y3.norm(); // y3=X2+Z2
+        x3.mul(&y3); // x3=(X1+Z1)(X2+Z2)
+        y3 = t0.clone();
+        y3.add(&t2); // y3=X1.X2+Z1+Z2
+        y3.rsub(&x3);
+        y3.norm(); // y3=(X1+Z1)(X2+Z2) - (X1.X2+Z1.Z2) = X1.Z2+X2.Z1
+
+        if ecp::SEXTIC_TWIST == SexticTwist::DType {
+            t0.mul_ip();
+            t0.norm(); // x.Q.x
+            t1.mul_ip();
+            t1.norm(); // y.Q.y
+        }
+        x3 = t0.clone();
+        x3.add(&t0);
+        t0.add(&x3);
+        t0.norm();
+        t2.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            t2.mul_ip();
+            t2.norm();
+        }
+        let mut z3 = t1.clone();
+        z3.add(&t2);
+        z3.norm();
+        t1.sub(&t2);
+        t1.norm();
+        y3.imul(b);
+        if ecp::SEXTIC_TWIST == SexticTwist::MType {
+            y3.mul_ip();
+            y3.norm();
+        }
+        x3 = y3.clone();
+        x3.mul(&t4);
+        t2 = t3.clone();
+        t2.mul(&t1);
+        x3.rsub(&t2);
+        y3.mul(&t0);
+        t1.mul(&z3);
+        y3.add(&t1);
+        t0.mul(&t3);
+        z3.mul(&t4);
+        z3.add(&t0);
+
+        self.x = x3;
+        self.x.norm();
+        self.y = y3;
+        self.y.norm();
+        self.z = z3;
+        self.z.norm();
+
+        return 0;
+    }
+pub fn is_unity(&self) -> bool {
+        let one = FP2::new_int(1);
+        self.a.equals(&one) && self.b.is_zilch()
+    }
+pub fn generator() -> ECP2 {
+        return ECP2::new_fp2s(
+            FP2::new_bigs(
+                Big::new_ints(&rom::CURVE_PXA),
+                Big::new_ints(&rom::CURVE_PXB),
+            ),
+            FP2::new_bigs(
+                Big::new_ints(&rom::CURVE_PYA),
+                Big::new_ints(&rom::CURVE_PYB),
+            ),
+        );
+    }
+pub fn from_bytes(b: &[u8]) -> ECP2 {
+        let mut t: [u8; big::MODBYTES as usize] = [0; big::MODBYTES as usize];
+        let mb = big::MODBYTES as usize;
+
+        for i in 0..mb {
+            t[i] = b[i]
+        }
+        let ra = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = b[i + mb]
+        }
+        let rb = Big::from_bytes(&t);
+        let rx = FP2::new_bigs(ra, rb);
+
+        for i in 0..mb {
+            t[i] = b[i + 2 * mb]
+        }
+        let ra = Big::from_bytes(&t);
+        for i in 0..mb {
+            t[i] = b[i + 3 * mb]
+        }
+        let rb = Big::from_bytes(&t);
+        let ry = FP2::new_bigs(ra, rb);
+
+        ECP2::new_fp2s(rx, ry)
+    }
+pub fn fexp(m: &FP12) -> FP12 {
+    let f = FP2::new_bigs(Big::new_ints(&rom::FRA), Big::new_ints(&rom::FRB));
+    let mut x = Big::new_ints(&rom::CURVE_BNX);
+    let mut r = m.clone();
+
+    // Easy part of final exp
+    let mut lv = r.clone();
+    lv.inverse();
+    r.conj();
+
+    r.mul(&lv);
+    lv = r.clone();
+    r.frob(&f);
+    r.frob(&f);
+    r.mul(&lv);
+    //    if r.is_unity() {
+    //	r.zero();
+    //	return r;
+    //    }
+
+    /* Hard part of final exp */
+    if ecp::CURVE_PAIRING_TYPE == CurvePairingType::Bn {
+        lv = r.clone();
+        lv.frob(&f);
+        let mut x0 = lv.clone();
+        x0.frob(&f);
+        lv.mul(&r);
+        x0.mul(&lv);
+        x0.frob(&f);
+        let mut x1 = r.clone();
+        x1.conj();
+        let mut x4 = r.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::PositiveX {
+            x4.conj();
+        }
+
+        let mut x3 = x4.clone();
+        x3.frob(&f);
+
+        let mut x2 = x4.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::PositiveX {
+            x2.conj();
+        }
+        let mut x5 = x2.clone();
+        x5.conj();
+        lv = x2.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::PositiveX {
+            lv.conj();
+        }
+        x2.frob(&f);
+        r = x2.clone();
+        r.conj();
+
+        x4.mul(&r);
+        x2.frob(&f);
+
+        r = lv.clone();
+        r.frob(&f);
+        lv.mul(&r);
+
+        lv.usqr();
+        lv.mul(&x4);
+        lv.mul(&x5);
+        r = x3.clone();
+        r.mul(&x5);
+        r.mul(&lv);
+        lv.mul(&x2);
+        r.usqr();
+        r.mul(&lv);
+        r.usqr();
+        lv = r.clone();
+        lv.mul(&x1);
+        r.mul(&x0);
+        lv.usqr();
+        r.mul(&lv);
+        r.reduce();
+    } else {
+        // Ghamman & Fouotsa Method
+
+        let mut y0 = r.clone();
+        y0.usqr();
+        let mut y1 = y0.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y1.conj();
+        }
+        x.fshr(1);
+        let mut y2 = y1.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y2.conj();
+        }
+        x.fshl(1);
+        let mut y3 = r.clone();
+        y3.conj();
+        y1.mul(&y3);
+
+        y1.conj();
+        y1.mul(&y2);
+
+        y2 = y1.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y2.conj();
+        }
+        y3 = y2.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y3.conj();
+        }
+        y1.conj();
+        y3.mul(&y1);
+
+        y1.conj();
+        y1.frob(&f);
+        y1.frob(&f);
+        y1.frob(&f);
+        y2.frob(&f);
+        y2.frob(&f);
+        y1.mul(&y2);
+
+        y2 = y3.pow(&x);
+        if ecp::SIGN_OF_X == SignOfX::NegativeX {
+            y2.conj();
+        }
+        y2.mul(&y0);
+        y2.mul(&r);
+
+        y1.mul(&y2);
+        y2 = y3;
+        y2.frob(&f);
+        y1.mul(&y2);
+        r = y1;
+        r.reduce();
+    }
+    return r;
+}
+pub const BAD_PARAMS: isize = -11;
+pub const INVALID_POINT: isize = -14;
+pub struct FP12 {
+    a: FP4,
+    b: FP4,
+    c: FP4,
+    stype: usize,
+}
+------
+
+
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::ecp2::ECP2;
+use super::fp12::FP12;
+use super::fp4::FP4;
+use super::pair;
+use super::rom;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;

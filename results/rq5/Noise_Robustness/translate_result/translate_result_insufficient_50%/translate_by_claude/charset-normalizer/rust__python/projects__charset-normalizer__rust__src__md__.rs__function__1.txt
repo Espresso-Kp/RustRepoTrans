@@ -1,0 +1,380 @@
+<message>
+please translate the given python function to rust according to the rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).Please make sure to call the relevant dependencies as much as possible in the translated function Only response the translated function results.
+<python function>
+def mess_ratio(
+    decoded_sequence: str, maximum_threshold: float = 0.2, debug: bool = False
+) -> float:
+    """
+    Compute a mess ratio given a decoded bytes sequence. The maximum threshold does stop the computation earlier.
+    """
+
+    detectors: List[MessDetectorPlugin] = [
+        md_class() for md_class in MessDetectorPlugin.__subclasses__()
+    ]
+
+    length: int = len(decoded_sequence) + 1
+
+    mean_mess_ratio: float = 0.0
+
+    if length < 511:
+        intermediary_mean_mess_ratio_calc: int = 32
+    elif length <= 1024:
+        intermediary_mean_mess_ratio_calc = 64
+    else:
+        intermediary_mean_mess_ratio_calc = 128
+
+    for character, index in zip(decoded_sequence + "\n", range(length)):
+        for detector in detectors:
+            if detector.eligible(character):
+                detector.feed(character)
+
+        if (
+            index > 0 and index % intermediary_mean_mess_ratio_calc == 0
+        ) or index == length - 1:
+            mean_mess_ratio = sum(dt.ratio for dt in detectors)
+
+            if mean_mess_ratio >= maximum_threshold:
+                break
+
+    if debug:
+        logger = getLogger("charset_normalizer")
+
+        logger.log(
+            TRACE,
+            "Mess-detector extended-analysis start. "
+            f"intermediary_mean_mess_ratio_calc={intermediary_mean_mess_ratio_calc} mean_mess_ratio={mean_mess_ratio} "
+            f"maximum_threshold={maximum_threshold}",
+        )
+
+        if len(decoded_sequence) > 16:
+            logger.log(TRACE, f"Starting with: {decoded_sequence[:16]}")
+            logger.log(TRACE, f"Ending with: {decoded_sequence[-16::]}")
+
+        for dt in detectors:  # pragma: nocover
+            logger.log(TRACE, f"{dt.__class__}: {dt.ratio}")
+
+    return round(mean_mess_ratio, 3)
+</python function>
+<rust function signature>
+pub(crate) fn mess_ratio(
+    decoded_sequence: String,
+    maximum_threshold: Option<OrderedFloat<f32>>,
+) -> f32 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn feed(&mut self, character: &MessDetectorChar) {
+        if !(character.is(MessDetectorCharFlags::ALPHABETIC)
+            && character.is(MessDetectorCharFlags::CASE_VARIABLE))
+            && self.character_count_since_last_sep > 0
+        {
+            if self.character_count_since_last_sep <= 64
+                && !character.is(MessDetectorCharFlags::ASCII_DIGIT)
+                && !self.current_ascii_only
+            {
+                self.successive_upper_lower_count_final += self.successive_upper_lower_count;
+            }
+
+            self.successive_upper_lower_count = 0;
+            self.character_count_since_last_sep = 0;
+            self.last_alpha_seen = None;
+            self.buf = false;
+            self.character_count += 1;
+            self.current_ascii_only = true;
+
+            return;
+        }
+
+        self.current_ascii_only &= character.is(MessDetectorCharFlags::ASCII);
+
+        if let Some(tmp_last_alpha) = self.last_alpha_seen {
+            if (character.is(MessDetectorCharFlags::UPPERCASE)
+                && tmp_last_alpha.is(MessDetectorCharFlags::LOWERCASE))
+                || (character.is(MessDetectorCharFlags::LOWERCASE)
+                    && tmp_last_alpha.is(MessDetectorCharFlags::UPPERCASE))
+            {
+                if self.buf {
+                    self.successive_upper_lower_count += 2;
+                    self.buf = false;
+                } else {
+                    self.buf = true;
+                }
+            } else {
+                self.buf = false;
+            }
+        }
+
+        self.character_count += 1;
+        self.character_count_since_last_sep += 1;
+        self.last_alpha_seen = Some(*character);
+    }
+fn ratio(&self) -> f32 {
+        if self.character_count == 0 {
+            return 0.0;
+        }
+        self.successive_upper_lower_count_final as f32 / self.character_count as f32
+    }
+#[derive(Default)]
+pub(super) struct TooManySymbolOrPunctuationPlugin {
+    punctuation_count: u64,
+    symbol_count: u64,
+    character_count: u64,
+    last_printable_char: Option<MessDetectorChar>,
+}
+#[derive(Default)]
+pub(super) struct TooManyAccentuatedPlugin {
+    character_count: u64,
+    accentuated_count: u64,
+}
+pub(super) struct UnprintablePlugin {
+    character_count: u64,
+    unprintable_count: u64,
+}
+pub(super) struct SuspiciousDuplicateAccentPlugin {
+    character_count: u64,
+    successive_count: u64,
+    last_latin_character: Option<MessDetectorChar>,
+}
+pub(super) struct SuspiciousRangePlugin {
+    character_count: u64,
+    suspicious_successive_range_count: u64,
+    last_printable_char: Option<MessDetectorChar>,
+}
+pub(super) struct CjkInvalidStopPlugin {
+    wrong_stop_count: u64,
+    cjk_character_count: u64,
+}
+pub(crate) struct MessDetectorChar {
+    pub character: char,
+    pub flags: MessDetectorCharFlags,
+    pub unicode_range: Option<&'static str>,
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+
+
+use cached::proc_macro::cached;
+use log::{log_enabled, trace};
+use ordered_float::OrderedFloat;
+use plugins::{
+    ArchaicUpperLowerPlugin, CjkInvalidStopPlugin, MessDetectorPlugin, SuperWeirdWordPlugin,
+    SuspiciousDuplicateAccentPlugin, SuspiciousRangePlugin, TooManyAccentuatedPlugin,
+    TooManySymbolOrPunctuationPlugin, UnprintablePlugin,
+};
+use structs::MessDetectorChar;
+
+</rust function dependency libraries>
+
+</message>
+<function>
+pub(crate) fn mess_ratio(
+    decoded_sequence: String,
+    maximum_threshold: Option<OrderedFloat<f32>>,
+) -> f32 {
+    let maximum_threshold = f32::from(maximum_threshold.unwrap_or(OrderedFloat(0.2)));
+    let mut detectors: Vec<Box<dyn MessDetectorPlugin>> = vec![
+        Box::<TooManySymbolOrPunctuationPlugin>::default(),
+        Box::<TooManyAccentuatedPlugin>::default(),
+        Box::<UnprintablePlugin>::default(),
+        Box::<SuspiciousRangePlugin>::default(),
+        Box::<SuspiciousDuplicateAccentPlugin>::default(),
+        Box::<SuperWeirdWordPlugin>::default(),
+        Box::<CjkInvalidStopPlugin>::default(),
+        Box::<ArchaicUpperLowerPlugin>::default(),
+    ];
+
+    let mut mean_mess_ratio: Option<f32> = None;
+    let early_calc_period: usize = match decoded_sequence.chars().count() {
+        ..=510 => 32,
+        511..=1023 => 64,
+        _ => 128,
+    };
+    // Traverse through chars and detectors
+    for (index, ch) in decoded_sequence
+        .chars()
+        .chain(std::iter::once('\n'))
+        .enumerate()
+    {
+        let mess_char = MessDetectorChar::new(ch);
+        detectors
+            .iter_mut()
+            .filter(|detector| detector.eligible(&mess_char))
+            .for_each(|detector| detector.feed(&mess_char));
+
+        if index % early_calc_period == early_calc_period - 1 {
+            let early_mess_ratio: f32 = detectors.iter().map(|x| x.ratio()).sum();
+            if early_mess_ratio >= maximum_threshold {
+                mean_mess_ratio = Some(early_mess_ratio);
+                break;
+            }
+        }
+    }
+    let return_ratio = mean_mess_ratio.unwrap_or(detectors.iter().map(|x| x.ratio()).sum());
+
+    if log_enabled!(log::Level::Trace) {
+        trace!(
+            "Mess-detector extended-analysis start: early_calc_period={}, mean_mess_ratio={}, maximum_threshold={} \
+            {}",
+            early_calc_period,
+            return_ratio,
+            maximum_threshold,
+            detectors
+            .iter()
+            .filter(|d| d.ratio() > 0.0)
+            .map(|d| format!("{} produces ratio: {}", d.name(), d.ratio()))
+            .collect::<Vec<String>>()
+            .join("===")
+        );
+    }
+
+    return_ratio
+}
+</function>
+<translated function>
+Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and data type declarations:
+
+```rust
+pub(crate) fn mess_ratio(
+    decoded_sequence: String,
+    maximum_threshold: Option<OrderedFloat<f32>>,
+) -> f32 {
+    let maximum_threshold = maximum_threshold.unwrap_or(OrderedFloat(0.2));
+    let debug = log_enabled!(log::Level::Trace);
+
+    let mut detectors: Vec<Box<dyn MessDetectorPlugin>> = vec![
+        Box::new(ArchaicUpperLowerPlugin::default()),
+        Box::new(TooManySymbolOrPunctuationPlugin::default()),
+        Box::new(TooManyAccentuatedPlugin::default()),
+        Box::new(UnprintablePlugin::default()),
+        Box::new(SuspiciousDuplicateAccentPlugin::default()),
+        Box::new(SuspiciousRangePlugin::default()),
+        Box::new(CjkInvalidStopPlugin::default()),
+        Box::new(SuperWeirdWordPlugin::default()),
+    ];
+
+    let length = decoded_sequence.len() + 1;
+
+    let mut mean_mess_ratio = 0.0;
+
+    let intermediary_mean_mess_ratio_calc = if length < 511 {
+        32
+    } else if length <= 1024 {
+        64
+    } else {
+        128
+    };
+
+    for (index, character) in decoded_sequence.chars().chain(std::iter::once('\n')).enumerate() {
+        let mess_detector_char = MessDetectorChar::new(character);
+        
+        for detector in &mut detectors {
+            if detector.eligible(&mess_detector_char) {
+                detector.feed(&mess_detector_char);
+            }
+        }
+
+        if (index > 0 && index % intermediary_mean_mess_ratio_calc == 0) || index == length - 1 {
+            mean_mess_ratio = detectors.iter().map(|dt| dt.ratio()).sum();
+
+            if mean_mess_ratio >= maximum_threshold.into_inner() {
+                break;
+            }
+        }
+    }
+
+    if debug {
+        trace!(
+            "Mess-detector extended-analysis start. intermediary_mean_mess_ratio_calc={} mean_mess_ratio={} maximum_threshold={}",
+            intermediary_mean_mess_ratio_calc,
+            mean_mess_ratio,
+            maximum_threshold
+        );
+
+        if decoded_sequence.len() > 16 {
+            trace!("Starting with: {}", &decoded_sequence[..16]);
+            trace!("Ending with: {}", &decoded_sequence[decoded_sequence.len() - 16..]);
+        }
+
+        for dt in &detectors {
+            trace!("{}: {}", std::any::type_name::<dyn MessDetectorPlugin>(), dt.ratio());
+        }
+    }
+
+    (mean_mess_ratio * 1000.0).round() / 1000.0
+}
+```
+
+This translation maintains the core logic of the Python function while adapting it to Rust's syntax and the provided dependencies. Note that some assumptions were made about the exact implementation of certain traits and structures, as not all details were provided in the dependencies. You may need to adjust some parts based on the actual implementation of the `MessDetectorPlugin` trait and other related types.</translated function>Here's the translated Rust function based on the provided Python function, Rust function signature, dependencies, and data type declarations:
+
+```rust
+pub(crate) fn mess_ratio(
+    decoded_sequence: String,
+    maximum_threshold: Option<OrderedFloat<f32>>,
+) -> f32 {
+    let maximum_threshold = maximum_threshold.unwrap_or(OrderedFloat(0.2));
+    let debug = log_enabled!(log::Level::Trace);
+
+    let mut detectors: Vec<Box<dyn MessDetectorPlugin>> = vec![
+        Box::new(ArchaicUpperLowerPlugin::default()),
+        Box::new(TooManySymbolOrPunctuationPlugin::default()),
+        Box::new(TooManyAccentuatedPlugin::default()),
+        Box::new(UnprintablePlugin::default()),
+        Box::new(SuspiciousDuplicateAccentPlugin::default()),
+        Box::new(SuspiciousRangePlugin::default()),
+        Box::new(CjkInvalidStopPlugin::default()),
+        Box::new(SuperWeirdWordPlugin::default()),
+    ];
+
+    let length = decoded_sequence.len() + 1;
+
+    let mut mean_mess_ratio = 0.0;
+
+    let intermediary_mean_mess_ratio_calc = if length < 511 {
+        32
+    } else if length <= 1024 {
+        64
+    } else {
+        128
+    };
+
+    for (index, character) in decoded_sequence.chars().chain(std::iter::once('\n')).enumerate() {
+        let mess_detector_char = MessDetectorChar::new(character);
+        
+        for detector in &mut detectors {
+            if detector.eligible(&mess_detector_char) {
+                detector.feed(&mess_detector_char);
+            }
+        }
+
+        if (index > 0 && index % intermediary_mean_mess_ratio_calc == 0) || index == length - 1 {
+            mean_mess_ratio = detectors.iter().map(|dt| dt.ratio()).sum();
+
+            if mean_mess_ratio >= maximum_threshold.into_inner() {
+                break;
+            }
+        }
+    }
+
+    if debug {
+        trace!(
+            "Mess-detector extended-analysis start. intermediary_mean_mess_ratio_calc={} mean_mess_ratio={} maximum_threshold={}",
+            intermediary_mean_mess_ratio_calc,
+            mean_mess_ratio,
+            maximum_threshold
+        );
+
+        if decoded_sequence.len() > 16 {
+            trace!("Starting with: {}", &decoded_sequence[..16]);
+            trace!("Ending with: {}", &decoded_sequence[decoded_sequence.len() - 16..]);
+        }
+
+        for dt in &detectors {
+            trace!("{}: {}", std::any::type_name::<dyn MessDetectorPlugin>(), dt.ratio());
+        }
+    }
+
+    (mean_mess_ratio * 1000.0).round() / 1000.0
+}
+```
+
+This translation maintains the core logic of the Python function while adapting it to Rust's syntax and the provided dependencies. Note that some assumptions were made about the exact implementation of certain traits and structures, as not all details were provided in the dependencies. You may need to adjust some parts based on the actual implementation of the `MessDetectorPlugin` trait and other related types.
