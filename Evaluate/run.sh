@@ -6,10 +6,10 @@ if [ "$#" -ne 3 ]; then
 fi
 
 # translate function pairs from target LLM
-python translate_throughLLM.py $1 translate_result $2 $3
+python3 translate_throughLLM.py $1 translate_result $2 $3
 
 # run unit-test
-python auto_test_rust.py translate_result test_result $2 $1 $3
+python3 auto_test_rust.py translate_result test_result $2 $1 $3
 
 # calculte the pass@1 of test_resut of target LLM
-python cnt_success.py test_result $2
+python3 cnt_success.py test_result $2

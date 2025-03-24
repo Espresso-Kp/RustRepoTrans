@@ -37,13 +37,13 @@ projects/deltachat-core/c/dc_imex.c
 char* dc_imex_has_backup(dc_context_t* context, const char* dir_name)
 {
 	char*          ret = NULL;
-	time_t         ret_backup_time = 0;
 	DIR*           dir_handle = NULL;
 	struct dirent* dir_entry = NULL;
 	int            prefix_len = strlen(DC_BAK_PREFIX);
 	int            suffix_len = strlen(DC_BAK_SUFFIX);
 	char*          curr_pathNfilename = NULL;
 	dc_sqlite3_t*  test_sql = NULL;
+    char *newest_backup_name = NULL;
 
 	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
 		return NULL;
@@ -57,34 +57,25 @@ char* dc_imex_has_backup(dc_context_t* context, const char* dir_name)
 	while ((dir_entry=readdir(dir_handle))!=NULL) {
 		const char* name = dir_entry->d_name; /* name without path; may also be `.` or `..` */
 		int name_len = strlen(name);
+        free(curr_pathNfilename);
+        curr_pathNfilename = dc_mprintf("%s/%s", dir_name, name);
+
 		if (name_len > prefix_len && strncmp(name, DC_BAK_PREFIX, prefix_len)==0
 		 && name_len > suffix_len && strncmp(&name[name_len-suffix_len-1], "." DC_BAK_SUFFIX, suffix_len)==0)
-		{
-			free(curr_pathNfilename);
-			curr_pathNfilename = dc_mprintf("%s/%s", dir_name, name);
+		 && (newest_backup_name == NULL || strcmp(name, newest_backup_name) > 0)
+        {
+			free(newest_backup_name);  
+            newest_backup_name = strdup(name);
 
-			dc_sqlite3_unref(test_sql);
-			if ((test_sql=dc_sqlite3_new(context/*for logging only*/))!=NULL
-			 && dc_sqlite3_open(test_sql, curr_pathNfilename, DC_OPEN_READONLY))
-			{
-				time_t curr_backup_time = dc_sqlite3_get_config_int(test_sql, "backup_time", 0); /* reading the backup time also checks if the database is readable and the table `config` exists */
-				if (curr_backup_time > 0
-				 && curr_backup_time > ret_backup_time/*use the newest if there are multiple backup*/)
-				{
-					/* set return value to the tested database name */
-					free(ret);
-					ret = curr_pathNfilename;
-					ret_backup_time = curr_backup_time;
-					curr_pathNfilename = NULL;
-				}
-			}
+            free(ret);
+            ret = curr_pathNfilename;
+            curr_pathNfilename = NULL;
 		}
 	}
 
 cleanup:
 	if (dir_handle) { closedir(dir_handle); }
 	free(curr_pathNfilename);
-	dc_sqlite3_unref(test_sql);
 	return ret;
 }
 </function>

@@ -6,7 +6,7 @@ compose_folders=("crates/catalog/glue/testdata/glue_catalog" "crates/catalog/hms
 # 遍历每个子文件夹并启动 docker-compose 服务
 for folder in "${compose_folders[@]}"; do
   echo "Starting docker-compose services in $folder"
-  (cd $folder && sudo docker-compose down && sudo docker-compose up -d)
+  (cd $folder && docker-compose down && docker-compose up -d)
   if [ $? -ne 0 ]; then
     echo "Failed to start docker-compose services in $folder"
     exit 1

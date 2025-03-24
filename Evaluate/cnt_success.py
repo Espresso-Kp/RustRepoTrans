@@ -3,12 +3,9 @@ import sys
 
 
 def count_success_files(test_result, target_llm, target_project, lang_pair):
-    # if not os.path.exists(os.path.join(test_result+"_fail4test_case", target_llm, target_project, lang_pair)):
-    #     os.makedirs(os.path.join(test_result+"_fail4test_case", target_llm, target_project, lang_pair))
     directory = os.path.join(test_result, target_llm, target_project, lang_pair)
     success_count = 0
     total_count = 0
-    # 遍历目录中的所有文件
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         
@@ -23,8 +20,6 @@ def count_success_files(test_result, target_llm, target_project, lang_pair):
 
 
     return total_count, success_count
-
-
 
 test_result = sys.argv[1]
 target_llm = sys.argv[2]

@@ -41,15 +41,8 @@ pub(crate) async fn set_msg_failed(
 projects/deltachat-core/c/dc_msg.c
 </path>
 <function>
-void dc_set_msg_failed(dc_context_t* context, uint32_t msg_id, const char* error)
+void dc_set_msg_failed(dc_context_t* context, dc_msg_t* msg, const char* error)
 {
-	dc_msg_t*     msg = dc_msg_new_untyped(context);
-	sqlite3_stmt* stmt = NULL;
-
-	if (!dc_msg_load_from_db(msg, context, msg_id)) {
-		goto cleanup;
-	}
-
 	if (DC_STATE_OUT_PREPARING==msg->state ||
 	    DC_STATE_OUT_PENDING  ==msg->state ||
 	    DC_STATE_OUT_DELIVERED==msg->state)
@@ -62,14 +55,15 @@ void dc_set_msg_failed(dc_context_t* context, uint32_t msg_id, const char* error
 		dc_log_error(context, 0, "%s", error);
 	}
 
+	sqlite3_stmt* stmt = NULL;
 	stmt = dc_sqlite3_prepare(context->sql,
-		"UPDATE msgs SET state=?, param=? WHERE id=?;");
+		"UPDATE msgs SET state=?, error=? WHERE id=?;");
 	sqlite3_bind_int (stmt, 1, msg->state);
 	sqlite3_bind_text(stmt, 2, msg->param->packed, -1, SQLITE_STATIC);
-	sqlite3_bind_int (stmt, 3, msg_id);
+	sqlite3_bind_int (stmt, 3, msg->id);
 	sqlite3_step(stmt);
 
-	context->cb(context, DC_EVENT_MSG_FAILED, msg->chat_id, msg_id);
+	context->cb(context, DC_EVENT_MSG_FAILED, msg->chat_id, msg->id);
 
 cleanup:
 	sqlite3_finalize(stmt);

@@ -60,6 +60,59 @@ pub async fn load_from_db(context: &Context, chat_id: ChatId) -> Result<Self> {
         Ok(chat)
     }
 
+pub async fn new(
+        context: &Context,
+        msg: &Message,
+        chat: &Chat,
+        contact: Option<&Contact>,
+    ) -> Result<Summary> {
+        let prefix = if msg.state == MessageState::OutDraft {
+            Some(SummaryPrefix::Draft(stock_str::draft(context).await))
+        } else if msg.from_id == ContactId::SELF {
+            if msg.is_info() || chat.is_self_talk() {
+                None
+            } else {
+                Some(SummaryPrefix::Me(stock_str::self_msg(context).await))
+            }
+        } else {
+            match chat.typ {
+                Chattype::Group | Chattype::Broadcast | Chattype::Mailinglist => {
+                    if msg.is_info() || contact.is_none() {
+                        None
+                    } else {
+                        msg.get_override_sender_name()
+                            .or_else(|| contact.map(|contact| msg.get_sender_name(contact)))
+                            .map(SummaryPrefix::Username)
+                    }
+                }
+                Chattype::Single => None,
+            }
+        };
+
+        let mut text = msg.get_summary_text(context).await;
+
+        if text.is_empty() && msg.quoted_text().is_some() {
+            text = stock_str::reply_noun(context).await
+        }
+
+        let thumbnail_path = if msg.viewtype == Viewtype::Image
+            || msg.viewtype == Viewtype::Gif
+            || msg.viewtype == Viewtype::Sticker
+        {
+            msg.get_file(context)
+                .and_then(|path| path.to_str().map(|p| p.to_owned()))
+        } else {
+            None
+        };
+
+        Ok(Summary {
+            prefix,
+            text,
+            timestamp: msg.get_timestamp(),
+            state: msg.state,
+            thumbnail_path,
+        })
+
 pub async fn get_by_id(context: &Context, contact_id: ContactId) -> Result<Self> {
         let contact = Self::get_by_id_optional(context, contact_id)
             .await?

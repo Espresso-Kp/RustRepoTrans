@@ -238,6 +238,8 @@ def run(target_llm, target_project, target_lang, test_cmd):
         
 def main():
     special_test_cmds = {"deltachat-core": ["cargo","nextest","run"], "incubator-milagro-crypto" : ["cargo", "test", "--all", "--all-features", "--release"], "iceberg" : ["make", "unit-test"]}
+    
+    subprocess.run(['./run_docker-compose.sh'], cwd=os.path.join("projects", "iceberg", "rust"), capture_output=True, text=True)
 
     target_llms = os.listdir(translate_result_path)
 

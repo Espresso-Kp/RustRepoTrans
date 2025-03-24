@@ -9,6 +9,35 @@ pub async fn get_by_id(context: &Context, contact_id: ContactId) -> Result<Self>
         Ok(contact)
     }
 
+pub(crate) async fn msg_add_member_local(
+    context: &Context,
+    added_member_addr: &str,
+    by_contact: ContactId,
+) -> String {
+    let addr = added_member_addr;
+    let whom = &match Contact::lookup_id_by_addr(context, addr, Origin::Unknown).await {
+        Ok(Some(contact_id)) => Contact::get_by_id(context, contact_id)
+            .await
+            .map(|contact| contact.get_name_n_addr())
+            .unwrap_or_else(|_| addr.to_string()),
+        _ => addr.to_string(),
+    };
+    if by_contact == ContactId::UNDEFINED {
+        translated(context, StockMessage::MsgAddMember)
+            .await
+            .replace1(whom)
+    } else if by_contact == ContactId::SELF {
+        translated(context, StockMessage::MsgYouAddMember)
+            .await
+            .replace1(whom)
+    } else {
+        translated(context, StockMessage::MsgAddMemberBy)
+            .await
+            .replace1(whom)
+            .replace2(&by_contact.get_stock_name_n_addr(context).await)
+    }
+}
+
 pub async fn load_from_db(context: &Context, chat_id: ChatId) -> Result<Self> {
         let mut chat = context
             .sql

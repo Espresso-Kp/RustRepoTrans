@@ -57,20 +57,6 @@ projects/deltachat-core/rust/chat.rs
 projects/deltachat-core/c/dc_chat.c
 </path>
 <function>
- *   be unexpected as (1) deleting a normal chat also does not prevent new mails
- *   from arriving, (2) leaving a group requires sending a message to
- *   all group members - especially for groups not used for a longer time, this is
- *   really unexpected when deletion results in contacting all members again,
- *   (3) only leaving groups is also a valid usecase.
- *
- * To leave a chat explicitly, use dc_remove_contact_from_chat() with
- * chat_id=DC_CONTACT_ID_SELF)
- *
- * @memberof dc_context_t
- * @param context The context object as returned from dc_context_new().
- * @param chat_id The ID of the chat to delete.
- * @return None.
- */
 void dc_delete_chat(dc_context_t* context, uint32_t chat_id)
 {
 	/* Up to 2017-11-02 deleting a group also implied leaving it, see above why we have changed this. */
@@ -125,6 +111,11 @@ void dc_delete_chat(dc_context_t* context, uint32_t chat_id)
 	dc_job_kill_action(context, DC_JOB_HOUSEKEEPING);
 	dc_job_add(context, DC_JOB_HOUSEKEEPING, 0, NULL, DC_HOUSEKEEPING_DELAY_SEC);
 
+	if dc_chat_is_self_talk(obj){
+		dc_msg_t* msg = dc_msg_new(context, DC_MSG_TEXT);
+		dc_stock_str(msg->text, DC_STR_SELF_DELETED_MSG_BODY);
+		dc_add_device_msg(context, Null, msg);
+	}
 cleanup:
 	if (pending_transaction) { dc_sqlite3_rollback(context->sql); }
 	dc_chat_unref(obj);
