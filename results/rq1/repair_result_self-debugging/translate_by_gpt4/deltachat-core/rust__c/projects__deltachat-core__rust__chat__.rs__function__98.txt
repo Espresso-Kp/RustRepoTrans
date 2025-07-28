@@ -1,0 +1,241 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'pub async fn lookup_by_contact(context: &Context, contact_id: ContactId) -> Result<Option<Self>> {\n    let sql = context.inner.sql.as_ref();\n\n    if !sql.is_open().await {\n        return Ok(None); // no database, no chats - this is no error (needed eg. for information)\n    }\n    \n    let query = format!(\n        "SELECT c.id, c.blocked\n        FROM chats c\n        INNER JOIN chats_contacts j ON c.id=j.chat_id\n        WHERE c.type=? AND c.id>? AND j.contact_id=?;"\n    );\n    let paramsv = params![Chattype::Single, DC_CHAT_ID_LAST_SPECIAL as u32, contact_id];\n    let res = sql\n        .query_row_optional(&query, paramsv, |row| {\n            let chat_id: u32 = row.get(0)?;\n            let blocked: i32 = row.get(1)?;\n            \n            let chat_id_blocked = ChatIdBlocked {\n                id: ChatId::new(chat_id),\n                blocked: match blocked {\n                    0 => Blocked::Not,\n                    2 => Blocked::Manually,\n                    _ => Blocked::Deaddrop,\n                },\n            };\n            \n            Ok(chat_id_blocked)\n        })\n        .await?;\n\n    Ok(res.map(|chat_id_blocked| Chat::load_from_db(context, chat_id_blocked.id).await.unwrap())\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error: mismatched closing delimiter: `}`
+    --> src/chat.rs:2506:7
+     |
+2474 | pub async fn lookup_by_contact(context: &Context, contact_id: ContactId) -> Result<Option<Self>> {
+     |                                                                                                  - closing delimiter possibly meant for this
+...
+2506 |     Ok(res.map(|chat_id_blocked| Chat::load_from_db(context, chat_id_blocked.id).await.unwrap())
+     |       ^ unclosed delimiter
+2507 | }
+     | ^ mismatched closing delimiter
+
+error: could not compile `deltachat` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `deltachat` (lib test) due to 1 previous error
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+void dc_lookup_real_nchat_by_contact_id(dc_context_t* context, uint32_t contact_id, uint32_t* ret_chat_id, int* ret_chat_blocked)
+{
+	/* checks for "real" chats or self-chat */
+	sqlite3_stmt* stmt = NULL;
+
+	if (ret_chat_id)      { *ret_chat_id = 0;      }
+	if (ret_chat_blocked) { *ret_chat_blocked = 0; }
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || context->sql->cobj==NULL) {
+		return; /* no database, no chats - this is no error (needed eg. for information) */
+	}
+
+	stmt = dc_sqlite3_prepare(context->sql,
+			"SELECT c.id, c.blocked"
+			" FROM chats c"
+			" INNER JOIN chats_contacts j ON c.id=j.chat_id"
+			" WHERE c.type=" DC_STRINGIFY(DC_CHAT_TYPE_SINGLE) " AND c.id>" DC_STRINGIFY(DC_CHAT_ID_LAST_SPECIAL) " AND j.contact_id=?;");
+	sqlite3_bind_int(stmt, 1, contact_id);
+	if (sqlite3_step(stmt)==SQLITE_ROW) {
+		if (ret_chat_id)      { *ret_chat_id      = sqlite3_column_int(stmt, 0); }
+		if (ret_chat_blocked) { *ret_chat_blocked = sqlite3_column_int(stmt, 1); }
+	}
+	sqlite3_finalize(stmt);
+}
+</c function>
+<rust function signature>
+pub async fn lookup_by_contact(
+        context: &Context,
+        contact_id: ContactId,
+    ) -> Result<Option<Self>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub async fn is_open(&self) -> bool {
+        self.pool.read().await.is_some()
+    }
+
+pub async fn query_row_optional<T, F>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+    ) -> Result<Option<T>>
+    where
+        F: Send + FnOnce(&rusqlite::Row) -> rusqlite::Result<T>,
+        T: Send + 'static,
+    {
+        self.call(move |conn| match conn.query_row(sql.as_ref(), params, f) {
+            Ok(res) => Ok(Some(res)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(rusqlite::Error::InvalidColumnType(_, _, rusqlite::types::Type::Null)) => Ok(None),
+            Err(err) => Err(err.into()),
+        })
+        .await
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+
+pub struct ChatId(u32);
+
+pub(crate) struct ChatIdBlocked {
+    /// Chat ID.
+    pub id: ChatId,
+
+    /// Whether the chat is blocked, unblocked or a contact request.
+    pub blocked: Blocked,
+}
+
+pub struct ContactId(u32);
+
+impl ContactId {
+    /// Undefined contact. Used as a placeholder for trashed messages.
+    pub const UNDEFINED: ContactId = ContactId::new(0);
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+b'pub async fn lookup_by_contact(context: &Context, contact_id: ContactId) -> Result<Option<Self>> {\n    let sql = context.inner.sql.as_ref();\n\n    if !sql.is_open().await {\n        return Ok(None); // no database, no chats - this is no error (needed eg. for information)\n    }\n    \n    let query = format!(\n        "SELECT c.id, c.blocked\n        FROM chats c\n        INNER JOIN chats_contacts j ON c.id=j.chat_id\n        WHERE c.type=? AND c.id>? AND j.contact_id=?;"\n    );\n    let paramsv = params![Chattype::Single, DC_CHAT_ID_LAST_SPECIAL as u32, contact_id];\n    let res = sql\n        .query_row_optional(&query, paramsv, |row| {\n            let chat_id: u32 = row.get(0)?;\n            let blocked: i32 = row.get(1)?;\n            \n            let chat_id_blocked = ChatIdBlocked {\n                id: ChatId::new(chat_id),\n                blocked: match blocked {\n                    0 => Blocked::Not,\n                    2 => Blocked::Manually,\n                    _ => Blocked::Deaddrop,\n                },\n            };\n            \n            Ok(chat_id_blocked)\n        })\n        .await?;\n\n    Ok(res.map(|chat_id_blocked| Chat::load_from_db(context, chat_id_blocked.id).await.unwrap()))\n}'</reapir response>

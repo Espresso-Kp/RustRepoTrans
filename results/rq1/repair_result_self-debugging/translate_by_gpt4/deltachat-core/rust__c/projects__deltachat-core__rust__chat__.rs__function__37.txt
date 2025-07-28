@@ -1,0 +1,333 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'pub async fn get_fresh_msg_cnt(self, context: &Context) -> Result<usize> {\n    let count: usize;\n\n    if self.is_archived_link() {\n        let query = \n            "SELECT COUNT(DISTINCT(m.chat_id))\n            FROM msgs m\n            LEFT JOIN chats c ON m.chat_id=c.id\n            WHERE m.state=10\n            and m.hidden=0\n            AND m.chat_id>9\n            AND c.blocked=0\n            AND c.archived=1;";\n        count = context.inner.sql.count(query, ()).await?;\n    } else {\n        let query = \n            "SELECT COUNT(*) FROM msgs \n            WHERE state=10\n            AND hidden=0\n            AND chat_id=?;";\n        count = context.inner.sql.count(query, &[self.0]).await?;\n    }\n\n    Ok(count)\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error[E0277]: the trait bound `&[u32; 1]: rusqlite::Params` is not satisfied
+    --> src/chat.rs:1004:48
+     |
+1004 |         count = context.inner.sql.count(query, &[self.0]).await?;
+     |                                   -----        ^^^^^^^^^ the trait `rusqlite::Params` is not implemented for `&[u32; 1]`
+     |                                   |
+     |                                   required by a bound introduced by this call
+     |
+note: required by a bound in `Sql::count`
+    --> src/sql.rs:446:57
+     |
+446  |     pub async fn count(&self, query: &str, params: impl rusqlite::Params + Send) -> Result<usize> {
+     |                                                         ^^^^^^^^^^^^^^^^ required by this bound in `Sql::count`
+help: consider removing the leading `&`-reference
+     |
+1004 -         count = context.inner.sql.count(query, &[self.0]).await?;
+1004 +         count = context.inner.sql.count(query, [self.0]).await?;
+     |
+
+error[E0277]: the trait bound `&[u32; 1]: rusqlite::Params` is not satisfied
+    --> src/chat.rs:1004:48
+     |
+1004 |         count = context.inner.sql.count(query, &[self.0]).await?;
+     |                                   -----        ^^^^^^^^^ the trait `rusqlite::Params` is not implemented for `&[u32; 1]`
+     |                                   |
+     |                                   required by a bound introduced by this call
+     |
+note: required by a bound in `sql::Sql::count`
+    --> src/sql.rs:446:57
+     |
+446  |     pub async fn count(&self, query: &str, params: impl rusqlite::Params + Send) -> Result<usize> {
+     |                                                         ^^^^^^^^^^^^^^^^ required by this bound in `Sql::count`
+help: consider removing the leading `&`-reference
+     |
+1004 -         count = context.inner.sql.count(query, &[self.0]).await?;
+1004 +         count = context.inner.sql.count(query, [self.0]).await?;
+     |
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `deltachat` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `deltachat` (lib test) due to 1 previous error
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+int dc_get_fresh_msg_cnt(dc_context_t* context, uint32_t chat_id)
+{
+	int           ret = 0;
+	sqlite3_stmt* stmt = NULL;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC) {
+		goto cleanup;
+	}
+    if (chat_id == DC_CHAT_ID_ARCHIVED_LINK){
+        stmt = dc_sqlite3_prepare(context->sql,       
+        "SELECT COUNT(DISTINCT(m.chat_id))"
+        "FROM msgs m"
+        "LEFT JOIN chats c ON m.chat_id=c.id"
+        "WHERE m.state=10"
+        "and m.hidden=0"
+        "AND m.chat_id>9"
+        "AND c.blocked=0"
+        "AND c.archived=1;");
+    }
+    else{
+        stmt = dc_sqlite3_prepare(context->sql,
+            "SELECT COUNT(*) FROM msgs "
+            " WHERE state=" DC_STRINGIFY(DC_STATE_IN_FRESH)
+            "   AND hidden=0 "
+            "   AND chat_id=?;"); /* we have an index over the state-column, this should be sufficient as there are typically only few fresh messages */
+        sqlite3_bind_int(stmt, 1, chat_id);
+    }
+ 
+
+	if (sqlite3_step(stmt)!=SQLITE_ROW) {
+		goto cleanup;
+	}
+
+	ret = sqlite3_column_int(stmt, 0);
+
+cleanup:
+	sqlite3_finalize(stmt);
+	return ret;
+}
+</c function>
+<rust function signature>
+pub async fn get_fresh_msg_cnt(self, context: &Context) -> Result<usize> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub async fn count(&self, query: &str, params: impl rusqlite::Params + Send) -> Result<usize> {
+        let count: isize = self.query_row(query, params, |row| row.get(0)).await?;
+        Ok(usize::try_from(count)?)
+    }
+
+pub fn is_archived_link(self) -> bool {
+        self == DC_CHAT_ID_ARCHIVED_LINK
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+
+pub async fn count(&self, query: &str, params: impl rusqlite::Params + Send) -> Result<usize> {
+        let count: isize = self.query_row(query, params, |row| row.get(0)).await?;
+        Ok(usize::try_from(count)?)
+    }
+    
+pub struct ChatId(u32);
+
+pub enum MessageState {
+    /// Undefined message state.
+    #[default]
+    Undefined = 0,
+
+    /// Incoming *fresh* message. Fresh messages are neither noticed
+    /// nor seen and are typically shown in notifications.
+    InFresh = 10,
+
+    /// Incoming *noticed* message. E.g. chat opened but message not
+    /// yet read - noticed messages are not counted as unread but did
+    /// not marked as read nor resulted in MDNs.
+    InNoticed = 13,
+
+    /// Incoming message, really *seen* by the user. Marked as read on
+    /// IMAP and MDN may be sent.
+    InSeen = 16,
+
+    /// For files which need time to be prepared before they can be
+    /// sent, the message enters this state before
+    /// OutPending.
+    OutPreparing = 18,
+
+    /// Message saved as draft.
+    OutDraft = 19,
+
+    /// The user has pressed the "send" button but the message is not
+    /// yet sent and is pending in some way. Maybe we're offline (no
+    /// checkmark).
+    OutPending = 20,
+
+    /// *Unrecoverable* error (*recoverable* errors result in pending
+    /// messages).
+    OutFailed = 24,
+
+    /// Outgoing message successfully delivered to server (one
+    /// checkmark). Note, that already delivered messages may get into
+    /// the OutFailed state if we get such a hint from the server.
+    OutDelivered = 26,
+
+    /// Outgoing message read by the recipient (two checkmarks; this
+    /// requires goodwill on the receiver's side)
+    OutMdnRcvd = 28,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+The fixed function is as follows:
+
+```
+pub async fn get_fresh_msg_cnt(self, context: &Context) -> Result<usize> {
+    let query: &str;
+    let params: Vec<Param>;
+    
+    if self.is_archived_link() {
+        query = 
+            "SELECT COUNT(DISTINCT(m.chat_id))
+            FROM msgs m
+            LEFT JOIN chats c ON m.chat_id=c.id
+            WHERE m.state=10
+            and m.hidden=0
+            AND m.chat_id>9
+            AND c.blocked=0
+            AND c.archived=1;";
+        params = Vec::new();    
+    } else {
+        query = 
+            "SELECT COUNT(*) FROM msgs 
+            WHERE state=10
+            AND hidden=0
+            AND chat_id=?;";
+        params = vec![Param::Int(self.0)];
+    }
+
+    let count = context.inner.sql.count(query, params).await?;
+    Ok(count)
+}
+```</reapir response>

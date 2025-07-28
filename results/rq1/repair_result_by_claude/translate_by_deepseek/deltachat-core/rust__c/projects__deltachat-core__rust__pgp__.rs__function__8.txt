@@ -1,0 +1,502 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'pub(crate) fn create_keypair(addr: EmailAddress, keygen_type: KeyGenType) -> Result<KeyPair> {\n    let mut success = 0;\n    let mut seckey = pgp::key::Key::new();\n    let mut pubkey = pgp::key::Key::new();\n    let mut subkey = pgp::key::Key::new();\n    let subkeyid = vec![0u8; PGP_KEY_ID_SIZE];\n    let mut user_id: Option<Vec<u8>> = None;\n    let pubmem = pgp::memory::Memory::new();\n    let secmem = pgp::memory::Memory::new();\n    let pubout = pgp::output::Output::new();\n    let secout = pgp::output::Output::new();\n\n    if addr.is_empty() || pubmem.is_none() || secmem.is_none() || pubout.is_none() || secout.is_none() {\n        return Ok(KeyPair { addr, public: SignedPublicKey::default(), secret: SignedSecretKey::default() });\n    }\n\n    // Generate User ID.\n    user_id = Some(format!("<{}>", addr).into_bytes());\n\n    // Generate two keypairs.\n    if !pgp::rsa::generate_keypair(&seckey, keygen_type.bits(), keygen_type.e(), None, None, None, 0)\n        || !pgp::rsa::generate_keypair(&subkey, keygen_type.bits(), keygen_type.e(), None, None, None, 0) {\n        return Ok(KeyPair { addr, public: SignedPublicKey::default(), secret: SignedSecretKey::default() });\n    }\n\n    // Create public key, bind public subkey to public key.\n    pubkey.typ = pgp::types::Tag::CtPublickey;\n    pubkey.key.pubkey = seckey.key.pubkey.clone();\n    pubkey.pubkeyid = seckey.pubkeyid.clone();\n    pubkey.pubkeyfpr = pgp::fingerprint(&seckey.key.pubkey, 0);\n    add_selfsigned_userid(&seckey, &pubkey, &user_id.unwrap(), 0);\n\n    pubkey.subkeys.push(pgp::subkey::Subkey {\n        key: subkey.key.clone(),\n        id: subkeyid.clone(),\n    });\n\n    pubkey.subkeysigs.push(add_subkey_binding_signature(&pubkey, &subkey, &seckey));\n\n    // Create secret key, bind secret subkey to secret key.\n    seckey.subkeys.push(pgp::subkey::Subkey {\n        key: subkey.key.clone(),\n        id: subkeyid.clone(),\n    });\n\n    seckey.subkeysigs.push(add_subkey_binding_signature(&seckey, &subkey, &seckey));\n\n    // Done with key generation, write binary keys to memory.\n    pgp_writer_set_memory(pubout.as_mut().unwrap(), pubmem.as_mut().unwrap());\n    if !pgp_write_xfer_key(pubout.as_mut().unwrap(), &pubkey, 0)\n        || pubmem.as_ref().unwrap().buf.is_none() || pubmem.as_ref().unwrap().length <= 0 {\n        return Ok(KeyPair { addr, public: SignedPublicKey::default(), secret: SignedSecretKey::default() });\n    }\n\n    pgp_writer_set_memory(secout.as_mut().unwrap(), secmem.as_mut().unwrap());\n    if !pgp_write_xfer_key(secout.as_mut().unwrap(), &seckey, 0)\n        || secmem.as_ref().unwrap().buf.is_none() || secmem.as_ref().unwrap().length <= 0 {\n        return Ok(KeyPair { addr, public: SignedPublicKey::default(), secret: SignedSecretKey::default() });\n    }\n\n    let public_key_binary = pubmem.as_ref().unwrap().buf.unwrap();\n    let secret_key_binary = secmem.as_ref().unwrap().buf.unwrap();\n\n    success = 1;\n\n    Ok(KeyPair { addr, public: SignedPublicKey::from_binary(&public_key_binary)?, secret: SignedSecretKey::from_binary(&secret_key_binary)? })\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error[E0433]: failed to resolve: could not find `memory` in `pgp`
+   --> src/pgp.rs:153:23
+    |
+153 |     let pubmem = pgp::memory::Memory::new();
+    |                       ^^^^^^ could not find `memory` in `pgp`
+
+error[E0433]: failed to resolve: could not find `memory` in `pgp`
+   --> src/pgp.rs:154:23
+    |
+154 |     let secmem = pgp::memory::Memory::new();
+    |                       ^^^^^^ could not find `memory` in `pgp`
+
+error[E0433]: failed to resolve: could not find `rsa` in `pgp`
+   --> src/pgp.rs:166:14
+    |
+166 |     if !pgp::rsa::generate_keypair(&mut seckey, keygen_type as usize, 65537, None, None, None, 0)
+    |              ^^^ could not find `rsa` in `pgp`
+
+error[E0433]: failed to resolve: could not find `rsa` in `pgp`
+   --> src/pgp.rs:167:18
+    |
+167 |         || !pgp::rsa::generate_keypair(&mut subkey, keygen_type as usize, 65537, None, None, None, 0)
+    |                  ^^^ could not find `rsa` in `pgp`
+
+error[E0433]: failed to resolve: could not find `subkey` in `pgp`
+   --> src/pgp.rs:179:30
+    |
+179 |     pubkey.subkeys.push(pgp::subkey::Subkey {
+    |                              ^^^^^^ could not find `subkey` in `pgp`
+
+error[E0433]: failed to resolve: could not find `subkey` in `pgp`
+   --> src/pgp.rs:190:30
+    |
+190 |     seckey.subkeys.push(pgp::subkey::Subkey {
+    |                              ^^^^^^ could not find `subkey` in `pgp`
+
+error[E0433]: failed to resolve: could not find `Key` in `key`
+   --> src/pgp.rs:148:32
+    |
+148 |     let mut seckey = pgp::key::Key::default();
+    |                                ^^^ could not find `Key` in `key`
+
+error[E0433]: failed to resolve: could not find `Key` in `key`
+   --> src/pgp.rs:149:32
+    |
+149 |     let mut pubkey = pgp::key::Key::default();
+    |                                ^^^ could not find `Key` in `key`
+
+error[E0433]: failed to resolve: could not find `Key` in `key`
+   --> src/pgp.rs:150:32
+    |
+150 |     let mut subkey = pgp::key::Key::default();
+    |                                ^^^ could not find `Key` in `key`
+
+error[E0425]: cannot find value `PGP_KEY_ID_SIZE` in this scope
+   --> src/pgp.rs:151:30
+    |
+151 |     let mut subkeyid = [0u8; PGP_KEY_ID_SIZE];
+    |                              ^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: could not find `output` in `pgp`
+   --> src/pgp.rs:155:23
+    |
+155 |     let pubout = pgp::output::Output::new();
+    |                       ^^^^^^ could not find `output` in `pgp`
+    |
+help: consider importing this struct
+    |
+3   + use std::process::Output;
+    |
+help: if you import `Output`, refer to it directly
+    |
+155 -     let pubout = pgp::output::Output::new();
+155 +     let pubout = Output::new();
+    |
+
+error[E0433]: failed to resolve: could not find `output` in `pgp`
+   --> src/pgp.rs:156:23
+    |
+156 |     let secout = pgp::output::Output::new();
+    |                       ^^^^^^ could not find `output` in `pgp`
+    |
+help: consider importing this struct
+    |
+3   + use std::process::Output;
+    |
+help: if you import `Output`, refer to it directly
+    |
+156 -     let secout = pgp::output::Output::new();
+156 +     let secout = Output::new();
+    |
+
+error[E0425]: cannot find function `fingerprint` in crate `pgp`
+   --> src/pgp.rs:176:29
+    |
+176 |     pubkey.pubkeyfpr = pgp::fingerprint(&seckey.key.pubkey, 0);
+    |                             ^^^^^^^^^^^ not found in `pgp`
+
+warning: unused `#[macro_use]` import
+  --> src/lib.rs:31:1
+   |
+31 | #[macro_use]
+   | ^^^^^^^^^^^^
+   |
+note: the lint level is defined here
+  --> src/lib.rs:6:5
+   |
+6  |     unused,
+   |     ^^^^^^
+   = note: `#[warn(unused_imports)]` implied by `#[warn(unused)]`
+
+warning: unused imports: `SecretKeyParamsBuilder`, `SubkeyParamsBuilder`
+  --> src/pgp.rs:11:53
+   |
+11 |     Deserializable, KeyType as PgpKeyType, Message, SecretKeyParamsBuilder, SignedPublicKey,
+   |                                                     ^^^^^^^^^^^^^^^^^^^^^^
+12 |     SignedPublicSubKey, SignedSecretKey, StandaloneSignature, SubkeyParamsBuilder,
+   |                                                               ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `SecretKeyTrait`
+  --> src/pgp.rs:17:58
+   |
+17 |     CompressionAlgorithm, KeyTrait, Mpi, PublicKeyTrait, SecretKeyTrait, StringToKey,
+   |                                                          ^^^^^^^^^^^^^^
+
+error[E0599]: no method named `is_empty` found for struct `deltachat_contact_tools::EmailAddress` in the current scope
+   --> src/pgp.rs:158:13
+    |
+158 |     if addr.is_empty() || pubmem.is_none() || secmem.is_none() || pubout.is_none() || secout.is_none() {
+    |             ^^^^^^^^ method not found in `EmailAddress`
+    |
+help: some of the expressions' fields have a method of the same name
+    |
+158 |     if addr.domain.is_empty() || pubmem.is_none() || secmem.is_none() || pubout.is_none() || secout.is_none() {
+    |             +++++++
+158 |     if addr.local.is_empty() || pubmem.is_none() || secmem.is_none() || pubout.is_none() || secout.is_none() {
+    |             ++++++
+
+error[E0599]: no variant or associated item named `PublicKey` found for enum `KeyType` in the current scope
+   --> src/pgp.rs:173:30
+    |
+173 |     pubkey.typ = PgpKeyType::PublicKey;
+    |                              ^^^^^^^^^ variant or associated item not found in `KeyType`
+
+error[E0425]: cannot find function `add_selfsigned_userid` in this scope
+   --> src/pgp.rs:177:5
+    |
+177 |     add_selfsigned_userid(&mut seckey, &mut pubkey, &user_id.as_ref().unwrap(), 0);
+    |     ^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0560]: struct `StandaloneSignature` has no field named `key`
+   --> src/pgp.rs:185:9
+    |
+185 |         key: subkey.key.pubkey.clone(),
+    |         ^^^ `StandaloneSignature` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+error[E0560]: struct `StandaloneSignature` has no field named `key`
+   --> src/pgp.rs:196:9
+    |
+196 |         key: subkey.key.seckey.clone(),
+    |         ^^^ `StandaloneSignature` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+error[E0425]: cannot find function `pgp_writer_set_memory` in this scope
+   --> src/pgp.rs:201:5
+    |
+201 |     pgp_writer_set_memory(pubout.as_mut().unwrap(), pubmem.as_mut().unwrap());
+    |     ^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `pgp_write_xfer_key` in this scope
+   --> src/pgp.rs:202:9
+    |
+202 |     if !pgp_write_xfer_key(pubout.as_mut().unwrap(), &pubkey, 0) || pubmem.as_ref().unwrap().buf.is_none() || pubmem.as_ref().unwrap().le...
+    |         ^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `pgp_writer_set_memory` in this scope
+   --> src/pgp.rs:206:5
+    |
+206 |     pgp_writer_set_memory(secout.as_mut().unwrap(), secmem.as_mut().unwrap());
+    |     ^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `pgp_write_xfer_key` in this scope
+   --> src/pgp.rs:207:9
+    |
+207 |     if !pgp_write_xfer_key(secout.as_mut().unwrap(), &seckey, 0) || secmem.as_ref().unwrap().buf.is_none() || secmem.as_ref().unwrap().le...
+    |         ^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0560]: struct `SignedPublicKey` has no field named `key`
+   --> src/pgp.rs:219:13
+    |
+219 |             key: pubkey,
+    |             ^^^ `SignedPublicKey` does not have this field
+    |
+    = note: available fields are: `primary_key`, `details`, `public_subkeys`
+
+error[E0560]: struct `SignedPublicKey` has no field named `data`
+   --> src/pgp.rs:220:13
+    |
+220 |             data: public_key_data.to_vec(),
+    |             ^^^^ `SignedPublicKey` does not have this field
+    |
+    = note: available fields are: `primary_key`, `details`, `public_subkeys`
+
+error[E0560]: struct `SignedSecretKey` has no field named `key`
+   --> src/pgp.rs:223:13
+    |
+223 |             key: seckey,
+    |             ^^^ `SignedSecretKey` does not have this field
+    |
+    = note: available fields are: `primary_key`, `details`, `public_subkeys`, `secret_subkeys`
+
+error[E0560]: struct `SignedSecretKey` has no field named `data`
+   --> src/pgp.rs:224:13
+    |
+224 |             data: secret_key_data.to_vec(),
+    |             ^^^^ `SignedSecretKey` does not have this field
+    |
+    = note: available fields are: `primary_key`, `details`, `public_subkeys`, `secret_subkeys`
+
+Some errors have detailed explanations: E0425, E0433, E0560, E0599.
+For more information about an error, try `rustc --explain E0425`.
+warning: `deltachat` (lib) generated 3 warnings
+error: could not compile `deltachat` (lib) due to 26 previous errors; 3 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+error[E0560]: struct `pgp::SignedPublicKey` has no field named `key`
+   --> src/pgp.rs:219:13
+    |
+219 |             key: pubkey,
+    |             ^^^ `pgp::SignedPublicKey` does not have this field
+    |
+    = note: available fields are: `primary_key`, `details`, `public_subkeys`
+
+error[E0560]: struct `pgp::SignedPublicKey` has no field named `data`
+   --> src/pgp.rs:220:13
+    |
+220 |             data: public_key_data.to_vec(),
+    |             ^^^^ `pgp::SignedPublicKey` does not have this field
+    |
+    = note: available fields are: `primary_key`, `details`, `public_subkeys`
+
+error[E0560]: struct `pgp::SignedSecretKey` has no field named `key`
+   --> src/pgp.rs:223:13
+    |
+223 |             key: seckey,
+    |             ^^^ `pgp::SignedSecretKey` does not have this field
+    |
+    = note: available fields are: `primary_key`, `details`, `public_subkeys`, `secret_subkeys`
+
+error[E0560]: struct `pgp::SignedSecretKey` has no field named `data`
+   --> src/pgp.rs:224:13
+    |
+224 |             data: secret_key_data.to_vec(),
+    |             ^^^^ `pgp::SignedSecretKey` does not have this field
+    |
+    = note: available fields are: `primary_key`, `details`, `public_subkeys`, `secret_subkeys`
+
+warning: `deltachat` (lib test) generated 3 warnings (3 duplicates)
+error: could not compile `deltachat` (lib test) due to 26 previous errors; 3 warnings emitted
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+int dc_pgp_create_keypair(dc_context_t* context, const char* addr, dc_key_t* ret_public_key, dc_key_t* ret_private_key)
+{
+	int              success = 0;
+	pgp_key_t        seckey;
+	pgp_key_t        pubkey;
+	pgp_key_t        subkey;
+	uint8_t          subkeyid[PGP_KEY_ID_SIZE];
+	uint8_t*         user_id = NULL;
+	pgp_memory_t*    pubmem = pgp_memory_new();
+	pgp_memory_t*    secmem = pgp_memory_new();
+	pgp_output_t*    pubout = pgp_output_new();
+	pgp_output_t*    secout = pgp_output_new();
+
+	memset(&seckey, 0, sizeof(pgp_key_t));
+	memset(&pubkey, 0, sizeof(pgp_key_t));
+	memset(&subkey, 0, sizeof(pgp_key_t));
+
+	if (context==NULL || addr==NULL || ret_public_key==NULL || ret_private_key==NULL
+	 || pubmem==NULL || secmem==NULL || pubout==NULL || secout==NULL) {
+		goto cleanup;
+	}
+
+	/* Generate User ID.
+	By convention, this is the e-mail-address in angle brackets.
+
+	As the user-id is only decorative in Autocrypt and not needed for Delta Chat,
+	so we _could_ just use sth. that looks like an e-mail-address.
+	This would protect the user's privacy if someone else uploads the keys to keyservers.
+
+	However, as eg. Enigmail displayes the user-id in "Good signature from <user-id>,
+	for now, we decided to leave the address in the user-id */
+	#if 0
+		user_id = (uint8_t*)dc_mprintf("<%08X@%08X.org>", (int)random(), (int)random());
+	#else
+		user_id = (uint8_t*)dc_mprintf("<%s>", addr);
+	#endif
+
+
+	/* generate two keypairs */
+	if (!pgp_rsa_generate_keypair(&seckey, DC_KEYGEN_BITS, DC_KEYGEN_E, NULL, NULL, NULL, 0)
+	 || !pgp_rsa_generate_keypair(&subkey, DC_KEYGEN_BITS, DC_KEYGEN_E, NULL, NULL, NULL, 0)) {
+		goto cleanup;
+	}
+
+
+	/* Create public key, bind public subkey to public key */
+
+	pubkey.type = PGP_PTAG_CT_PUBLIC_KEY;
+	pgp_pubkey_dup(&pubkey.key.pubkey, &seckey.key.pubkey);
+	memcpy(pubkey.pubkeyid, seckey.pubkeyid, PGP_KEY_ID_SIZE);
+	pgp_fingerprint(&pubkey.pubkeyfpr, &seckey.key.pubkey, 0);
+	add_selfsigned_userid(&seckey, &pubkey, (const uint8_t*)user_id, 0/*never expire*/);
+
+	EXPAND_ARRAY((&pubkey), subkey);
+	{
+		pgp_subkey_t* p = &pubkey.subkeys[pubkey.subkeyc++];
+		pgp_pubkey_dup(&p->key.pubkey, &subkey.key.pubkey);
+		pgp_keyid(subkeyid, PGP_KEY_ID_SIZE, &pubkey.key.pubkey, PGP_HASH_SHA1);
+		memcpy(p->id, subkeyid, PGP_KEY_ID_SIZE);
+	}
+
+	EXPAND_ARRAY((&pubkey), subkeysig);
+	add_subkey_binding_signature(&pubkey.subkeysigs[pubkey.subkeysigc++], &pubkey, &subkey, &seckey);
+
+
+	/* Create secret key, bind secret subkey to secret key */
+
+	EXPAND_ARRAY((&seckey), subkey);
+	{
+		pgp_subkey_t* p = &seckey.subkeys[seckey.subkeyc++];
+		pgp_seckey_dup(&p->key.seckey, &subkey.key.seckey);
+		pgp_keyid(subkeyid, PGP_KEY_ID_SIZE, &seckey.key.pubkey, PGP_HASH_SHA1);
+		memcpy(p->id, subkeyid, PGP_KEY_ID_SIZE);
+	}
+
+	EXPAND_ARRAY((&seckey), subkeysig);
+	add_subkey_binding_signature(&seckey.subkeysigs[seckey.subkeysigc++], &seckey, &subkey, &seckey);
+
+
+	/* Done with key generation, write binary keys to memory */
+
+	pgp_writer_set_memory(pubout, pubmem);
+	if (!pgp_write_xfer_key(pubout, &pubkey, 0/*armored*/)
+	 || pubmem->buf==NULL || pubmem->length <= 0) {
+		goto cleanup;
+	}
+
+	pgp_writer_set_memory(secout, secmem);
+	if (!pgp_write_xfer_key(secout, &seckey, 0/*armored*/)
+	 || secmem->buf==NULL || secmem->length <= 0) {
+		goto cleanup;
+	}
+
+	dc_key_set_from_binary(ret_public_key, pubmem->buf, pubmem->length, DC_KEY_PUBLIC);
+	dc_key_set_from_binary(ret_private_key, secmem->buf, secmem->length, DC_KEY_PRIVATE);
+
+	success = 1;
+
+cleanup:
+	if (pubout) { pgp_output_delete(pubout); }
+	if (secout) { pgp_output_delete(secout); }
+	if (pubmem) { pgp_memory_free(pubmem); }
+	if (secmem) { pgp_memory_free(secmem); }
+	pgp_key_free(&seckey); /* not: pgp_keydata_free() which will also free the pointer itself (we created it on the stack) */
+	pgp_key_free(&pubkey);
+	pgp_key_free(&subkey);
+	free(user_id);
+	return success;
+}
+</c function>
+<rust function signature>
+pub(crate) fn create_keypair(addr: EmailAddress, keygen_type: KeyGenType) -> Result<KeyPair> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub struct KeyPair {
+    /// Email address.
+    pub addr: EmailAddress,
+
+    /// Public key.
+    pub public: SignedPublicKey,
+
+    /// Secret key.
+    pub secret: SignedSecretKey,
+}
+
+pub enum KeyGenType {
+    #[default]
+    Default = 0,
+
+    /// 2048-bit RSA.
+    Rsa2048 = 1,
+
+    /// [Ed25519](https://ed25519.cr.yp.to/) signature and X25519 encryption.
+    Ed25519 = 2,
+
+    /// 4096-bit RSA.
+    Rsa4096 = 3,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::collections::{BTreeMap, HashSet};
+use std::io;
+use std::io::Cursor;
+use anyhow::{bail, Context as _, Result};
+use deltachat_contact_tools::EmailAddress;
+use pgp::armor::BlockType;
+use pgp::composed::{
+    Deserializable, KeyType as PgpKeyType, Message, SecretKeyParamsBuilder, SignedPublicKey,
+    SignedPublicSubKey, SignedSecretKey, StandaloneSignature, SubkeyParamsBuilder,
+};
+use pgp::crypto::hash::HashAlgorithm;
+use pgp::crypto::sym::SymmetricKeyAlgorithm;
+use pgp::types::{
+    CompressionAlgorithm, KeyTrait, Mpi, PublicKeyTrait, SecretKeyTrait, StringToKey,
+};
+use rand::{thread_rng, CryptoRng, Rng};
+use tokio::runtime::Handle;
+use crate::constants::KeyGenType;
+use crate::key::{DcKey, Fingerprint};
+use std::io::Read;
+use once_cell::sync::Lazy;
+use tokio::sync::OnceCell;
+use super::*;
+use crate::test_utils::{alice_keypair, bob_keypair};
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the error messages and the provided information, I'll fix the previous response. Here's the corrected Rust function:
+
+```rust
+pub(crate) fn create_keypair(addr: EmailAddress, keygen_type: KeyGenType) -> Result<KeyPair> {
+    let mut rng = thread_rng();
+    let key_params = match keygen_type {
+        KeyGenType::Default | KeyGenType::Rsa2048 => SecretKeyParamsBuilder::default()
+            .key_type(PgpKeyType::Rsa(2048))
+            .can_sign(true)
+            .can_create_certificates(true)
+            .primary_user_id(format!("<{}>", addr))
+            .build()?,
+        KeyGenType::Rsa4096 => SecretKeyParamsBuilder::default()
+            .key_type(PgpKeyType::Rsa(4096))
+            .can_sign(true)
+            .can_create_certificates(true)
+            .primary_user_id(format!("<{}>", addr))
+            .build()?,
+        KeyGenType::Ed25519 => SecretKeyParamsBuilder::default()
+            .key_type(PgpKeyType::EdDSA)
+            .can_sign(true)
+            .can_create_certificates(true)
+            .primary_user_id(format!("<{}>", addr))
+            .build()?,
+    };
+
+    let subkey_params = SubkeyParamsBuilder::default()
+        .key_type(key_params.key_type())
+        .can_encrypt(true)
+        .build()?;
+
+    let secret_key = key_params.generate(&mut rng)?;
+    let public_key = secret_key.public_key();
+    let secret_subkey = subkey_params.generate(&mut rng)?;
+    let public_subkey = secret_subkey.public_key();
+
+    let signed_secret_key = SignedSecretKey::new(secret_key, vec![secret_subkey])?;
+    let signed_public_key = SignedPublicKey::new(public_key, vec![public_subkey])?;
+
+    Ok(KeyPair {
+        addr,
+        public: signed_public_key,
+        secret: signed_secret_key,
+    })
+}
+```
+
+This version addresses the following issues:
+
+1. Removed references to non-existent `pgp::memory`, `pgp::output`, and `pgp::rsa` modules.
+2. Replaced the manual key generation process with the `SecretKeyParamsBuilder` and `SubkeyParamsBuilder` from the `pgp` crate.
+3. Removed references to non-existent functions like `add_selfsigned_userid`, `pgp_writer_set_memory`, and `pgp_write_xfer_key`.
+4. Fixed the `KeyPair` struct creation to use the correct field names for `SignedPublicKey` and `SignedSecretKey`.
+5. Removed the `PGP_KEY_ID_SIZE` constant and related code, as it's not needed in this implementation.
+6. Used the `thread_rng()` function for random number generation.
+7. Implemented different key types based on the `KeyGenType` enum.
+
+This implementation should compile without the previous errors. It uses the `pgp` crate's high-level API to generate keys, which is more idiomatic and safer than the low-level C-style implementation.</reapir response>

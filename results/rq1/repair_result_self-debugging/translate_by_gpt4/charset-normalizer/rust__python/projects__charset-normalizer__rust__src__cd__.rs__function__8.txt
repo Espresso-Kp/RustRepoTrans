@@ -1,0 +1,180 @@
+<message>
+you were asked to translate the given python function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, python function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'pub(crate) fn filter_alt_coherence_matches(results: &CoherenceMatches) -> CoherenceMatches {\n    let mut index_results: HashMap<Language, Vec<f32>> = HashMap::new();\n\n    for coherence_match in results {\n        let language = coherence_match.language;\n        let score = coherence_match.score;\n\n        if index_results.get(language).is_none() {\n            index_results.insert(*language, vec![]);\n        }\n\n        if let Some(scores) = index_results.get_mut(language) {\n            scores.push(score);\n        }\n    }\n\n    if index_results.iter().any(|(_, v)| v.len() > 1) {\n        let mut filtered_results: CoherenceMatches = vec![];\n\n        for (language, scores) in &index_results {\n            filtered_results.push(CoherenceMatch {\n                language: language,\n                score: *scores.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap(),\n            });\n        }\n\n        return filtered_results;\n    }\n    results.clone()\n}'
+</previous response>
+<error message>
+Compiling charset-normalizer-rs v1.0.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/charset-normalizer/rust)
+error[E0507]: cannot move out of `*language` which is behind a shared reference
+   --> src/cd.rs:170:34
+    |
+170 |             index_results.insert(*language, vec![]);
+    |                                  ^^^^^^^^^ move occurs because `*language` has type `Language`, which does not implement the `Copy` trait
+
+error[E0597]: `index_results` does not live long enough
+   --> src/cd.rs:181:35
+    |
+163 |     let mut index_results: HashMap<Language, Vec<f32>> = HashMap::new();
+    |         ----------------- binding `index_results` declared here
+...
+181 |         for (language, scores) in &index_results {
+    |                                   ^^^^^^^^^^^^^^
+    |                                   |
+    |                                   borrowed value does not live long enough
+    |                                   argument requires that `index_results` is borrowed for `'static`
+...
+191 | }
+    | - `index_results` dropped here while still borrowed
+
+Some errors have detailed explanations: E0507, E0597.
+For more information about an error, try `rustc --explain E0507`.
+error: could not compile `charset-normalizer-rs` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `charset-normalizer-rs` (lib test) due to 2 previous errors
+</error message>
+<python function>
+def filter_alt_coherence_matches(results: CoherenceMatches) -> CoherenceMatches:
+    """
+    We shall NOT return "English" in CoherenceMatches because it is an alternative
+    of "English". This function only keeps the best match and remove the em-dash in it.
+    """
+    index_results: Dict[str, List[float]] = dict()
+
+    for result in results:
+        language, ratio = result
+        no_em_name: str = language.replace("", "")
+
+        if no_em_name not in index_results:
+            index_results[no_em_name] = []
+
+        index_results[no_em_name].append(ratio)
+
+    if any(len(index_results[e]) > 1 for e in index_results):
+        filtered_results: CoherenceMatches = []
+
+        for language in index_results:
+            filtered_results.append((language, max(index_results[language])))
+
+        return filtered_results
+
+    return results
+</python function>
+<rust function signature>
+pub(crate) fn filter_alt_coherence_matches(results: &CoherenceMatches) -> CoherenceMatches 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+pub struct CoherenceMatch {
+    pub language: &'static Language,
+    pub score: f32,
+}
+
+pub enum Language {
+    English,
+    German,
+    French,
+    Dutch,
+    Italian,
+    Polish,
+    Spanish,
+    Russian,
+    Japanese,
+    Portuguese,
+    Swedish,
+    Chinese,
+    Ukrainian,
+    Norwegian,
+    Finnish,
+    Vietnamese,
+    Czech,
+    Hungarian,
+    Korean,
+    Indonesian,
+    Turkish,
+    Romanian,
+    Farsi,
+    Arabic,
+    Danish,
+    Serbian,
+    Lithuanian,
+    Slovene,
+    Slovak,
+    Hebrew,
+    Bulgarian,
+    Croatian,
+    Hindi,
+    Estonian,
+    Thai,
+    Greek,
+    Tamil,
+    Kazakh,
+    Unknown,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on your initial function, python function, and the error message, I've revised the rust function in line with the provided dependencies and data type declarations. Here is the corrected version:
+
+```rust
+pub(crate) fn filter_alt_coherence_matches(results: &CoherenceMatches) -> CoherenceMatches {
+    let mut index_results: HashMap<&Language, Vec<f32>> = HashMap::new();
+
+    for coherence_match in results.iter() {
+        let language = coherence_match.language;
+        let score = coherence_match.score;
+        
+        if index_results.get(language).is_none() {
+            index_results.insert(language, vec![]);
+        }
+
+        if let Some(scores) = index_results.get_mut(language) {
+            scores.push(score);
+        }
+    }
+    
+    if index_results.iter().any(|(_, v)| v.len() > 1) {
+        let mut filtered_results: CoherenceMatches = vec![];
+
+        for (&language, scores) in index_results.iter() {
+            filtered_results.push(CoherenceMatch {
+                language,
+                score: *scores.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap(),
+            });
+        }
+
+        return filtered_results;
+    }
+    results.to_vec()
+}
+```
+The main changes that alleviate your errors are:
+
+1. Modified the data type of HashMap key to `&Language`, avoided making a copy of an object that doesn't support the `Copy` trait.
+2. Iterated over a reference to the `results` vector to ensure that data isn't moved during iteration (`for coherence_match in results.iter()`) and matched the python implementation's non-destructive loop.
+3. Iterated using `(&language, scores)` instead of `(language, scores)`, which doesn't require making a copy of a shared reference.
+4. Converted `results` to a vector before returning, following idiomatic Rust style.</reapir response>

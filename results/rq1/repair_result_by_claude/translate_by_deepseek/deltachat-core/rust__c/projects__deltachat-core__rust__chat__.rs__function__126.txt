@@ -1,0 +1,255 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'pub async fn add_contact_to_chat(\n    context: &Context,\n    chat_id: ChatId,\n    contact_id: ContactId,\n) -> Result<()> {\n    let result = add_contact_to_chat_ex(context, chat_id, contact_id, false).await?;\n    if !result {\n        bail!("Failed to add contact to chat");\n    }\n    Ok(())\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error[E0061]: this function takes 5 arguments but 4 arguments were supplied
+    --> src/chat.rs:3678:18
+     |
+3678 |     let result = add_contact_to_chat_ex(context, chat_id, contact_id, false).await?;
+     |                  ^^^^^^^^^^^^^^^^^^^^^^          ------- an argument of type `sync::Sync` is missing
+     |
+note: function defined here
+    --> src/chat.rs:3687:21
+     |
+3687 | pub(crate) async fn add_contact_to_chat_ex(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^
+3688 |     context: &Context,
+     |     -----------------
+3689 |     mut sync: sync::Sync,
+     |     --------------------
+3690 |     chat_id: ChatId,
+     |     ---------------
+3691 |     contact_id: ContactId,
+     |     ---------------------
+3692 |     from_handshake: bool,
+     |     --------------------
+help: provide the argument
+     |
+3678 |     let result = add_contact_to_chat_ex(context, /* sync::Sync */, chat_id, contact_id, false).await?;
+     |                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For more information about this error, try `rustc --explain E0061`.
+error: could not compile `deltachat` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `deltachat` (lib test) due to 1 previous error
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+* If the group is already _promoted_ (any message was sent to the group),
+ * all group members are informed by a special status message that is sent automatically by this function.
+ *
+ * If the group is a verified group, only verified contacts can be added to the group.
+ *
+ * Sends out #DC_EVENT_CHAT_MODIFIED and #DC_EVENT_MSGS_CHANGED if a status message was sent.
+ *
+ * @memberof dc_context_t
+ * @param context The context as created by dc_context_new().
+ * @param chat_id The chat ID to add the contact to.  Must be a group chat.
+ * @param contact_id The contact ID to add to the chat.
+ * @return 1=member added to group, 0=error
+ */
+int dc_add_contact_to_chat(dc_context_t* context, uint32_t chat_id, uint32_t contact_id /*may be DC_CONTACT_ID_SELF*/)
+{
+	return dc_add_contact_to_chat_ex(context, chat_id, contact_id, 0);
+}
+</c function>
+<rust function signature>
+pub async fn add_contact_to_chat(
+    context: &Context,
+    chat_id: ChatId,
+    contact_id: ContactId,
+) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) async fn add_contact_to_chat_ex(
+    context: &Context,
+    mut sync: sync::Sync,
+    chat_id: ChatId,
+    contact_id: ContactId,
+    from_handshake: bool,
+) -> Result<bool> {
+    ensure!(!chat_id.is_special(), "can not add member to special chats");
+    let contact = Contact::get_by_id(context, contact_id).await?;
+    let mut msg = Message::default();
+
+    chat_id.reset_gossiped_timestamp(context).await?;
+
+    // this also makes sure, no contacts are added to special or normal chats
+    let mut chat = Chat::load_from_db(context, chat_id).await?;
+    ensure!(
+        chat.typ == Chattype::Group || chat.typ == Chattype::Broadcast,
+        "{} is not a group/broadcast where one can add members",
+        chat_id
+    );
+    ensure!(
+        Contact::real_exists_by_id(context, contact_id).await? || contact_id == ContactId::SELF,
+        "invalid contact_id {} for adding to group",
+        contact_id
+    );
+    ensure!(!chat.is_mailing_list(), "Mailing lists can't be changed");
+    ensure!(
+        chat.typ != Chattype::Broadcast || contact_id != ContactId::SELF,
+        "Cannot add SELF to broadcast."
+    );
+
+    if !chat.is_self_in_chat(context).await? {
+        context.emit_event(EventType::ErrorSelfNotInGroup(
+            "Cannot add contact to group; self not in group.".into(),
+        ));
+        bail!("can not add contact because the account is not part of the group/broadcast");
+    }
+
+    if from_handshake && chat.param.get_int(Param::Unpromoted).unwrap_or_default() == 1 {
+        chat.param.remove(Param::Unpromoted);
+        chat.update_param(context).await?;
+        let _ = context
+            .sync_qr_code_tokens(Some(chat_id))
+            .await
+            .log_err(context)
+            .is_ok()
+            && context.send_sync_msg().await.log_err(context).is_ok();
+    }
+
+    if context.is_self_addr(contact.get_addr()).await? {
+        // ourself is added using ContactId::SELF, do not add this address explicitly.
+        // if SELF is not in the group, members cannot be added at all.
+        warn!(
+            context,
+            "Invalid attempt to add self e-mail address to group."
+        );
+        return Ok(false);
+    }
+
+    if is_contact_in_chat(context, chat_id, contact_id).await? {
+        if !from_handshake {
+            return Ok(true);
+        }
+    } else {
+        // else continue and send status mail
+        if chat.is_protected() && !contact.is_verified(context).await? {
+            error!(
+                context,
+                "Cannot add non-bidirectionally verified contact {contact_id} to protected chat {chat_id}."
+            );
+            return Ok(false);
+        }
+        if is_contact_in_chat(context, chat_id, contact_id).await? {
+            return Ok(false);
+        }
+        add_to_chat_contacts_table(context, chat_id, &[contact_id]).await?;
+    }
+    if chat.typ == Chattype::Group && chat.is_promoted() {
+        msg.viewtype = Viewtype::Text;
+
+        let contact_addr = contact.get_addr().to_lowercase();
+        msg.text = stock_str::msg_add_member_local(context, &contact_addr, ContactId::SELF).await;
+        msg.param.set_cmd(SystemMessage::MemberAddedToGroup);
+        msg.param.set(Param::Arg, contact_addr);
+        msg.param.set_int(Param::Arg2, from_handshake.into());
+        msg.id = send_msg(context, chat_id, &mut msg).await?;
+        sync = Nosync;
+    }
+    context.emit_event(EventType::ChatModified(chat_id));
+    if sync.into() {
+        chat.sync_contacts(context).await.log_err(context).ok();
+    }
+    Ok(true)
+}
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct ContactId(u32);
+
+pub struct ChatId(u32);
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
+use deltachat_contact_tools::{strip_rtlo_characters, ContactAddress};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+use tokio::task;
+use crate::aheader::EncryptPreference;
+use crate::blob::BlobObject;
+use crate::chatlist::Chatlist;
+use crate::chatlist_events;
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{
+    self, Blocked, Chattype, DC_CHAT_ID_ALLDONE_HINT, DC_CHAT_ID_ARCHIVED_LINK,
+    DC_CHAT_ID_LAST_SPECIAL, DC_CHAT_ID_TRASH, DC_RESEND_USER_AVATAR_DAYS,
+};
+use crate::contact::{self, Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::debug_logging::maybe_set_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::Timer as EphemeralTimer;
+use crate::events::EventType;
+use crate::html::new_html_mimepart;
+use crate::location;
+use crate::log::LogExt;
+use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+use crate::mimefactory::MimeFactory;
+use crate::mimeparser::SystemMessage;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::receive_imf::ReceivedMsg;
+use crate::securejoin::BobState;
+use crate::smtp::send_msg_to_smtp;
+use crate::sql;
+use crate::stock_str;
+use crate::sync::{self, Sync::*, SyncData};
+use crate::tools::{
+    buf_compress, create_id, create_outgoing_rfc724_mid, create_smeared_timestamp,
+    create_smeared_timestamps, get_abs_path, gm2local_offset, improve_single_line_input,
+    smeared_time, time, IsNoneOrEmpty, SystemTime,
+};
+use crate::webxdc::WEBXDC_SUFFIX;
+use CantSendReason::*;
+use super::*;
+use crate::chatlist::get_archived_cnt;
+use crate::constants::{DC_GCL_ARCHIVED_ONLY, DC_GCL_NO_SPECIALS};
+use crate::message::delete_msgs;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{sync, TestContext, TestContextManager};
+use strum::IntoEnumIterator;
+use tokio::fs;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the error message and the provided information, the issue is that the `add_contact_to_chat_ex` function requires 5 arguments, but only 4 are being provided. The missing argument is of type `sync::Sync`. Here's the corrected version of the function:
+
+```rust
+pub async fn add_contact_to_chat(
+    context: &Context,
+    chat_id: ChatId,
+    contact_id: ContactId,
+) -> Result<()> {
+    let result = add_contact_to_chat_ex(context, sync::Sync::default(), chat_id, contact_id, false).await?;
+    if !result {
+        bail!("Failed to add contact to chat");
+    }
+    Ok(())
+}
+```
+
+This version adds the `sync::Sync::default()` argument to the `add_contact_to_chat_ex` function call. The `default()` method is used to create a default instance of `sync::Sync`. If a specific sync value is needed, you may need to adjust this based on your application's requirements.
+
+Also, note that the original C function returns an integer (1 for success, 0 for failure), while the Rust version returns a `Result<()>`. The Rust version throws an error if the operation fails, which is more idiomatic in Rust.</reapir response>

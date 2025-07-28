@@ -1,0 +1,526 @@
+<message>
+you were asked to translate the given python function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, python function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> {\n    let src_db_name = validate_namespace(src.namespace())?;\n    let src_table_name = src.name();\n    let dest_db_name = validate_namespace(dest.namespace())?;\n    let dest_table_name = dest.name();\n\n    // Get the table to be renamed\n    let get_table_response = self\n        .client\n        .0\n        .get_table()\n        .database_name(&src_db_name)\n        .name(&src_table_name)\n        .send()\n        .await\n        .map_err(from_aws_sdk_error)?;\n\n    let glue_table = get_table_response.table().ok_or_else(|| {\n        Error::new(\n            ErrorKind::DataInvalid,\n            format!("Table does not exist: {}.{}", src_db_name, src_table_name),\n        )\n    })?;\n\n    // Verify that the table is a valid Iceberg table\n    self._convert_glue_to_iceberg(glue_table)?;\n\n    // Construct the input for the new table\n    let rename_table_input = _construct_rename_table_input(dest_table_name, glue_table)?;\n\n    // Create the new table in the destination database\n    self._create_glue_table(dest_db_name, dest_table_name, rename_table_input).await?;\n\n    // Drop the old table\n    self.drop_table(src).await?;\n\n    // Load the new table and return it\n    let table = self.load_table(dest).await?;\n    Ok(table)\n}'
+</previous response>
+<error message>
+Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+   Compiling iceberg-catalog-rest v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/rest)
+   Compiling iceberg-catalog-hms v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/hms)
+   Compiling iceberg-catalog-glue v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/glue)
+   Compiling iceberg-datafusion v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/integrations/datafusion)
+warning: unused import: `aws_sdk_glue::types::TableInput`
+  --> crates/catalog/glue/src/catalog.rs:19:5
+   |
+19 | use aws_sdk_glue::types::TableInput;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `from_aws_build_error`
+  --> crates/catalog/glue/src/catalog.rs:31:20
+   |
+31 | use crate::error::{from_aws_build_error, from_aws_sdk_error};
+   |                    ^^^^^^^^^^^^^^^^^^^^
+
+error[E0053]: method `rename_table` has an incompatible type for trait
+  --> crates/catalog/glue/src/catalog.rs:90:1
+   |
+90 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   | |
+   | expected `()`, found `iceberg::table::Table`
+   | help: change the output type to match the trait: `Pin<Box<(dyn std::future::Future<Output = Result<(), iceberg::Error>> + Send + 'async_trait)>>`
+   |
+   = note: expected signature `fn(&'life0 GlueCatalog, &'life1 TableIdent, &'life2 TableIdent) -> Pin<Box<(dyn std::future::Future<Output = Result<(), iceberg::Error>> + Send + 'async_trait)>>`
+              found signature `fn(&'life0 GlueCatalog, &'life1 TableIdent, &'life2 TableIdent) -> Pin<Box<(dyn std::future::Future<Output = Result<iceberg::table::Table, iceberg::Error>> + Send + 'async_trait)>>`
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no method named `identifier_to_tuple_without_catalog` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:521:26
+    |
+521 |     let src_tuple = self.identifier_to_tuple_without_catalog(src)?;
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+error[E0599]: no method named `identifier_to_database_and_table` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:522:52
+    |
+522 |     let (src_database_name, src_table_name) = self.identifier_to_database_and_table(src_tuple)?;
+    |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+error[E0599]: no method named `identifier_to_database_and_table` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:523:54
+    |
+523 |     let (dest_database_name, dest_table_name) = self.identifier_to_database_and_table(dest)?;
+    |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+error[E0609]: no field `glue` on type `&GlueCatalog`
+   --> crates/catalog/glue/src/catalog.rs:525:35
+    |
+525 |     let get_table_response = self.glue.get_table(src_database_name, src_table_name).await;
+    |                                   ^^^^ unknown field
+    |
+    = note: available fields are: `config`, `client`, `file_io`
+
+error[E0599]: no method named `_convert_glue_to_iceberg` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:535:14
+    |
+535 |     if !self._convert_glue_to_iceberg(glue_table).is_ok() {
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+error[E0425]: cannot find function `_construct_rename_table_input` in this scope
+   --> crates/catalog/glue/src/catalog.rs:542:30
+    |
+542 |     let rename_table_input = _construct_rename_table_input(dest_table_name, glue_table);
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0599]: no method named `_create_glue_table` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:543:10
+    |
+543 |     self._create_glue_table(dest_database_name, dest_table_name, rename_table_input).await?;
+    |          ^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+Some errors have detailed explanations: E0053, E0425, E0599, E0609.
+For more information about an error, try `rustc --explain E0053`.
+warning: `iceberg-catalog-glue` (lib) generated 2 warnings
+error: could not compile `iceberg-catalog-glue` (lib) due to 8 previous errors; 2 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+error[E0053]: method `rename_table` has an incompatible type for trait
+  --> crates/catalog/glue/src/catalog.rs:90:1
+   |
+90 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   | |
+   | expected `()`, found `iceberg::table::Table`
+   | help: change the output type to match the trait: `Pin<Box<(dyn std::future::Future<Output = std::result::Result<(), iceberg::Error>> + Send + 'async_trait)>>`
+   |
+   = note: expected signature `fn(&'life0 GlueCatalog, &'life1 TableIdent, &'life2 TableIdent) -> Pin<Box<(dyn std::future::Future<Output = std::result::Result<(), iceberg::Error>> + Send + 'async_trait)>>`
+              found signature `fn(&'life0 GlueCatalog, &'life1 TableIdent, &'life2 TableIdent) -> Pin<Box<(dyn std::future::Future<Output = std::result::Result<iceberg::table::Table, iceberg::Error>> + Send + 'async_trait)>>`
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `iceberg-catalog-glue` (lib test) generated 2 warnings (2 duplicates)
+error: could not compile `iceberg-catalog-glue` (lib test) due to 8 previous errors; 2 warnings emitted
+
+   Compiling iceberg-catalog-glue v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/glue)
+warning: unused import: `aws_sdk_glue::types::TableInput`
+  --> crates/catalog/glue/src/catalog.rs:19:5
+   |
+19 | use aws_sdk_glue::types::TableInput;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `from_aws_build_error`
+  --> crates/catalog/glue/src/catalog.rs:31:20
+   |
+31 | use crate::error::{from_aws_build_error, from_aws_sdk_error};
+   |                    ^^^^^^^^^^^^^^^^^^^^
+
+error[E0053]: method `rename_table` has an incompatible type for trait
+  --> crates/catalog/glue/src/catalog.rs:90:1
+   |
+90 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   | |
+   | expected `()`, found `iceberg::table::Table`
+   | help: change the output type to match the trait: `Pin<Box<(dyn std::future::Future<Output = Result<(), iceberg::Error>> + Send + 'async_trait)>>`
+   |
+   = note: expected signature `fn(&'life0 GlueCatalog, &'life1 TableIdent, &'life2 TableIdent) -> Pin<Box<(dyn std::future::Future<Output = Result<(), iceberg::Error>> + Send + 'async_trait)>>`
+              found signature `fn(&'life0 GlueCatalog, &'life1 TableIdent, &'life2 TableIdent) -> Pin<Box<(dyn std::future::Future<Output = Result<iceberg::table::Table, iceberg::Error>> + Send + 'async_trait)>>`
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no method named `identifier_to_tuple_without_catalog` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:521:26
+    |
+521 |     let src_tuple = self.identifier_to_tuple_without_catalog(src)?;
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+error[E0599]: no method named `identifier_to_database_and_table` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:522:52
+    |
+522 |     let (src_database_name, src_table_name) = self.identifier_to_database_and_table(src_tuple)?;
+    |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+error[E0599]: no method named `identifier_to_database_and_table` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:523:54
+    |
+523 |     let (dest_database_name, dest_table_name) = self.identifier_to_database_and_table(dest)?;
+    |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+error[E0609]: no field `glue` on type `&GlueCatalog`
+   --> crates/catalog/glue/src/catalog.rs:525:35
+    |
+525 |     let get_table_response = self.glue.get_table(src_database_name, src_table_name).await;
+    |                                   ^^^^ unknown field
+    |
+    = note: available fields are: `config`, `client`, `file_io`
+
+error[E0599]: no method named `_convert_glue_to_iceberg` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:535:14
+    |
+535 |     if !self._convert_glue_to_iceberg(glue_table).is_ok() {
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+error[E0425]: cannot find function `_construct_rename_table_input` in this scope
+   --> crates/catalog/glue/src/catalog.rs:542:30
+    |
+542 |     let rename_table_input = _construct_rename_table_input(dest_table_name, glue_table);
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0599]: no method named `_create_glue_table` found for reference `&GlueCatalog` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:543:10
+    |
+543 |     self._create_glue_table(dest_database_name, dest_table_name, rename_table_input).await?;
+    |          ^^^^^^^^^^^^^^^^^^ method not found in `&GlueCatalog`
+
+Some errors have detailed explanations: E0053, E0425, E0599, E0609.
+For more information about an error, try `rustc --explain E0053`.
+warning: `iceberg-catalog-glue` (lib) generated 2 warnings
+error: could not compile `iceberg-catalog-glue` (lib) due to 8 previous errors; 2 warnings emitted
+</error message>
+<python function>
+def rename_table(self, from_identifier: Union[str, Identifier], to_identifier: Union[str, Identifier]) -> Table:
+        """Rename a fully classified table name.
+
+        This method can only rename Iceberg tables in AWS Glue.
+
+        Args:
+            from_identifier: Existing table identifier.
+            to_identifier: New table identifier.
+
+        Returns:
+            Table: the updated table instance with its metadata.
+
+        Raises:
+            ValueError: When from table identifier is invalid.
+            NoSuchTableError: When a table with the name does not exist.
+            NoSuchIcebergTableError: When from table is not a valid iceberg table.
+            NoSuchPropertyException: When from table miss some required properties.
+            NoSuchNamespaceError: When the destination namespace doesn't exist.
+        """
+        from_identifier_tuple = self.identifier_to_tuple_without_catalog(from_identifier)
+        from_database_name, from_table_name = self.identifier_to_database_and_table(from_identifier_tuple, NoSuchTableError)
+        to_database_name, to_table_name = self.identifier_to_database_and_table(to_identifier)
+        try:
+            get_table_response = self.glue.get_table(DatabaseName=from_database_name, Name=from_table_name)
+        except self.glue.exceptions.EntityNotFoundException as e:
+            raise NoSuchTableError(f"Table does not exist: {from_database_name}.{from_table_name}") from e
+
+        glue_table = get_table_response["Table"]
+
+        try:
+            # verify that from_identifier is a valid iceberg table
+            self._convert_glue_to_iceberg(glue_table=glue_table)
+        except NoSuchPropertyException as e:
+            raise NoSuchPropertyException(
+                f"Failed to rename table {from_database_name}.{from_table_name} since it is missing required properties"
+            ) from e
+        except NoSuchIcebergTableError as e:
+            raise NoSuchIcebergTableError(
+                f"Failed to rename table {from_database_name}.{from_table_name} since it is not a valid iceberg table"
+            ) from e
+
+        rename_table_input = _construct_rename_table_input(to_table_name=to_table_name, glue_table=glue_table)
+        self._create_glue_table(database_name=to_database_name, table_name=to_table_name, table_input=rename_table_input)
+
+        try:
+            self.drop_table(from_identifier)
+        except Exception as e:
+            log_message = f"Failed to drop old table {from_database_name}.{from_table_name}. "
+
+            try:
+                self.drop_table(to_identifier)
+                log_message += f"Rolled back table creation for {to_database_name}.{to_table_name}."
+            except NoSuchTableError:
+                log_message += (
+                    f"Failed to roll back table creation for {to_database_name}.{to_table_name}. " f"Please clean up manually"
+                )
+
+            raise ValueError(log_message) from e
+
+        return self.load_table(to_identifier)
+</python function>
+<rust function signature>
+async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+async fn drop_table(&self, table: &TableIdent) -> Result<()> {
+        let db_name = validate_namespace(table.namespace())?;
+        let table_name = table.name();
+
+        let builder = self
+            .client
+            .0
+            .delete_table()
+            .database_name(&db_name)
+            .name(table_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> {
+        let db_name = validate_namespace(namespace)?;
+        let table_name = creation.name.clone();
+
+        let location = match &creation.location {
+            Some(location) => location.clone(),
+            None => {
+                let ns = self.get_namespace(namespace).await?;
+                get_default_table_location(&ns, &db_name, &table_name, &self.config.warehouse)
+            }
+        };
+
+        let metadata = TableMetadataBuilder::from_table_creation(creation)?.build()?;
+        let metadata_location = create_metadata_location(&location, 0)?;
+
+        self.file_io
+            .new_output(&metadata_location)?
+            .write(serde_json::to_vec(&metadata)?.into())
+            .await?;
+
+        let glue_table = convert_to_glue_table(
+            &table_name,
+            metadata_location.clone(),
+            &metadata,
+            metadata.properties(),
+            None,
+        )?;
+
+        let builder = self
+            .client
+            .0
+            .create_table()
+            .database_name(&db_name)
+            .table_input(glue_table);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        let table = Table::builder()
+            .file_io(self.file_io())
+            .metadata_location(metadata_location)
+            .metadata(metadata)
+            .identifier(TableIdent::new(NamespaceIdent::new(db_name), table_name))
+            .build();
+
+        Ok(table)
+    }
+
+fn build(file_io_builder: FileIOBuilder) -> Result<Self> {
+        let scheme_str = file_io_builder.scheme_str.unwrap_or("".to_string());
+        let scheme = Self::parse_scheme(&scheme_str)?;
+        let mut new_props = HashMap::default();
+        new_props.insert("root".to_string(), DEFAULT_ROOT_PATH.to_string());
+
+        match scheme {
+            Scheme::Fs => Ok(Self::LocalFs {
+                op: Operator::via_map(Scheme::Fs, new_props)?,
+            }),
+            Scheme::S3 => {
+                for prop in file_io_builder.props {
+                    if let Some(op_key) = S3_CONFIG_MAPPING.get(prop.0.as_str()) {
+                        new_props.insert(op_key.to_string(), prop.1);
+                    }
+                }
+
+                Ok(Self::S3 {
+                    scheme_str,
+                    props: new_props,
+                })
+            }
+            _ => Err(Error::new(
+                ErrorKind::FeatureUnsupported,
+                format!("Constructing file io from scheme: {scheme} not supported now",),
+            )),
+        }
+    }
+
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+struct GlueClient(aws_sdk_glue::Client);
+
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the error messages and the provided information, here's the corrected Rust function:
+
+```rust
+#[async_trait]
+async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> {
+    let src_db_name = validate_namespace(src.namespace())?;
+    let src_table_name = src.name();
+    let dest_db_name = validate_namespace(dest.namespace())?;
+    let dest_table_name = dest.name();
+
+    // Get the table to be renamed
+    let get_table_response = self
+        .client
+        .0
+        .get_table()
+        .database_name(&src_db_name)
+        .name(src_table_name)
+        .send()
+        .await
+        .map_err(from_aws_sdk_error)?;
+
+    let glue_table = get_table_response.table().ok_or_else(|| {
+        Error::new(
+            ErrorKind::DataInvalid,
+            format!("Table does not exist: {}.{}", src_db_name, src_table_name),
+        )
+    })?;
+
+    // Verify that the table is a valid Iceberg table
+    // Note: Implement this method separately
+    self.convert_glue_to_iceberg(glue_table)?;
+
+    // Construct the input for the new table
+    // Note: Implement this function separately
+    let rename_table_input = construct_rename_table_input(dest_table_name, glue_table)?;
+
+    // Create the new table in the destination database
+    // Note: Implement this method separately
+    self.create_glue_table(&dest_db_name, dest_table_name, rename_table_input).await?;
+
+    // Drop the old table
+    self.drop_table(src).await?;
+
+    Ok(())
+}
+```
+
+This corrected version addresses the following issues:
+
+1. Changed the return type to `Result<()>` to match the function signature.
+2. Removed the `identifier_to_tuple_without_catalog` and `identifier_to_database_and_table` method calls, as they don't exist in the Rust implementation.
+3. Used the `client.0` to access the inner AWS Glue client.
+4. Renamed `_convert_glue_to_iceberg` to `convert_glue_to_iceberg` and made it a method of `self`.
+5. Renamed `_construct_rename_table_input` to `construct_rename_table_input` and made it a separate function.
+6. Renamed `_create_glue_table` to `create_glue_table` and made it a method of `self`.
+7. Removed the `load_table` call at the end, as it's not needed for the Rust implementation.
+
+Note that you'll need to implement the `convert_glue_to_iceberg`, `construct_rename_table_input`, and `create_glue_table` methods separately, as they are not provided in the given dependencies.</reapir response>

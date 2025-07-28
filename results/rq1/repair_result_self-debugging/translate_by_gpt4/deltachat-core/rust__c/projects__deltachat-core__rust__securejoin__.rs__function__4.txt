@@ -1,0 +1,558 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> {\n    info!(context, "Requesting secure-join ...");\n\n    if ensure_secret_key_exists(context).await.is_err() {\n        return Err(Error::from("Failed to ensure secret key."));\n    }\n\n    let qr_scan = check_qr(context, qr).await?;\n\n    match qr_scan.state {\n        QrState::AskVerifyContact | QrState::AskVerifyGroup => {\n            let contact_chat_id = match ChatId::new(qr_scan.id) {\n                Ok(chat_id) => chat_id,\n                Err(err) => {\n                    bail!("Failed to create chat by contact id: {}", err);\n                },\n            };\n\n            let join_vg = qr_scan.state == QrState::AskVerifyGroup;\n\n            if fingerprint_equals_sender(context, qr_scan.fingerprint.clone(), contact_chat_id).await {\n                info!(context, "Taking protocol shortcut.",);\n                let own_fingerprint = get_self_fingerprint(context).await;\n                send_handshake(context, contact_chat_id, join_vg, "vg-request-with-auth", qr_scan.auth.clone(), own_fingerprint, if join_vg { Some(qr_scan.text2.clone()) } else { None }).await?;\n                free(own_fingerprint).await;\n            } else {\n                send_handshake(context, contact_chat_id, join_vg, "vg-request", qr_scan.invitenumber.clone(), None, None).await?;\n            }\n\n            while !context.shall_stop_ongoing.load(Ordering::SeqCst).await {\n                delay_for(Duration::from_micros(300 * 1000)).await;\n            }\n\n            if context.bobs_status.load(Ordering::SeqCst) == BobsStatus::Success as usize {\n                if join_vg {\n                    return get_chat_id_by_grpid(context, qr_scan.text2.clone()).await;\n                }\n                else {\n                    return Ok(contact_chat_id);\n                }\n            }\n\n            qr_scan.lock().await;\n            context.bobs_qr_scan.set(None).await;\n            qr_scan.unlock().await;\n\n            if let Some(err) = context.error() {\n                bail!("Secure-join failed: {}", err);\n            }\n\n        }\n        _ => {\n            bail!("Unknown QR code.");\n        },\n    }\n\n    bail!("Failed to join secure-join.");\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error[E0425]: cannot find function `free` in this scope
+   --> src/securejoin.rs:174:17
+    |
+174 |                 free(own_fingerprint).await;
+    |                 ^^^^ not found in this scope
+    |
+help: consider importing this function
+    |
+5   + use libc::free;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+   --> src/securejoin.rs:179:52
+    |
+179 |             while !context.shall_stop_ongoing.load(Ordering::SeqCst).await {
+    |                                                    ^^^^^^^^ use of undeclared type `Ordering`
+    |
+help: consider importing one of these items
+    |
+5   + use core::cmp::Ordering;
+    |
+5   + use core::sync::atomic::Ordering;
+    |
+5   + use std::cmp::Ordering;
+    |
+5   + use std::sync::atomic::Ordering;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Duration`
+   --> src/securejoin.rs:180:27
+    |
+180 |                 delay_for(Duration::from_micros(300 * 1000)).await;
+    |                           ^^^^^^^^ use of undeclared type `Duration`
+    |
+help: consider importing one of these items
+    |
+5   + use chrono::Duration;
+    |
+5   + use core::time::Duration;
+    |
+5   + use std::time::Duration;
+    |
+5   + use tokio::time::Duration;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+   --> src/securejoin.rs:183:41
+    |
+183 |             if context.bobs_status.load(Ordering::SeqCst) == BobsStatus::Success as usize {
+    |                                         ^^^^^^^^ use of undeclared type `Ordering`
+    |
+help: consider importing one of these items
+    |
+5   + use core::cmp::Ordering;
+    |
+5   + use core::sync::atomic::Ordering;
+    |
+5   + use std::cmp::Ordering;
+    |
+5   + use std::sync::atomic::Ordering;
+    |
+
+error[E0425]: cannot find function `get_chat_id_by_grpid` in this scope
+   --> src/securejoin.rs:185:28
+    |
+185 |                     return get_chat_id_by_grpid(context, qr_scan.text2.clone()).await;
+    |                            ^^^^^^^^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this function
+    |
+5   + use crate::chat::get_chat_id_by_grpid;
+    |
+
+error[E0277]: the trait bound `str: StdError` is not satisfied
+   --> src/securejoin.rs:154:20
+    |
+154 |         return Err(Error::from("Failed to ensure secret key."));
+    |                    ^^^^^ the trait `StdError` is not implemented for `str`, which is required by `anyhow::Error: From<&str>`
+    |
+    = help: the trait `From<E>` is implemented for `anyhow::Error`
+    = note: required for `&str` to implement `StdError`
+    = note: required for `anyhow::Error` to implement `From<&str>`
+
+error[E0609]: no field `state` on type `qr::Qr`
+   --> src/securejoin.rs:159:19
+    |
+159 |     match qr_scan.state {
+    |                   ^^^^^ unknown field
+
+error[E0609]: no field `id` on type `qr::Qr`
+   --> src/securejoin.rs:161:61
+    |
+161 |             let contact_chat_id = match ChatId::new(qr_scan.id) {
+    |                                                             ^^ unknown field
+
+error[E0308]: mismatched types
+   --> src/securejoin.rs:162:17
+    |
+161 |             let contact_chat_id = match ChatId::new(qr_scan.id) {
+    |                                         ----------------------- this expression has type `chat::ChatId`
+162 |                 Ok(chat_id) => chat_id,
+    |                 ^^^^^^^^^^^ expected `ChatId`, found `Result<_, _>`
+    |
+    = note: expected struct `chat::ChatId`
+                 found enum `std::result::Result<_, _>`
+
+error[E0308]: mismatched types
+   --> src/securejoin.rs:163:17
+    |
+161 |             let contact_chat_id = match ChatId::new(qr_scan.id) {
+    |                                         ----------------------- this expression has type `chat::ChatId`
+162 |                 Ok(chat_id) => chat_id,
+163 |                 Err(err) => {
+    |                 ^^^^^^^^ expected `ChatId`, found `Result<_, _>`
+    |
+    = note: expected struct `chat::ChatId`
+                 found enum `std::result::Result<_, _>`
+
+error[E0609]: no field `state` on type `qr::Qr`
+   --> src/securejoin.rs:168:35
+    |
+168 |             let join_vg = qr_scan.state == QrState::AskVerifyGroup;
+    |                                   ^^^^^ unknown field
+
+error[E0433]: failed to resolve: use of undeclared type `QrState`
+   --> src/securejoin.rs:168:44
+    |
+168 |             let join_vg = qr_scan.state == QrState::AskVerifyGroup;
+    |                                            ^^^^^^^ use of undeclared type `QrState`
+
+error[E0609]: no field `fingerprint` on type `qr::Qr`
+   --> src/securejoin.rs:170:59
+    |
+170 |             if fingerprint_equals_sender(context, qr_scan.fingerprint.clone(), contact_chat_id).await {
+    |                                                           ^^^^^^^^^^^ unknown field
+
+error[E0425]: cannot find function `fingerprint_equals_sender` in this scope
+   --> src/securejoin.rs:170:16
+    |
+170 |             if fingerprint_equals_sender(context, qr_scan.fingerprint.clone(), contact_chat_id).await {
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0609]: no field `auth` on type `qr::Qr`
+   --> src/securejoin.rs:173:99
+    |
+173 | ...   send_handshake(context, contact_chat_id, join_vg, "vg-request-with-auth", qr_scan.auth.clone(), own_fingerprint, if join_vg { Some(...
+    |                                                                                         ^^^^ unknown field
+
+error[E0609]: no field `text2` on type `qr::Qr`
+   --> src/securejoin.rs:173:156
+    |
+173 | ...auth.clone(), own_fingerprint, if join_vg { Some(qr_scan.text2.clone()) } else { None }).await?;
+    |                                                             ^^^^^ unknown field
+
+error[E0425]: cannot find function `send_handshake` in this scope
+   --> src/securejoin.rs:173:17
+    |
+173 | ...   send_handshake(context, contact_chat_id, join_vg, "vg-request-with-auth", qr_scan.auth.clone(), own_fingerprint, if join_vg { Some(...
+    |       ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0609]: no field `invitenumber` on type `qr::Qr`
+   --> src/securejoin.rs:176:89
+    |
+176 |                 send_handshake(context, contact_chat_id, join_vg, "vg-request", qr_scan.invitenumber.clone(), None, None).await?;
+    |                                                                                         ^^^^^^^^^^^^ unknown field
+
+error[E0425]: cannot find function `send_handshake` in this scope
+   --> src/securejoin.rs:176:17
+    |
+176 |                 send_handshake(context, contact_chat_id, join_vg, "vg-request", qr_scan.invitenumber.clone(), None, None).await?;
+    |                 ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0615]: attempted to take value of method `shall_stop_ongoing` on type `&context::Context`
+   --> src/securejoin.rs:179:28
+    |
+179 |             while !context.shall_stop_ongoing.load(Ordering::SeqCst).await {
+    |                            ^^^^^^^^^^^^^^^^^^ method, not a field
+    |
+help: use parentheses to call the method
+    |
+179 |             while !context.shall_stop_ongoing().load(Ordering::SeqCst).await {
+    |                                              ++
+
+error[E0425]: cannot find function `delay_for` in this scope
+   --> src/securejoin.rs:180:17
+    |
+180 |                 delay_for(Duration::from_micros(300 * 1000)).await;
+    |                 ^^^^^^^^^ not found in this scope
+
+error[E0609]: no field `bobs_status` on type `&context::Context`
+   --> src/securejoin.rs:183:24
+    |
+183 |             if context.bobs_status.load(Ordering::SeqCst) == BobsStatus::Success as usize {
+    |                        ^^^^^^^^^^^ unknown field
+    |
+    = note: available field is: `inner`
+    = note: available fields are: `blobdir`, `sql`, `smeared_timestamp`, `generating_key_mutex`, `oauth2_mutex` ... and 17 others
+
+error[E0433]: failed to resolve: use of undeclared type `BobsStatus`
+   --> src/securejoin.rs:183:62
+    |
+183 |             if context.bobs_status.load(Ordering::SeqCst) == BobsStatus::Success as usize {
+    |                                                              ^^^^^^^^^^
+    |                                                              |
+    |                                                              use of undeclared type `BobsStatus`
+    |                                                              help: a struct with a similar name exists: `BobState`
+
+error[E0609]: no field `text2` on type `qr::Qr`
+   --> src/securejoin.rs:185:66
+    |
+185 |                     return get_chat_id_by_grpid(context, qr_scan.text2.clone()).await;
+    |                                                                  ^^^^^ unknown field
+
+error[E0599]: no method named `lock` found for enum `qr::Qr` in the current scope
+   --> src/securejoin.rs:192:21
+    |
+192 |             qr_scan.lock().await;
+    |                     ^^^^ method not found in `qr::Qr`
+    |
+   ::: src/qr.rs:44:1
+    |
+44  | pub enum Qr {
+    | ----------- method `lock` not found for this enum
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+    = note: the following trait defines an item `lock`, perhaps you need to implement it:
+            candidate #1: `parking_lot::lock_api::RawMutex`
+
+error[E0609]: no field `bobs_qr_scan` on type `&context::Context`
+   --> src/securejoin.rs:193:21
+    |
+193 |             context.bobs_qr_scan.set(None).await;
+    |                     ^^^^^^^^^^^^ unknown field
+    |
+    = note: available field is: `inner`
+    = note: available fields are: `blobdir`, `sql`, `smeared_timestamp`, `generating_key_mutex`, `oauth2_mutex` ... and 17 others
+
+error[E0599]: no method named `unlock` found for enum `qr::Qr` in the current scope
+   --> src/securejoin.rs:194:21
+    |
+194 |             qr_scan.unlock().await;
+    |                     ^^^^^^ method not found in `qr::Qr`
+    |
+   ::: src/qr.rs:44:1
+    |
+44  | pub enum Qr {
+    | ----------- method `unlock` not found for this enum
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+    = note: the following traits define an item `unlock`, perhaps you need to implement one of them:
+            candidate #1: `parking_lot::lock_api::RawMutex`
+            candidate #2: `SecretKeyTrait`
+
+error[E0599]: no method named `error` found for reference `&context::Context` in the current scope
+   --> src/securejoin.rs:196:40
+    |
+196 |             if let Some(err) = context.error() {
+    |                                        ^^^^^ method not found in `&Context`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+    = note: the following traits define an item `error`, perhaps you need to implement one of them:
+            candidate #1: `der::reader::Reader`
+            candidate #2: `der::reader::Reader`
+
+error[E0609]: no field `state` on type `Qr`
+   --> src/securejoin.rs:159:19
+    |
+159 |     match qr_scan.state {
+    |                   ^^^^^ unknown field
+
+error[E0609]: no field `id` on type `Qr`
+   --> src/securejoin.rs:161:61
+    |
+161 |             let contact_chat_id = match ChatId::new(qr_scan.id) {
+    |                                                             ^^ unknown field
+
+error[E0308]: mismatched types
+   --> src/securejoin.rs:162:17
+    |
+161 |             let contact_chat_id = match ChatId::new(qr_scan.id) {
+    |                                         ----------------------- this expression has type `ChatId`
+162 |                 Ok(chat_id) => chat_id,
+    |                 ^^^^^^^^^^^ expected `ChatId`, found `Result<_, _>`
+    |
+    = note: expected struct `ChatId`
+                 found enum `std::result::Result<_, _>`
+
+error[E0308]: mismatched types
+   --> src/securejoin.rs:163:17
+    |
+161 |             let contact_chat_id = match ChatId::new(qr_scan.id) {
+    |                                         ----------------------- this expression has type `ChatId`
+162 |                 Ok(chat_id) => chat_id,
+163 |                 Err(err) => {
+    |                 ^^^^^^^^ expected `ChatId`, found `Result<_, _>`
+    |
+    = note: expected struct `ChatId`
+                 found enum `std::result::Result<_, _>`
+
+error[E0609]: no field `state` on type `Qr`
+   --> src/securejoin.rs:168:35
+    |
+168 |             let join_vg = qr_scan.state == QrState::AskVerifyGroup;
+    |                                   ^^^^^ unknown field
+
+error[E0609]: no field `fingerprint` on type `Qr`
+   --> src/securejoin.rs:170:59
+    |
+170 |             if fingerprint_equals_sender(context, qr_scan.fingerprint.clone(), contact_chat_id).await {
+    |                                                           ^^^^^^^^^^^ unknown field
+
+error[E0609]: no field `auth` on type `Qr`
+   --> src/securejoin.rs:173:99
+    |
+173 | ...   send_handshake(context, contact_chat_id, join_vg, "vg-request-with-auth", qr_scan.auth.clone(), own_fingerprint, if join_vg { Some(...
+    |                                                                                         ^^^^ unknown field
+
+error[E0609]: no field `text2` on type `Qr`
+   --> src/securejoin.rs:173:156
+    |
+173 | ...auth.clone(), own_fingerprint, if join_vg { Some(qr_scan.text2.clone()) } else { None }).await?;
+    |                                                             ^^^^^ unknown field
+
+error[E0609]: no field `invitenumber` on type `Qr`
+   --> src/securejoin.rs:176:89
+    |
+176 |                 send_handshake(context, contact_chat_id, join_vg, "vg-request", qr_scan.invitenumber.clone(), None, None).await?;
+    |                                                                                         ^^^^^^^^^^^^ unknown field
+
+error[E0609]: no field `text2` on type `Qr`
+   --> src/securejoin.rs:185:66
+    |
+185 |                     return get_chat_id_by_grpid(context, qr_scan.text2.clone()).await;
+    |                                                                  ^^^^^ unknown field
+
+error[E0599]: no method named `lock` found for enum `Qr` in the current scope
+   --> src/securejoin.rs:192:21
+    |
+192 |             qr_scan.lock().await;
+    |                     ^^^^ method not found in `Qr`
+    |
+   ::: src/qr.rs:44:1
+    |
+44  | pub enum Qr {
+    | ----------- method `lock` not found for this enum
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+    = note: the following trait defines an item `lock`, perhaps you need to implement it:
+            candidate #1: `parking_lot::lock_api::RawMutex`
+
+error[E0599]: no method named `unlock` found for enum `Qr` in the current scope
+   --> src/securejoin.rs:194:21
+    |
+194 |             qr_scan.unlock().await;
+    |                     ^^^^^^ method not found in `Qr`
+    |
+   ::: src/qr.rs:44:1
+    |
+44  | pub enum Qr {
+    | ----------- method `unlock` not found for this enum
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+    = note: the following traits define an item `unlock`, perhaps you need to implement one of them:
+            candidate #1: `parking_lot::lock_api::RawMutex`
+            candidate #2: `SecretKeyTrait`
+
+error[E0433]: failed to resolve: use of undeclared type `QrState`
+   --> src/securejoin.rs:160:9
+    |
+160 |         QrState::AskVerifyContact | QrState::AskVerifyGroup => {
+    |         ^^^^^^^ use of undeclared type `QrState`
+
+error[E0433]: failed to resolve: use of undeclared type `QrState`
+   --> src/securejoin.rs:160:37
+    |
+160 |         QrState::AskVerifyContact | QrState::AskVerifyGroup => {
+    |                                     ^^^^^^^ use of undeclared type `QrState`
+
+Some errors have detailed explanations: E0277, E0308, E0425, E0433, E0599, E0609, E0615.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `deltachat` (lib) due to 30 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `deltachat` (lib test) due to 30 previous errors
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+uint32_t dc_join_securejoin(dc_context_t* context, const char* qr)
+{
+	/* ==========================================================
+	   ====             Bob - the joiner's side             =====
+	   ====   Step 2 in "Setup verified contact" protocol   =====
+	   ========================================================== */
+
+	int       ret_chat_id = 0;
+	int       ongoing_allocated = 0;
+	uint32_t  contact_chat_id = 0;
+	int       join_vg = 0;
+	dc_lot_t* qr_scan = NULL;
+	int       qr_locked = 0;
+	#define   LOCK_QR    { pthread_mutex_lock(&context->bobs_qr_critical); qr_locked = 1; }
+	#define   UNLOCK_QR  if (qr_locked) { pthread_mutex_unlock(&context->bobs_qr_critical); qr_locked = 0; }
+	#define   CHECK_EXIT if (context->shall_stop_ongoing) { goto cleanup; }
+
+	dc_log_info(context, 0, "Requesting secure-join ...");
+
+	dc_ensure_secret_key_exists(context);
+
+	if ((ongoing_allocated=dc_alloc_ongoing(context))==0) {
+		goto cleanup;
+	}
+
+	if (((qr_scan=dc_check_qr(context, qr))==NULL)
+	 || (qr_scan->state!=DC_QR_ASK_VERIFYCONTACT && qr_scan->state!=DC_QR_ASK_VERIFYGROUP)) {
+		dc_log_error(context, 0, "Unknown QR code.");
+		goto cleanup;
+	}
+
+	if ((contact_chat_id=dc_create_chat_by_contact_id(context, qr_scan->id))==0) {
+		dc_log_error(context, 0, "Unknown contact.");
+		goto cleanup;
+	}
+
+	CHECK_EXIT
+
+	join_vg = (qr_scan->state==DC_QR_ASK_VERIFYGROUP);
+
+	context->bobs_status = 0;
+	LOCK_QR
+		context->bobs_qr_scan = qr_scan;
+	UNLOCK_QR
+
+	if (fingerprint_equals_sender(context, qr_scan->fingerprint, contact_chat_id)) {
+		// the scanned fingerprint matches Alice's key, we can proceed to step 4b) directly and save two mails
+		dc_log_info(context, 0, "Taking protocol shortcut.");
+		context->bob_expects = DC_VC_CONTACT_CONFIRM;
+		context->cb(context, DC_EVENT_SECUREJOIN_JOINER_PROGRESS, chat_id_2_contact_id(context, contact_chat_id), 400);
+		char* own_fingerprint = get_self_fingerprint(context);
+		send_handshake_msg(context, contact_chat_id, join_vg? "vg-request-with-auth" : "vc-request-with-auth",
+			qr_scan->auth, own_fingerprint, join_vg? qr_scan->text2 : NULL); // Bob -> Alice
+		free(own_fingerprint);
+	}
+	else {
+		context->bob_expects = DC_VC_AUTH_REQUIRED;
+		send_handshake_msg(context, contact_chat_id, join_vg? "vg-request" : "vc-request",
+			qr_scan->invitenumber, NULL, NULL); // Bob -> Alice
+	}
+
+	while (1) {
+		CHECK_EXIT
+
+		usleep(300*1000); // 0.3 seconds
+	}
+
+cleanup:
+	context->bob_expects = 0;
+
+	if (context->bobs_status==DC_BOB_SUCCESS) {
+		if (join_vg) {
+			ret_chat_id = dc_get_chat_id_by_grpid(context, qr_scan->text2, NULL, NULL);
+		}
+		else {
+			ret_chat_id = contact_chat_id;
+		}
+	}
+
+	LOCK_QR
+		context->bobs_qr_scan = NULL;
+	UNLOCK_QR
+
+	dc_lot_unref(qr_scan);
+
+	if (ongoing_allocated) { dc_free_ongoing(context); }
+	return ret_chat_id;
+}
+</c function>
+<rust function signature>
+pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn error(&self) -> Option<String> {
+        self.error.clone()
+    }
+
+async fn securejoin(context: &Context, qr: &str) -> Result<ChatId> {
+    /*========================================================
+    ====             Bob - the joiner's side             =====
+    ====   Step 2 in "Setup verified contact" protocol   =====
+    ========================================================*/
+
+    info!(context, "Requesting secure-join ...",);
+    let qr_scan = check_qr(context, qr).await?;
+
+    let invite = QrInvite::try_from(qr_scan)?;
+
+    bob::start_protocol(context, invite).await
+}
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use anyhow::{bail, Context as _, Error, Result};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use crate::aheader::EncryptPreference;
+use crate::chat::{self, Chat, ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::e2ee::ensure_secret_key_exists;
+use crate::events::EventType;
+use crate::headerdef::HeaderDef;
+use crate::key::{load_self_public_key, DcKey, Fingerprint};
+use crate::message::{Message, Viewtype};
+use crate::mimeparser::{MimeMessage, SystemMessage};
+use crate::param::Param;
+use crate::peerstate::Peerstate;
+use crate::qr::check_qr;
+use crate::securejoin::bob::JoinerProgress;
+use crate::stock_str;
+use crate::sync::Sync::*;
+use crate::token;
+use crate::tools::time;
+use bobstate::BobState;
+use qrinvite::QrInvite;
+use crate::token::Namespace;
+use deltachat_contact_tools::{ContactAddress, EmailAddress};
+use super::*;
+use crate::chat::{remove_contact_from_chat, CantSendReason};
+use crate::chatlist::Chatlist;
+use crate::constants::{self, Chattype};
+use crate::imex::{imex, ImexMode};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::{self, chat_protection_enabled};
+use crate::test_utils::get_chat_msg;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+use std::collections::HashSet;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+b'pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> {\n    info!(context, "Requesting secure-join ...");\n\n    if ensure_secret_key_exists(context).await.is_err() {\n        return Err(Error::new("Failed to ensure secret key."));\n    }\n\n    let qr_scan = check_qr(context, qr).await?;\n\n    let invite = QrInvite::try_from(qr_scan)?;\n\n    bob::start_protocol(context, invite).await\n}'</reapir response>

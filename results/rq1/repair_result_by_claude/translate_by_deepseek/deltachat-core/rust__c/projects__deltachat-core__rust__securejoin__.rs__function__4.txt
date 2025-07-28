@@ -1,0 +1,520 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'use anyhow::{bail, Context as _, Error, Result};\nuse crate::chat::{ChatId, ProtectionStatus};\nuse crate::context::Context;\nuse crate::e2ee::ensure_secret_key_exists;\nuse crate::events::EventType;\nuse crate::qr::check_qr;\nuse crate::securejoin::bob::JoinerProgress;\nuse crate::stock_str::{self, chat_id_2_contact_id};\nuse std::sync::Arc;\nuse std::time::Duration;\n\npub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> {\n    /* ==========================================================\n       ====             Bob - the joiner\'s side             =====\n       ====   Step 2 in "Setup verified contact" protocol   =====\n       ========================================================== */\n\n    let mut ret_chat_id = 0;\n    let mut ongoing_allocated = 0;\n    let mut contact_chat_id = 0;\n    let mut join_vg = 0;\n    let mut qr_scan = None;\n    let mut qr_locked = 0;\n    #[allow(unused_macros)]\n    macro_rules! LOCK_QR {\n        () => {\n            if qr_locked == 0 {\n                qr_locked = 1;\n                context.inner.bobs_qr_critical.lock().await;\n            }\n        };\n    }\n    #[allow(unused_macros)]\n    macro_rules! UNLOCK_QR {\n        () => {\n            if qr_locked == 1 {\n                context.inner.bobs_qr_critical.unlock().await;\n                qr_locked = 0;\n            }\n        };\n    }\n    #[allow(unused_macros)]\n    macro_rules! CHECK_EXIT {\n        () => {\n            if context.inner.shall_stop_ongoing {\n                goto_cleanup!();\n            }\n        };\n    }\n\n    info!(context, "Requesting secure-join ...",);\n\n    ensure_secret_key_exists(context).await?;\n\n    if (ongoing_allocated = dc_alloc_ongoing(context).await?) == 0 {\n        goto_cleanup!();\n    }\n\n    if (qr_scan = check_qr(context, qr).await?) == None\n        || qr_scan.as_ref().unwrap().state != DC_QR_ASK_VERIFYCONTACT && qr_scan.as_ref().unwrap().state != DC_QR_ASK_VERIFYGROUP {\n        error!(context, "Unknown QR code.",);\n        goto_cleanup!();\n    }\n\n    if (contact_chat_id = dc_create_chat_by_contact_id(context, qr_scan.as_ref().unwrap().id).await?) == 0 {\n        error!(context, "Unknown contact.",);\n        goto_cleanup!();\n    }\n\n    CHECK_EXIT!();\n\n    join_vg = (qr_scan.as_ref().unwrap().state == DC_QR_ASK_VERIFYGROUP);\n\n    context.inner.bobs_status = 0;\n    LOCK_QR!();\n    context.inner.bobs_qr_scan = qr_scan.clone();\n    UNLOCK_QR!();\n\n    if fingerprint_equals_sender(context, qr_scan.as_ref().unwrap().fingerprint.clone(), contact_chat_id).await? {\n        // the scanned fingerprint matches Alice\'s key, we can proceed to step 4b) directly and save two mails\n        info!(context, "Taking protocol shortcut.",);\n        context.inner.bob_expects = DC_VC_CONTACT_CONFIRM;\n        context.inner.cb(context, DC_EVENT_SECUREJOIN_JOINER_PROGRESS, chat_id_2_contact_id(context, contact_chat_id), 400).await;\n        let own_fingerprint = get_self_fingerprint(context).await;\n        send_handshake_msg(context, contact_chat_id, join_vg? "vg-request-with-auth" : "vc-request-with-auth",\n            qr_scan.as_ref().unwrap().auth.clone(), own_fingerprint, join_vg? qr_scan.as_ref().unwrap().text2.clone() : None).await; // Bob -> Alice\n        free(own_fingerprint).await;\n    } else {\n        context.inner.bob_expects = DC_VC_AUTH_REQUIRED;\n        send_handshake_msg(context, contact_chat_id, join_vg? "vg-request" : "vc-request",\n            qr_scan.as_ref().unwrap().invitenumber.clone(), None, None).await; // Bob -> Alice\n    }\n\n    loop {\n        CHECK_EXIT!();\n\n        tokio::time::sleep(Duration::from_millis(300)).await; // 0.3 seconds\n    }\n\ncleanup:\n    context.inner.bob_expects = 0;\n\n    if context.inner.bobs_status == DC_BOB_SUCCESS {\n        if join_vg {\n            ret_chat_id = dc_get_chat_id_by_grpid(context, qr_scan.as_ref().unwrap().text2.clone(), None, None).await?;\n        } else {\n            ret_chat_id = contact_chat_id;\n        }\n    }\n\n    LOCK_QR!();\n    context.inner.bobs_qr_scan = None;\n    UNLOCK_QR!();\n\n    dc_lot_unref(qr_scan.clone()).await?;\n\n    if ongoing_allocated { dc_free_ongoing(context).await?; }\n    Ok(ret_chat_id)\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error: expected one of `!` or `::`, found `s`
+ --> src/securejoin.rs:6:1
+  |
+5 | u
+  |  - expected one of `!` or `::`
+6 | s
+  | ^ unexpected token
+
+error[E0432]: unresolved import `crate::securejoin::BobState`
+  --> src/chat.rs:42:5
+   |
+42 | use crate::securejoin::BobState;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `BobState` in `securejoin`
+
+error[E0432]: unresolved imports `crate::securejoin::handle_securejoin_handshake`, `crate::securejoin::observe_securejoin_on_other_device`
+  --> src/receive_imf.rs:38:31
+   |
+38 | use crate::securejoin::{self, handle_securejoin_handshake, observe_securejoin_on_other_device};
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `observe_securejoin_on_other_device` in `securejoin`
+   |                               |
+   |                               no `handle_securejoin_handshake` in `securejoin`
+
+error[E0433]: failed to resolve: could not find `HandshakeMessage` in `securejoin`
+   --> src/receive_imf.rs:373:25
+    |
+373 |             securejoin::HandshakeMessage::Done | securejoin::HandshakeMessage::Ignore => {
+    |                         ^^^^^^^^^^^^^^^^ could not find `HandshakeMessage` in `securejoin`
+
+error[E0433]: failed to resolve: could not find `HandshakeMessage` in `securejoin`
+   --> src/receive_imf.rs:373:62
+    |
+373 |             securejoin::HandshakeMessage::Done | securejoin::HandshakeMessage::Ignore => {
+    |                                                              ^^^^^^^^^^^^^^^^ could not find `HandshakeMessage` in `securejoin`
+
+error[E0433]: failed to resolve: could not find `HandshakeMessage` in `securejoin`
+   --> src/receive_imf.rs:380:58
+    |
+380 |                     needs_delete_job: res == securejoin::HandshakeMessage::Done,
+    |                                                          ^^^^^^^^^^^^^^^^ could not find `HandshakeMessage` in `securejoin`
+
+error[E0433]: failed to resolve: could not find `HandshakeMessage` in `securejoin`
+   --> src/receive_imf.rs:385:25
+    |
+385 |             securejoin::HandshakeMessage::Propagate => {
+    |                         ^^^^^^^^^^^^^^^^ could not find `HandshakeMessage` in `securejoin`
+
+error[E0425]: cannot find function `get_securejoin_qr` in module `securejoin`
+  --> src/qr_code_generator.rs:42:22
+   |
+42 |         &securejoin::get_securejoin_qr(context, Some(chat_id)).await?,
+   |                      ^^^^^^^^^^^^^^^^^ not found in `securejoin`
+
+error[E0425]: cannot find function `get_securejoin_qr` in module `securejoin`
+  --> src/qr_code_generator.rs:54:22
+   |
+54 |         &securejoin::get_securejoin_qr(context, None).await?,
+   |                      ^^^^^^^^^^^^^^^^^ not found in `securejoin`
+
+error[E0432]: unresolved imports `crate::securejoin::get_securejoin_qr`, `crate::securejoin::join_securejoin`
+  --> src/events/chatlist_events.rs:77:22
+   |
+77 |         securejoin::{get_securejoin_qr, join_securejoin},
+   |                      ^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^ no `join_securejoin` in `securejoin`
+   |                      |
+   |                      no `get_securejoin_qr` in `securejoin`
+
+error[E0432]: unresolved import `crate::securejoin::get_securejoin_qr`
+   --> src/qr.rs:828:9
+    |
+828 |     use crate::securejoin::get_securejoin_qr;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `get_securejoin_qr` in `securejoin`
+
+error[E0432]: unresolved imports `crate::securejoin::get_securejoin_qr`, `crate::securejoin::join_securejoin`
+  --> src/test_utils.rs:43:25
+   |
+43 | use crate::securejoin::{get_securejoin_qr, join_securejoin};
+   |                         ^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^ no `join_securejoin` in `securejoin`
+   |                         |
+   |                         no `get_securejoin_qr` in `securejoin`
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/qr_code_generator.rs:42:10
+   |
+42 |         &securejoin::get_securejoin_qr(context, Some(chat_id)).await?,
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+   = note: all local variables must have a statically known size
+   = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/qr_code_generator.rs:42:10
+   |
+42 |         &securejoin::get_securejoin_qr(context, Some(chat_id)).await?,
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `ControlFlow`
+  --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+   |
+85 | pub enum ControlFlow<B, C = ()> {
+   |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/qr_code_generator.rs:42:69
+   |
+42 |         &securejoin::get_securejoin_qr(context, Some(chat_id)).await?,
+   |                                                                     ^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `Break`
+  --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+   |
+85 | pub enum ControlFlow<B, C = ()> {
+   |                         ^^^^^^ required by this bound in `Break`
+...
+93 |     Break(B),
+   |     ----- required by a bound in this variant
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/qr_code_generator.rs:54:10
+   |
+54 |         &securejoin::get_securejoin_qr(context, None).await?,
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+   = note: all local variables must have a statically known size
+   = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/qr_code_generator.rs:54:10
+   |
+54 |         &securejoin::get_securejoin_qr(context, None).await?,
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `ControlFlow`
+  --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+   |
+85 | pub enum ControlFlow<B, C = ()> {
+   |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/qr_code_generator.rs:54:60
+   |
+54 |         &securejoin::get_securejoin_qr(context, None).await?,
+   |                                                            ^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `Break`
+  --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+   |
+85 | pub enum ControlFlow<B, C = ()> {
+   |                         ^^^^^^ required by this bound in `Break`
+...
+93 |     Break(B),
+   |     ----- required by a bound in this variant
+
+Some errors have detailed explanations: E0277, E0425, E0432, E0433.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `deltachat` (lib) due to 15 previous errors
+warning: build failed, waiting for other jobs to finish...
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/qr.rs:1213:13
+     |
+1213 |         let qr = get_securejoin_qr(&alice, None).await?;
+     |             ^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/qr.rs:1213:18
+     |
+1213 |         let qr = get_securejoin_qr(&alice, None).await?;
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/qr.rs:1213:18
+     |
+1213 |         let qr = get_securejoin_qr(&alice, None).await?;
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `ControlFlow`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/qr.rs:1213:55
+     |
+1213 |         let qr = get_securejoin_qr(&alice, None).await?;
+     |                                                       ^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `Break`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `Break`
+...
+93   |     Break(B),
+     |     ----- required by a bound in this variant
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/qr.rs:1248:13
+     |
+1248 |         let qr = get_securejoin_qr(&alice, Some(chat_id)).await?;
+     |             ^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/qr.rs:1248:18
+     |
+1248 |         let qr = get_securejoin_qr(&alice, Some(chat_id)).await?;
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/qr.rs:1248:18
+     |
+1248 |         let qr = get_securejoin_qr(&alice, Some(chat_id)).await?;
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `ControlFlow`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/qr.rs:1248:64
+     |
+1248 |         let qr = get_securejoin_qr(&alice, Some(chat_id)).await?;
+     |                                                                ^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `Break`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `Break`
+...
+93   |     Break(B),
+     |     ----- required by a bound in this variant
+
+error: could not compile `deltachat` (lib test) due to 26 previous errors
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+uint32_t dc_join_securejoin(dc_context_t* context, const char* qr)
+{
+	/* ==========================================================
+	   ====             Bob - the joiner's side             =====
+	   ====   Step 2 in "Setup verified contact" protocol   =====
+	   ========================================================== */
+
+	int       ret_chat_id = 0;
+	int       ongoing_allocated = 0;
+	uint32_t  contact_chat_id = 0;
+	int       join_vg = 0;
+	dc_lot_t* qr_scan = NULL;
+	int       qr_locked = 0;
+	#define   LOCK_QR    { pthread_mutex_lock(&context->bobs_qr_critical); qr_locked = 1; }
+	#define   UNLOCK_QR  if (qr_locked) { pthread_mutex_unlock(&context->bobs_qr_critical); qr_locked = 0; }
+	#define   CHECK_EXIT if (context->shall_stop_ongoing) { goto cleanup; }
+
+	dc_log_info(context, 0, "Requesting secure-join ...");
+
+	dc_ensure_secret_key_exists(context);
+
+	if ((ongoing_allocated=dc_alloc_ongoing(context))==0) {
+		goto cleanup;
+	}
+
+	if (((qr_scan=dc_check_qr(context, qr))==NULL)
+	 || (qr_scan->state!=DC_QR_ASK_VERIFYCONTACT && qr_scan->state!=DC_QR_ASK_VERIFYGROUP)) {
+		dc_log_error(context, 0, "Unknown QR code.");
+		goto cleanup;
+	}
+
+	if ((contact_chat_id=dc_create_chat_by_contact_id(context, qr_scan->id))==0) {
+		dc_log_error(context, 0, "Unknown contact.");
+		goto cleanup;
+	}
+
+	CHECK_EXIT
+
+	join_vg = (qr_scan->state==DC_QR_ASK_VERIFYGROUP);
+
+	context->bobs_status = 0;
+	LOCK_QR
+		context->bobs_qr_scan = qr_scan;
+	UNLOCK_QR
+
+	if (fingerprint_equals_sender(context, qr_scan->fingerprint, contact_chat_id)) {
+		// the scanned fingerprint matches Alice's key, we can proceed to step 4b) directly and save two mails
+		dc_log_info(context, 0, "Taking protocol shortcut.");
+		context->bob_expects = DC_VC_CONTACT_CONFIRM;
+		context->cb(context, DC_EVENT_SECUREJOIN_JOINER_PROGRESS, chat_id_2_contact_id(context, contact_chat_id), 400);
+		char* own_fingerprint = get_self_fingerprint(context);
+		send_handshake_msg(context, contact_chat_id, join_vg? "vg-request-with-auth" : "vc-request-with-auth",
+			qr_scan->auth, own_fingerprint, join_vg? qr_scan->text2 : NULL); // Bob -> Alice
+		free(own_fingerprint);
+	}
+	else {
+		context->bob_expects = DC_VC_AUTH_REQUIRED;
+		send_handshake_msg(context, contact_chat_id, join_vg? "vg-request" : "vc-request",
+			qr_scan->invitenumber, NULL, NULL); // Bob -> Alice
+	}
+
+	while (1) {
+		CHECK_EXIT
+
+		usleep(300*1000); // 0.3 seconds
+	}
+
+cleanup:
+	context->bob_expects = 0;
+
+	if (context->bobs_status==DC_BOB_SUCCESS) {
+		if (join_vg) {
+			ret_chat_id = dc_get_chat_id_by_grpid(context, qr_scan->text2, NULL, NULL);
+		}
+		else {
+			ret_chat_id = contact_chat_id;
+		}
+	}
+
+	LOCK_QR
+		context->bobs_qr_scan = NULL;
+	UNLOCK_QR
+
+	dc_lot_unref(qr_scan);
+
+	if (ongoing_allocated) { dc_free_ongoing(context); }
+	return ret_chat_id;
+}
+</c function>
+<rust function signature>
+pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn error(&self) -> Option<String> {
+        self.error.clone()
+    }
+
+async fn securejoin(context: &Context, qr: &str) -> Result<ChatId> {
+    /*========================================================
+    ====             Bob - the joiner's side             =====
+    ====   Step 2 in "Setup verified contact" protocol   =====
+    ========================================================*/
+
+    info!(context, "Requesting secure-join ...",);
+    let qr_scan = check_qr(context, qr).await?;
+
+    let invite = QrInvite::try_from(qr_scan)?;
+
+    bob::start_protocol(context, invite).await
+}
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use anyhow::{bail, Context as _, Error, Result};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use crate::aheader::EncryptPreference;
+use crate::chat::{self, Chat, ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::Blocked;
+use crate::contact::{Contact, ContactId, Origin};
+use crate::context::Context;
+use crate::e2ee::ensure_secret_key_exists;
+use crate::events::EventType;
+use crate::headerdef::HeaderDef;
+use crate::key::{load_self_public_key, DcKey, Fingerprint};
+use crate::message::{Message, Viewtype};
+use crate::mimeparser::{MimeMessage, SystemMessage};
+use crate::param::Param;
+use crate::peerstate::Peerstate;
+use crate::qr::check_qr;
+use crate::securejoin::bob::JoinerProgress;
+use crate::stock_str;
+use crate::sync::Sync::*;
+use crate::token;
+use crate::tools::time;
+use bobstate::BobState;
+use qrinvite::QrInvite;
+use crate::token::Namespace;
+use deltachat_contact_tools::{ContactAddress, EmailAddress};
+use super::*;
+use crate::chat::{remove_contact_from_chat, CantSendReason};
+use crate::chatlist::Chatlist;
+use crate::constants::{self, Chattype};
+use crate::imex::{imex, ImexMode};
+use crate::receive_imf::receive_imf;
+use crate::stock_str::{self, chat_protection_enabled};
+use crate::test_utils::get_chat_msg;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+use std::collections::HashSet;
+use std::time::Duration;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the provided information and error messages, here's the corrected Rust function:
+
+```rust
+pub async fn join_securejoin(context: &Context, qr: &str) -> Result<ChatId> {
+    /* ==========================================================
+       ====             Bob - the joiner's side             =====
+       ====   Step 2 in "Setup verified contact" protocol   =====
+       ========================================================== */
+
+    info!(context, "Requesting secure-join ...");
+
+    ensure_secret_key_exists(context).await?;
+
+    let ongoing_allocated = dc_alloc_ongoing(context).await?;
+    if ongoing_allocated == 0 {
+        bail!("Failed to allocate ongoing");
+    }
+
+    let qr_scan = check_qr(context, qr).await?;
+    if qr_scan.state != DC_QR_ASK_VERIFYCONTACT && qr_scan.state != DC_QR_ASK_VERIFYGROUP {
+        bail!("Unknown QR code.");
+    }
+
+    let contact_chat_id = dc_create_chat_by_contact_id(context, qr_scan.id).await?;
+    if contact_chat_id == ChatId::new(0) {
+        bail!("Unknown contact.");
+    }
+
+    if context.inner.shall_stop_ongoing {
+        bail!("Operation cancelled");
+    }
+
+    let join_vg = qr_scan.state == DC_QR_ASK_VERIFYGROUP;
+
+    context.inner.bobs_status.store(0, std::sync::atomic::Ordering::SeqCst);
+    {
+        let _lock = context.inner.bobs_qr_critical.lock().await;
+        context.inner.bobs_qr_scan.replace(qr_scan.clone());
+    }
+
+    if fingerprint_equals_sender(context, &qr_scan.fingerprint, contact_chat_id).await? {
+        // the scanned fingerprint matches Alice's key, we can proceed to step 4b) directly and save two mails
+        info!(context, "Taking protocol shortcut.");
+        context.inner.bob_expects.store(DC_VC_CONTACT_CONFIRM, std::sync::atomic::Ordering::SeqCst);
+        context.emit_event(EventType::SecurejoinJoinerProgress {
+            contact_id: chat_id_2_contact_id(context, contact_chat_id),
+            progress: 400,
+        }).await;
+        let own_fingerprint = get_self_fingerprint(context).await?;
+        send_handshake_msg(
+            context,
+            contact_chat_id,
+            if join_vg { "vg-request-with-auth" } else { "vc-request-with-auth" },
+            &qr_scan.auth,
+            &own_fingerprint,
+            if join_vg { Some(&qr_scan.text2) } else { None },
+        ).await?;
+    } else {
+        context.inner.bob_expects.store(DC_VC_AUTH_REQUIRED, std::sync::atomic::Ordering::SeqCst);
+        send_handshake_msg(
+            context,
+            contact_chat_id,
+            if join_vg { "vg-request" } else { "vc-request" },
+            &qr_scan.invitenumber,
+            None,
+            None,
+        ).await?;
+    }
+
+    loop {
+        if context.inner.shall_stop_ongoing {
+            bail!("Operation cancelled");
+        }
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    // The following code is unreachable due to the infinite loop above,
+    // but we'll keep it for consistency with the C function
+
+    context.inner.bob_expects.store(0, std::sync::atomic::Ordering::SeqCst);
+
+    let ret_chat_id = if context.inner.bobs_status.load(std::sync::atomic::Ordering::SeqCst) == DC_BOB_SUCCESS {
+        if join_vg {
+            dc_get_chat_id_by_grpid(context, &qr_</reapir response>

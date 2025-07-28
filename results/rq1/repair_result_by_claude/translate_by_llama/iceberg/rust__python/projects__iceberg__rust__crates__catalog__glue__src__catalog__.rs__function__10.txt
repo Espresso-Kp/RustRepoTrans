@@ -1,0 +1,255 @@
+<message>
+you were asked to translate the given python function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, python function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {\n    let database_name = validate_namespace(namespace)?;\n    let mut table_list: Vec<TableIdent> = Vec::new();\n    let mut next_token: Option<String> = None;\n\n    loop {\n        let table_list_response = if next_token.is_none() {\n            self.glue.get_tables(DatabaseName = database_name)\n        } else {\n            self.glue.get_tables(DatabaseName = database_name, NextToken = next_token.clone())\n        }\n       .await?;\n\n        table_list.extend(table_list_response.TableList);\n\n        next_token = table_list_response.NextToken;\n\n        if next_token.is_none() {\n            break;\n        }\n    }\n\n    Ok(table_list.into_iter().map(|table| (database_name.clone(), table.Name)).collect())\n}'
+</previous response>
+<error message>
+Compiling iceberg-catalog-rest v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/rest)
+   Compiling iceberg-catalog-glue v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/glue)
+error[E0425]: cannot find value `DatabaseName` in this scope
+   --> crates/catalog/glue/src/catalog.rs:301:41
+    |
+301 |             self.glue_client.get_tables(DatabaseName = database_name)
+    |                                         ^^^^^^^^^^^^ help: a local variable with a similar name exists: `database_name`
+
+error[E0425]: cannot find value `DatabaseName` in this scope
+   --> crates/catalog/glue/src/catalog.rs:303:41
+    |
+303 |             self.glue_client.get_tables(DatabaseName = database_name, NextToken = next_token.clone())
+    |                                         ^^^^^^^^^^^^ help: a local variable with a similar name exists: `database_name`
+
+error[E0425]: cannot find value `NextToken` in this scope
+   --> crates/catalog/glue/src/catalog.rs:303:71
+    |
+303 |             self.glue_client.get_tables(DatabaseName = database_name, NextToken = next_token.clone())
+    |                                                                       ^^^^^^^^^ help: a local variable with a similar name exists: `next_token`
+
+error[E0609]: no field `glue_client` on type `&GlueCatalog`
+   --> crates/catalog/glue/src/catalog.rs:301:18
+    |
+301 |             self.glue_client.get_tables(DatabaseName = database_name)
+    |                  ^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `config`, `client`, `file_io`
+
+error[E0609]: no field `glue_client` on type `&GlueCatalog`
+   --> crates/catalog/glue/src/catalog.rs:303:18
+    |
+303 |             self.glue_client.get_tables(DatabaseName = database_name, NextToken = next_token.clone())
+    |                  ^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `config`, `client`, `file_io`
+
+Some errors have detailed explanations: E0425, E0609.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `iceberg-catalog-glue` (lib) due to 5 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `iceberg-catalog-glue` (lib test) due to 5 previous errors
+
+   Compiling iceberg-catalog-glue v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/glue)
+error[E0425]: cannot find value `DatabaseName` in this scope
+   --> crates/catalog/glue/src/catalog.rs:301:41
+    |
+301 |             self.glue_client.get_tables(DatabaseName = database_name)
+    |                                         ^^^^^^^^^^^^ help: a local variable with a similar name exists: `database_name`
+
+error[E0425]: cannot find value `DatabaseName` in this scope
+   --> crates/catalog/glue/src/catalog.rs:303:41
+    |
+303 |             self.glue_client.get_tables(DatabaseName = database_name, NextToken = next_token.clone())
+    |                                         ^^^^^^^^^^^^ help: a local variable with a similar name exists: `database_name`
+
+error[E0425]: cannot find value `NextToken` in this scope
+   --> crates/catalog/glue/src/catalog.rs:303:71
+    |
+303 |             self.glue_client.get_tables(DatabaseName = database_name, NextToken = next_token.clone())
+    |                                                                       ^^^^^^^^^ help: a local variable with a similar name exists: `next_token`
+
+error[E0609]: no field `glue_client` on type `&GlueCatalog`
+   --> crates/catalog/glue/src/catalog.rs:301:18
+    |
+301 |             self.glue_client.get_tables(DatabaseName = database_name)
+    |                  ^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `config`, `client`, `file_io`
+
+error[E0609]: no field `glue_client` on type `&GlueCatalog`
+   --> crates/catalog/glue/src/catalog.rs:303:18
+    |
+303 |             self.glue_client.get_tables(DatabaseName = database_name, NextToken = next_token.clone())
+    |                  ^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `config`, `client`, `file_io`
+
+Some errors have detailed explanations: E0425, E0609.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `iceberg-catalog-glue` (lib) due to 5 previous errors
+</error message>
+<python function>
+def list_tables(self, namespace: Union[str, Identifier]) -> List[Identifier]:
+        """List tables under the given namespace in the catalog (including non-Iceberg tables).
+
+        Args:
+            namespace (str | Identifier): Namespace identifier to search.
+
+        Returns:
+            List[Identifier]: list of table identifiers.
+
+        Raises:
+            NoSuchNamespaceError: If a namespace with the given name does not exist, or the identifier is invalid.
+        """
+        database_name = self.identifier_to_database(namespace, NoSuchNamespaceError)
+        table_list: List[TableTypeDef] = []
+        next_token: Optional[str] = None
+        try:
+            while True:
+                table_list_response = (
+                    self.glue.get_tables(DatabaseName=database_name)
+                    if not next_token
+                    else self.glue.get_tables(DatabaseName=database_name, NextToken=next_token)
+                )
+                table_list.extend(table_list_response["TableList"])
+                next_token = table_list_response.get("NextToken")
+                if not next_token:
+                    break
+
+        except self.glue.exceptions.EntityNotFoundException as e:
+            raise NoSuchNamespaceError(f"Database does not exist: {database_name}") from e
+        return [(database_name, table["Name"]) for table in table_list]
+</python function>
+<rust function signature>
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+struct GlueClient(aws_sdk_glue::Client);
+
+pub struct TableIdent {
+    /// Namespace of the table.
+    pub namespace: NamespaceIdent,
+    /// Table name.
+    pub name: String,
+}
+
+pub fn new(namespace: NamespaceIdent, name: String) -> Self {
+        Self { namespace, name }
+    }
+    
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the error messages and provided information, here's the corrected Rust function:
+
+```rust
+async fn list_tables(&self, namespace: &NamespaceIdent) -> Result<Vec<TableIdent>> {
+    let database_name = validate_namespace(namespace)?;
+    let mut table_list: Vec<TableIdent> = Vec::new();
+    let mut next_token: Option<String> = None;
+
+    loop {
+        let table_list_response = if next_token.is_none() {
+            with_catalog_id!(self.client.get_tables(), &self.config)
+                .database_name(&database_name)
+                .send()
+                .await?
+        } else {
+            with_catalog_id!(self.client.get_tables(), &self.config)
+                .database_name(&database_name)
+                .next_token(next_token.as_ref().unwrap())
+                .send()
+                .await?
+        };
+
+        if let Some(tables) = table_list_response.table_list() {
+            table_list.extend(
+                tables
+                    .iter()
+                    .map(|table| TableIdent::new(namespace.clone(), table.name().unwrap().to_string())),
+            );
+        }
+
+        next_token = table_list_response.next_token().map(|s| s.to_string());
+
+        if next_token.is_none() {
+            break;
+        }
+    }
+
+    Ok(table_list)
+}
+```
+
+This corrected version addresses the following issues:
+
+1. Changed `self.glue_client` to `self.client` to match the struct definition.
+2. Used the correct method calls for the AWS SDK Glue client.
+3. Used the `with_catalog_id!` macro to handle the catalog ID.
+4. Properly handled the `database_name` and `next_token` parameters.
+5. Used the `TableIdent::new()` method to create table identifiers.
+6. Properly handled the response from the AWS SDK, including error handling and extracting table information.
+
+This version should compile without errors and properly implement the functionality of listing tables in the Glue catalog.</reapir response>

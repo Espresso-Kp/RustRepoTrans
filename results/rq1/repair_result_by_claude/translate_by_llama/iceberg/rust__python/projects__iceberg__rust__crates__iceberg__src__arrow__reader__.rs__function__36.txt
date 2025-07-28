@@ -1,0 +1,473 @@
+<message>
+you were asked to translate the given python function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, python function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'use crate::error::Result;\nuse crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};\nuse crate::expr::{BoundPredicate, BoundReference};\nuse crate::arrow::{arrow_schema_to_schema, get_arrow_datum};\nuse crate::spec::{Datum, SchemaRef};\nuse std::collections::HashMap;\n\nstruct BooleanExpression {\n    left: Box<PredicateResult>,\n    right: Box<PredicateResult>,\n}\n\nimpl BooleanExpression {\n    fn new(left: Box<PredicateResult>, right: Box<PredicateResult>, rest: Vec<Box<PredicateResult>>) -> Self {\n        if!rest.is_empty() {\n            return BooleanExpression::reduce_or(rest);\n        }\n        if left.is_always_true() || right.is_always_true() {\n            return BooleanExpression::always_true();\n        } else if left.is_always_false() {\n            return BooleanExpression::new(right, Box::new(()), vec![]);\n        } else if right.is_always_false() {\n            return BooleanExpression::new(left, Box::new(()), vec![]);\n        } else {\n            BooleanExpression { left, right }\n        }\n    }\n\n    fn reduce_or(rest: Vec<Box<PredicateResult>>) -> Self {\n        let mut result = Box::new(|batch| {\n            let mut left = left(batch.clone())?;\n            let mut right = right(batch)?;\n            for r in rest {\n                left = or(&left, &r(batch.clone())?);\n            }\n            left\n        });\n        BooleanExpression { left: result, right: Box::new(()), }\n    }\n\n    fn always_true() -> Self {\n        BooleanExpression { left: Box::new(|batch| Ok(true)), right: Box::new(()), }\n    }\n\n    fn is_always_true(&self) -> bool {\n        self.left(batch.clone())?.is_true()\n    }\n\n    fn is_always_false(&self) -> bool {\n        self.left(batch.clone())?.is_false()\n    }\n}\n\nfn batch(batch: &RecordBatch) -> Result<RecordBatch> {\n    let left = self.left(batch.clone())?;\n    let right = self.right(batch)?;\n    or(&left, &right)\n}'
+</previous response>
+<error message>
+Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+warning: unused import: `or`
+  --> crates/iceberg/src/arrow/reader.rs:21:60
+   |
+21 | use arrow_arith::boolean::{and, is_not_null, is_null, not, or};
+   |                                                            ^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+error[E0107]: type alias takes 1 generic argument but 2 generic arguments were supplied
+   --> crates/iceberg/src/arrow/reader.rs:555:48
+    |
+555 |         mut lhs: Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, ArrowError> + Send +'static>,
+    |                                                ^^^^^^               ---------- help: remove this generic argument
+    |                                                |
+    |                                                expected 1 generic argument
+    |
+note: type alias defined here, with 1 generic parameter: `T`
+   --> crates/iceberg/src/error.rs:25:10
+    |
+25  | pub type Result<T> = std::result::Result<T, Error>;
+    |          ^^^^^^ -
+
+error[E0107]: type alias takes 1 generic argument but 2 generic arguments were supplied
+   --> crates/iceberg/src/arrow/reader.rs:556:48
+    |
+556 |         mut rhs: Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, ArrowError> + Send +'static>,
+    |                                                ^^^^^^               ---------- help: remove this generic argument
+    |                                                |
+    |                                                expected 1 generic argument
+    |
+note: type alias defined here, with 1 generic parameter: `T`
+   --> crates/iceberg/src/error.rs:25:10
+    |
+25  | pub type Result<T> = std::result::Result<T, Error>;
+    |          ^^^^^^ -
+
+error[E0107]: type alias takes 1 generic argument but 2 generic arguments were supplied
+   --> crates/iceberg/src/arrow/reader.rs:557:47
+    |
+557 |     ) -> Result<Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, ArrowError> + Send +'static>> {
+    |                                               ^^^^^^               ---------- help: remove this generic argument
+    |                                               |
+    |                                               expected 1 generic argument
+    |
+note: type alias defined here, with 1 generic parameter: `T`
+   --> crates/iceberg/src/error.rs:25:10
+    |
+25  | pub type Result<T> = std::result::Result<T, Error>;
+    |          ^^^^^^ -
+
+error[E0053]: method `or` has an incompatible type for trait
+   --> crates/iceberg/src/arrow/reader.rs:555:18
+    |
+555 |         mut lhs: Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, ArrowError> + Send +'static>,
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |                  |
+    |                  expected `arrow_schema::ArrowError`, found `error::Error`
+    |                  help: change the parameter type to match the trait: `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, arrow_schema::ArrowError> + std::marker::Send + 'static)>`
+    |
+note: type in trait
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:38:27
+    |
+38  |     fn or(&mut self, lhs: Self::T, rhs: Self::T) -> Result<Self::T>;
+    |                           ^^^^^^^
+    = note: expected signature `fn(&mut PredicateConverter<'_>, Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, arrow_schema::ArrowError> + std::marker::Send + 'static)>, Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, arrow_schema::ArrowError> + std::marker::Send + 'static)>) -> std::result::Result<Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, arrow_schema::ArrowError> + std::marker::Send + 'static)>, _>`
+               found signature `fn(&mut PredicateConverter<'_>, Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>, Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>) -> std::result::Result<Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>, _>`
+
+error[E0599]: no method named `is_null` found for struct `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:558:16
+    |
+558 |         if lhs.is_null() || rhs.is_null() {
+    |                ^^^^^^^ method not found in `Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, Error> + Send>`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `is_null`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `is_null` found for struct `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:558:33
+    |
+558 |         if lhs.is_null() || rhs.is_null() {
+    |                                 ^^^^^^^ method not found in `Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, Error> + Send>`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `is_null`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `is_null` found for struct `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:560:23
+    |
+560 |         } else if lhs.is_null() {
+    |                       ^^^^^^^ method not found in `Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, Error> + Send>`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `is_null`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `is_null` found for struct `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:562:23
+    |
+562 |         } else if rhs.is_null() {
+    |                       ^^^^^^^ method not found in `Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, Error> + Send>`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `is_null`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no function or associated item named `or` found for struct `BooleanArray` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:569:63
+    |
+569 |                     (Ok(left), Ok(right)) => Ok(BooleanArray::or(left, right)),
+    |                                                               ^^ function or associated item not found in `BooleanArray`
+    |
+note: if you're trying to build a new `BooleanArray` consider using one of the following associated functions:
+      BooleanArray::new
+      BooleanArray::new_null
+      BooleanArray::from_unary
+      BooleanArray::from_binary
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/arrow-array-52.1.0/src/array/boolean_array.rs:89:5
+    |
+89  |       pub fn new(values: BooleanBuffer, nulls: Option<NullBuffer>) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+97  |       pub fn new_null(len: usize) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+213 | /     pub fn from_unary<T: ArrayAccessor, F>(left: T, mut op: F) -> Self
+214 | |     where
+215 | |         F: FnMut(T::Item) -> bool,
+    | |__________________________________^
+...
+241 | /     pub fn from_binary<T: ArrayAccessor, S: ArrayAccessor, F>(left: T, right: S, mut op: F) -> Self
+242 | |     where
+243 | |         F: FnMut(T::Item, S::Item) -> bool,
+    | |___________________________________________^
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `or`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0277]: the trait bound `arrow_schema::ArrowError: From<&str>` is not satisfied
+   --> crates/iceberg/src/arrow/reader.rs:570:30
+    |
+570 |                     _ => Err(ArrowError::from("Error evaluating predicate")),
+    |                              ^^^^^^^^^^ the trait `From<&str>` is not implemented for `arrow_schema::ArrowError`
+    |
+    = help: the following other types implement trait `From<T>`:
+              <arrow_schema::ArrowError as From<std::io::Error>>
+              <arrow_schema::ArrowError as From<parquet::errors::ParquetError>>
+              <arrow_schema::ArrowError as From<FromUtf8Error>>
+              <arrow_schema::ArrowError as From<IntoInnerError<W>>>
+              <arrow_schema::ArrowError as From<Utf8Error>>
+
+Some errors have detailed explanations: E0053, E0107, E0277, E0599.
+For more information about an error, try `rustc --explain E0053`.
+warning: `iceberg` (lib) generated 1 warning
+error: could not compile `iceberg` (lib) due to 10 previous errors; 1 warning emitted
+warning: build failed, waiting for other jobs to finish...
+warning: `iceberg` (lib test) generated 1 warning (1 duplicate)
+error: could not compile `iceberg` (lib test) due to 10 previous errors; 1 warning emitted
+
+   Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+warning: unused import: `or`
+  --> crates/iceberg/src/arrow/reader.rs:21:60
+   |
+21 | use arrow_arith::boolean::{and, is_not_null, is_null, not, or};
+   |                                                            ^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+error[E0107]: type alias takes 1 generic argument but 2 generic arguments were supplied
+   --> crates/iceberg/src/arrow/reader.rs:555:48
+    |
+555 |         mut lhs: Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, ArrowError> + Send +'static>,
+    |                                                ^^^^^^               ---------- help: remove this generic argument
+    |                                                |
+    |                                                expected 1 generic argument
+    |
+note: type alias defined here, with 1 generic parameter: `T`
+   --> crates/iceberg/src/error.rs:25:10
+    |
+25  | pub type Result<T> = std::result::Result<T, Error>;
+    |          ^^^^^^ -
+
+error[E0107]: type alias takes 1 generic argument but 2 generic arguments were supplied
+   --> crates/iceberg/src/arrow/reader.rs:556:48
+    |
+556 |         mut rhs: Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, ArrowError> + Send +'static>,
+    |                                                ^^^^^^               ---------- help: remove this generic argument
+    |                                                |
+    |                                                expected 1 generic argument
+    |
+note: type alias defined here, with 1 generic parameter: `T`
+   --> crates/iceberg/src/error.rs:25:10
+    |
+25  | pub type Result<T> = std::result::Result<T, Error>;
+    |          ^^^^^^ -
+
+error[E0107]: type alias takes 1 generic argument but 2 generic arguments were supplied
+   --> crates/iceberg/src/arrow/reader.rs:557:47
+    |
+557 |     ) -> Result<Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, ArrowError> + Send +'static>> {
+    |                                               ^^^^^^               ---------- help: remove this generic argument
+    |                                               |
+    |                                               expected 1 generic argument
+    |
+note: type alias defined here, with 1 generic parameter: `T`
+   --> crates/iceberg/src/error.rs:25:10
+    |
+25  | pub type Result<T> = std::result::Result<T, Error>;
+    |          ^^^^^^ -
+
+error[E0053]: method `or` has an incompatible type for trait
+   --> crates/iceberg/src/arrow/reader.rs:555:18
+    |
+555 |         mut lhs: Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, ArrowError> + Send +'static>,
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |                  |
+    |                  expected `arrow_schema::ArrowError`, found `error::Error`
+    |                  help: change the parameter type to match the trait: `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, arrow_schema::ArrowError> + std::marker::Send + 'static)>`
+    |
+note: type in trait
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:38:27
+    |
+38  |     fn or(&mut self, lhs: Self::T, rhs: Self::T) -> Result<Self::T>;
+    |                           ^^^^^^^
+    = note: expected signature `fn(&mut PredicateConverter<'_>, Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, arrow_schema::ArrowError> + std::marker::Send + 'static)>, Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, arrow_schema::ArrowError> + std::marker::Send + 'static)>) -> std::result::Result<Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, arrow_schema::ArrowError> + std::marker::Send + 'static)>, _>`
+               found signature `fn(&mut PredicateConverter<'_>, Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>, Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>) -> std::result::Result<Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>, _>`
+
+error[E0599]: no method named `is_null` found for struct `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:558:16
+    |
+558 |         if lhs.is_null() || rhs.is_null() {
+    |                ^^^^^^^ method not found in `Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, Error> + Send>`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `is_null`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `is_null` found for struct `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:558:33
+    |
+558 |         if lhs.is_null() || rhs.is_null() {
+    |                                 ^^^^^^^ method not found in `Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, Error> + Send>`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `is_null`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `is_null` found for struct `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:560:23
+    |
+560 |         } else if lhs.is_null() {
+    |                       ^^^^^^^ method not found in `Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, Error> + Send>`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `is_null`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `is_null` found for struct `Box<(dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, error::Error> + std::marker::Send + 'static)>` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:562:23
+    |
+562 |         } else if rhs.is_null() {
+    |                       ^^^^^^^ method not found in `Box<dyn FnMut(RecordBatch) -> Result<BooleanArray, Error> + Send>`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `is_null`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no function or associated item named `or` found for struct `BooleanArray` in the current scope
+   --> crates/iceberg/src/arrow/reader.rs:569:63
+    |
+569 |                     (Ok(left), Ok(right)) => Ok(BooleanArray::or(left, right)),
+    |                                                               ^^ function or associated item not found in `BooleanArray`
+    |
+note: if you're trying to build a new `BooleanArray` consider using one of the following associated functions:
+      BooleanArray::new
+      BooleanArray::new_null
+      BooleanArray::from_unary
+      BooleanArray::from_binary
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/arrow-array-52.1.0/src/array/boolean_array.rs:89:5
+    |
+89  |       pub fn new(values: BooleanBuffer, nulls: Option<NullBuffer>) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+97  |       pub fn new_null(len: usize) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+213 | /     pub fn from_unary<T: ArrayAccessor, F>(left: T, mut op: F) -> Self
+214 | |     where
+215 | |         F: FnMut(T::Item) -> bool,
+    | |__________________________________^
+...
+241 | /     pub fn from_binary<T: ArrayAccessor, S: ArrayAccessor, F>(left: T, right: S, mut op: F) -> Self
+242 | |     where
+243 | |         F: FnMut(T::Item, S::Item) -> bool,
+    | |___________________________________________^
+    = help: items from traits can only be used if the trait is implemented and in scope
+note: `BoundPredicateVisitor` defines an item `or`, perhaps you need to implement it
+   --> crates/iceberg/src/expr/visitors/bound_predicate_visitor.rs:24:1
+    |
+24  | pub trait BoundPredicateVisitor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0277]: the trait bound `arrow_schema::ArrowError: From<&str>` is not satisfied
+   --> crates/iceberg/src/arrow/reader.rs:570:30
+    |
+570 |                     _ => Err(ArrowError::from("Error evaluating predicate")),
+    |                              ^^^^^^^^^^ the trait `From<&str>` is not implemented for `arrow_schema::ArrowError`
+    |
+    = help: the following other types implement trait `From<T>`:
+              <arrow_schema::ArrowError as From<std::io::Error>>
+              <arrow_schema::ArrowError as From<parquet::errors::ParquetError>>
+              <arrow_schema::ArrowError as From<FromUtf8Error>>
+              <arrow_schema::ArrowError as From<IntoInnerError<W>>>
+              <arrow_schema::ArrowError as From<Utf8Error>>
+
+Some errors have detailed explanations: E0053, E0107, E0277, E0599.
+For more information about an error, try `rustc --explain E0053`.
+warning: `iceberg` (lib) generated 1 warning
+error: could not compile `iceberg` (lib) due to 10 previous errors; 1 warning emitted
+</error message>
+<python function>
+def __new__(cls, left: BooleanExpression, right: BooleanExpression) -> BooleanExpression:  # type: ignore
+
+        if left is AlwaysTrue() or right is AlwaysTrue():
+            return AlwaysTrue()
+        elif left is AlwaysFalse():
+            return right
+        elif right is AlwaysFalse():
+            return left
+        else:
+            obj = super().__new__(cls)
+            obj.left = left
+            obj.right = right
+            return obj
+</python function>
+<rust function signature>
+fn or(
+        &mut self,
+        mut lhs: Box<PredicateResult>,
+        mut rhs: Box<PredicateResult>,
+    ) -> Result<Box<PredicateResult>> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+struct PredicateConverter<'a> {
+    /// The Parquet schema descriptor.
+    pub parquet_schema: &'a SchemaDescriptor,
+    /// The map between field id and leaf column index in Parquet schema.
+    pub column_map: &'a HashMap<i32, usize>,
+    /// The required column indices in Parquet schema for the predicates.
+    pub column_indices: &'a Vec<usize>,
+}
+
+type PredicateResult =
+    dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, ArrowError> + Send + 'static;
+    
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use crate::error::Result;
+use arrow_arith::boolean::{and, is_not_null, is_null, not, or};
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
+use arrow_ord::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
+use arrow_schema::{ArrowError, DataType, SchemaRef as ArrowSchemaRef};
+use async_stream::try_stream;
+use bytes::Bytes;
+use fnv::FnvHashSet;
+use futures::future::BoxFuture;
+use futures::stream::StreamExt;
+use futures::{try_join, TryFutureExt};
+use parquet::arrow::arrow_reader::{ArrowPredicateFn, RowFilter};
+use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, PARQUET_FIELD_ID_META_KEY};
+use parquet::file::metadata::ParquetMetaData;
+use parquet::schema::types::{SchemaDescriptor, Type as ParquetType};
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::str::FromStr;
+use std::sync::Arc;
+use crate::arrow::{arrow_schema_to_schema, get_arrow_datum};
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::io::{FileIO, FileMetadata, FileRead};
+use crate::scan::{ArrowRecordBatchStream, FileScanTaskStream};
+use crate::spec::{Datum, SchemaRef};
+use crate::{Error, ErrorKind};
+use crate::arrow::reader::CollectFieldIdVisitor;
+use crate::expr::visitors::bound_predicate_visitor::visit;
+use crate::expr::{Bind, Reference};
+use crate::spec::{NestedField, PrimitiveType, Schema, SchemaRef, Type};
+use std::collections::HashSet;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the provided information and error messages, I'll fix the `or` function. Here's the corrected implementation:
+
+```rust
+fn or(
+    &mut self,
+    mut lhs: Box<PredicateResult>,
+    mut rhs: Box<PredicateResult>,
+) -> Result<Box<PredicateResult>> {
+    Ok(Box::new(move |batch: RecordBatch| {
+        let left_result = lhs(batch.clone());
+        let right_result = rhs(batch.clone());
+
+        match (left_result, right_result) {
+            (Ok(left), Ok(right)) => {
+                let result = arrow_arith::boolean::or(&left, &right)?;
+                Ok(result)
+            }
+            (Ok(left), Err(_)) => Ok(left),
+            (Err(_), Ok(right)) => Ok(right),
+            (Err(e1), Err(_)) => Err(e1),
+        }
+    }))
+}
+```
+
+This implementation addresses the following issues:
+
+1. It uses the correct `Result` type from `crate::error::Result`.
+2. It removes the `is_null` checks, which were not applicable to the `Box<PredicateResult>` type.
+3. It uses the `arrow_arith::boolean::or` function to perform the OR operation on `BooleanArray`s.
+4. It handles errors properly, returning the successful result if one side succeeds and the other fails.
+5. It wraps the closure in a `Box` to match the expected return type.
+
+Note that this implementation assumes that the `PredicateResult` type is defined as follows:
+
+```rust
+type PredicateResult = dyn FnMut(RecordBatch) -> std::result::Result<BooleanArray, ArrowError> + Send + 'static;
+```
+
+This implementation should resolve the compilation errors and provide the expected functionality for the `or` operation on predicates.</reapir response>

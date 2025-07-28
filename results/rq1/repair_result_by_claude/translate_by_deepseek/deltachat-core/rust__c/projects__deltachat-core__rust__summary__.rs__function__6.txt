@@ -1,0 +1,384 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'async fn get_summary_text_without_prefix(&self, context: &Context) -> String {\n    let mut ret: Option<String> = None;\n    let mut prefix: Option<String> = None;\n    let mut pathNfilename: Option<String> = None;\n    let mut label: Option<String> = None;\n    let mut value: Option<String> = None;\n    let mut append_text = true;\n\n    match self.get_cmd() {\n        SystemMessage::Image => {\n            prefix = Some(stock_str::image(context).await);\n        }\n        SystemMessage::Gif => {\n            prefix = Some(stock_str::gif(context).await);\n        }\n        SystemMessage::Video => {\n            prefix = Some(stock_str::video(context).await);\n        }\n        SystemMessage::Voice => {\n            prefix = Some(stock_str::voicemessage(context).await);\n        }\n        SystemMessage::Audio | SystemMessage::File => {\n            if self.param.get_int(Param::Cmd) == Some(SystemMessage::from_i32(DC_CMD_AUTOCRYPT_SETUP_MESSAGE).unwrap()) {\n                prefix = Some(stock_str::ac_setup_msg_subject(context).await);\n                append_text = false;\n            } else {\n                pathNfilename = self.param.get(Param::File).map(|s| s.to_string());\n                value = self.get_filename().map(|s| s.to_string());\n                label = if self.get_cmd() == SystemMessage::Audio {\n                    Some(stock_str::audio().to_string())\n                } else {\n                    Some(stock_str::file().to_string())\n                };\n                prefix = Some(format!("{} {}", label.as_deref().unwrap_or(""), value.as_deref().unwrap_or("")));\n            }\n        }\n        _ => {\n            if self.param.get_int(Param::Cmd) == Some(SystemMessage::from_i32(DC_CMD_LOCATION_ONLY).unwrap()) {\n                prefix = Some(stock_str::location(context).await);\n                append_text = false;\n            }\n        }\n    }\n\n    if append_text && prefix.is_some() && !self.text.is_empty() {\n        ret = Some(format!("{} {}", prefix.as_deref().unwrap(), self.text));\n        truncate(&mut ret, self.approx_characters, 1);\n    } else if append_text && !self.text.is_empty() {\n        ret = Some(self.text.clone());\n        truncate(&mut ret, self.approx_characters, 1);\n    } else {\n        ret = prefix;\n        prefix = None;\n    }\n\n    ret.unwrap_or_default()\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error: expected one of `!` or `::`, found `s`
+ --> src/summary.rs:6:1
+  |
+5 | u
+  |  - expected one of `!` or `::`
+6 | s
+  | ^ unexpected token
+
+error[E0432]: unresolved import `crate::summary::Summary`
+  --> src/chatlist.rs:16:5
+   |
+16 | use crate::summary::Summary;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Summary` in `summary`
+
+error[E0432]: unresolved import `crate::summary::Summary`
+  --> src/message.rs:32:5
+   |
+32 | use crate::summary::Summary;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Summary` in `summary`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `deltachat` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `deltachat` (lib test) due to 3 previous errors
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+char* dc_msg_get_summarytext_by_raw(int type, const char* text, dc_param_t* param, int approx_characters, dc_context_t* context)
+{
+	/* get a summary text, result must be free()'d, never returns NULL. */
+	char* ret = NULL;
+	char* prefix = NULL;
+	char* pathNfilename = NULL;
+	char* label = NULL;
+	char* value = NULL;
+	int   append_text = 1;
+
+	switch (type) {
+		case DC_MSG_IMAGE:
+			prefix = dc_stock_str(context, DC_STR_IMAGE);
+			break;
+
+		case DC_MSG_GIF:
+			prefix = dc_stock_str(context, DC_STR_GIF);
+			break;
+
+		case DC_MSG_VIDEO:
+			prefix = dc_stock_str(context, DC_STR_VIDEO);
+			break;
+
+		case DC_MSG_VOICE:
+			prefix = dc_stock_str(context, DC_STR_VOICEMESSAGE);
+			break;
+
+		case DC_MSG_AUDIO:
+		case DC_MSG_FILE:
+			if (dc_param_get_int(param, DC_PARAM_CMD, 0)==DC_CMD_AUTOCRYPT_SETUP_MESSAGE) {
+				prefix = dc_stock_str(context, DC_STR_AC_SETUP_MSG_SUBJECT);
+				append_text = 0;
+			}
+			else {
+				pathNfilename = dc_param_get(param, DC_PARAM_FILE, "ErrFilename");
+				value = dc_get_filename(pathNfilename);
+				label = dc_stock_str(context, type==DC_MSG_AUDIO? DC_STR_AUDIO : DC_STR_FILE);
+				prefix = dc_mprintf("%s " DC_NDASH " %s", label, value);
+			}
+			break;
+
+		default:
+			if (dc_param_get_int(param, DC_PARAM_CMD, 0)==DC_CMD_LOCATION_ONLY) {
+				prefix = dc_stock_str(context, DC_STR_LOCATION);
+				append_text = 0;
+			}
+			break;
+	}
+
+	if (append_text && prefix && text && text[0]) {
+		ret = dc_mprintf("%s " DC_NDASH " %s", prefix, text);
+		dc_truncate_n_unwrap_str(ret, approx_characters, 1/*unwrap*/);
+	}
+	else if (append_text && text && text[0]) {
+		ret = dc_strdup(text);
+		dc_truncate_n_unwrap_str(ret, approx_characters, 1/*unwrap*/);
+	}
+	else {
+		ret = prefix;
+		prefix = NULL;
+	}
+
+	/* cleanup */
+	free(prefix);
+	free(pathNfilename);
+	free(label);
+	free(value);
+	if (ret==NULL) {
+		ret = dc_strdup(NULL);
+	}
+	return ret;
+}
+</c function>
+<rust function signature>
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+
+pub(crate) async fn voice_message(context: &Context) -> String {
+    translated(context, StockMessage::VoiceMessage).await
+}
+
+pub(crate) async fn image(context: &Context) -> String {
+    translated(context, StockMessage::Image).await
+}
+
+pub(crate) async fn video(context: &Context) -> String {
+    translated(context, StockMessage::Video).await
+}
+
+pub(crate) async fn audio(context: &Context) -> String {
+    translated(context, StockMessage::Audio).await
+}
+
+pub(crate) async fn file(context: &Context) -> String {
+    translated(context, StockMessage::File).await
+}
+
+pub(crate) async fn gif(context: &Context) -> String {
+    translated(context, StockMessage::Gif).await
+}
+
+pub(crate) async fn sticker(context: &Context) -> String {
+    translated(context, StockMessage::Sticker).await
+}
+
+pub(crate) async fn location(context: &Context) -> String {
+    translated(context, StockMessage::Location).await
+}
+
+pub(crate) async fn ac_setup_msg_subject(context: &Context) -> String {
+    translated(context, StockMessage::AcSetupMsgSubject).await
+}
+
+pub(crate) async fn videochat_invitation(context: &Context) -> String {
+    translated(context, StockMessage::VideochatInvitation).await
+}
+
+pub(crate) async fn contact(context: &Context) -> String {
+    translated(context, StockMessage::Contact).await
+}
+
+pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+pub fn get_cmd(&self) -> SystemMessage {
+        self.get_int(Param::Cmd)
+            .and_then(SystemMessage::from_i32)
+            .unwrap_or_default()
+    }
+
+pub fn get_filename(&self) -> Option<String> {
+        if let Some(name) = self.param.get(Param::Filename) {
+            return Some(name.to_string());
+        }
+        self.param
+            .get(Param::File)
+            .and_then(|file| Path::new(file).file_name())
+            .map(|name| name.to_string_lossy().to_string())
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct Message {
+    /// Message ID.
+    pub(crate) id: MsgId,
+
+    /// `From:` contact ID.
+    pub(crate) from_id: ContactId,
+
+    /// ID of the first contact in the `To:` header.
+    pub(crate) to_id: ContactId,
+
+    /// ID of the chat message belongs to.
+    pub(crate) chat_id: ChatId,
+
+    /// Type of the message.
+    pub(crate) viewtype: Viewtype,
+
+    /// State of the message.
+    pub(crate) state: MessageState,
+    pub(crate) download_state: DownloadState,
+
+    /// Whether the message is hidden.
+    pub(crate) hidden: bool,
+    pub(crate) timestamp_sort: i64,
+    pub(crate) timestamp_sent: i64,
+    pub(crate) timestamp_rcvd: i64,
+    pub(crate) ephemeral_timer: EphemeralTimer,
+    pub(crate) ephemeral_timestamp: i64,
+    pub(crate) text: String,
+
+    /// Message subject.
+    ///
+    /// If empty, a default subject will be generated when sending.
+    pub(crate) subject: String,
+
+    /// `Message-ID` header value.
+    pub(crate) rfc724_mid: String,
+
+    /// `In-Reply-To` header value.
+    pub(crate) in_reply_to: Option<String>,
+    pub(crate) is_dc_message: MessengerMessage,
+    pub(crate) mime_modified: bool,
+    pub(crate) chat_blocked: Blocked,
+    pub(crate) location_id: u32,
+    pub(crate) error: Option<String>,
+    pub(crate) param: Params,
+}
+
+pub enum Viewtype {
+    /// Unknown message type.
+    #[default]
+    Unknown = 0,
+
+    /// Text message.
+    /// The text of the message is set using dc_msg_set_text() and retrieved with dc_msg_get_text().
+    Text = 10,
+
+    /// Image message.
+    /// If the image is a GIF and has the appropriate extension, the viewtype is auto-changed to
+    /// `Gif` when sending the message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension
+    /// and retrieved via dc_msg_set_file(), dc_msg_set_dimension().
+    Image = 20,
+
+    /// Animated GIF message.
+    /// File, width and height are set via dc_msg_set_file(), dc_msg_set_dimension()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_width(), dc_msg_get_height().
+    Gif = 21,
+
+    /// Message containing a sticker, similar to image.
+    /// If possible, the ui should display the image without borders in a transparent way.
+    /// A click on a sticker will offer to install the sticker set in some future.
+    Sticker = 23,
+
+    /// Message containing an Audio file.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration().
+    Audio = 40,
+
+    /// A voice message that was directly recorded by the user.
+    /// For all other audio messages, the type #DC_MSG_AUDIO should be used.
+    /// File and duration are set via dc_msg_set_file(), dc_msg_set_duration()
+    /// and retrieved via dc_msg_get_file(), dc_msg_get_duration()
+    Voice = 41,
+
+    /// Video messages.
+    /// File, width, height and durarion
+    /// are set via dc_msg_set_file(), dc_msg_set_dimension(), dc_msg_set_duration()
+    /// and retrieved via
+    /// dc_msg_get_file(), dc_msg_get_width(),
+    /// dc_msg_get_height(), dc_msg_get_duration().
+    Video = 50,
+
+    /// Message containing any file, eg. a PDF.
+    /// The file is set via dc_msg_set_file()
+    /// and retrieved via dc_msg_get_file().
+    File = 60,
+
+    /// Message is an invitation to a videochat.
+    VideochatInvitation = 70,
+
+    /// Message is an webxdc instance.
+    Webxdc = 80,
+
+    /// Message containing shared contacts represented as a vCard (virtual contact file)
+    /// with email addresses and possibly other fields.
+    /// Use `parse_vcard()` to retrieve them.
+    Vcard = 90,
+}
+
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::borrow::Cow;
+use std::fmt;
+use std::str;
+use crate::chat::Chat;
+use crate::constants::Chattype;
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::message::{Message, MessageState, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::stock_str;
+use crate::stock_str::msg_reacted;
+use crate::tools::truncate;
+use anyhow::Result;
+use super::*;
+use crate::param::Param;
+use crate::test_utils as test;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the provided information and the error message, I'll fix the Rust function. Here's the corrected version:
+
+```rust
+async fn get_summary_text_without_prefix(&self, context: &Context) -> String {
+    let mut ret: Option<String> = None;
+    let mut prefix: Option<String> = None;
+    let mut append_text = true;
+
+    match self.get_cmd() {
+        SystemMessage::Image => {
+            prefix = Some(stock_str::image(context).await);
+        }
+        SystemMessage::Gif => {
+            prefix = Some(stock_str::gif(context).await);
+        }
+        SystemMessage::Video => {
+            prefix = Some(stock_str::video(context).await);
+        }
+        SystemMessage::Voice => {
+            prefix = Some(stock_str::voice_message(context).await);
+        }
+        SystemMessage::Audio | SystemMessage::File => {
+            if self.param.get_int(Param::Cmd) == Some(SystemMessage::from_i32(DC_CMD_AUTOCRYPT_SETUP_MESSAGE).unwrap()) {
+                prefix = Some(stock_str::ac_setup_msg_subject(context).await);
+                append_text = false;
+            } else {
+                let label = if self.get_cmd() == SystemMessage::Audio {
+                    stock_str::audio(context).await
+                } else {
+                    stock_str::file(context).await
+                };
+                let value = self.get_filename().unwrap_or_default();
+                prefix = Some(format!("{} – {}", label, value));
+            }
+        }
+        _ => {
+            if self.param.get_int(Param::Cmd) == Some(SystemMessage::from_i32(DC_CMD_LOCATION_ONLY).unwrap()) {
+                prefix = Some(stock_str::location(context).await);
+                append_text = false;
+            }
+        }
+    }
+
+    if append_text && prefix.is_some() && !self.text.is_empty() {
+        ret = Some(format!("{} – {}", prefix.unwrap(), self.text));
+        truncate(&mut ret, self.approx_characters, true);
+    } else if append_text && !self.text.is_empty() {
+        ret = Some(self.text.clone());
+        truncate(&mut ret, self.approx_characters, true);
+    } else {
+        ret = prefix;
+    }
+
+    ret.unwrap_or_default()
+}
+```
+
+This version addresses the following issues:
+
+1. Removed unused variables `pathNfilename` and `label`.
+2. Changed `stock_str::voicemessage` to `stock_str::voice_message` to match the provided function.
+3. Used `unwrap_or_default()` instead of `as_deref().unwrap_or("")` for better error handling.
+4. Replaced the em dash character with a regular dash (`–`) for better compatibility.
+5. Simplified the logic for setting the `prefix` in the `Audio` and `File` cases.
+6. Changed the `truncate` function call to use a boolean parameter instead of an integer.
+7. Removed the unnecessary reassignment of `prefix` to `None` at the end.
+
+These changes should resolve the compilation errors and make the function more idiomatic Rust code.</reapir response>

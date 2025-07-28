@@ -1,0 +1,698 @@
+<message>
+you were asked to translate the given python function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, python function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'use crate::arrow::ArrowReaderBuilder;\nuse crate::expr::visitors::expression_evaluator::ExpressionEvaluator;\nuse crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;\nuse crate::expr::visitors::inclusive_projection::InclusiveProjection;\nuse crate::expr::visitors::manifest_evaluator::ManifestEvaluator;\nuse crate::expr::{Bind, BoundPredicate, Predicate};\nuse crate::io::FileIO;\nuse crate::spec::{\n    DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef,\n    TableMetadataRef,\n};\nuse crate::table::Table;\nuse crate::{Error, ErrorKind, Result};\nuse arrow_array::RecordBatch;\nuse async_stream::try_stream;\nuse futures::stream::BoxStream;\nuse futures::StreamExt;\nuse serde::{Deserialize, Serialize};\nuse std::collections::hash_map::Entry;\nuse std::collections::HashMap;\nuse std::sync::Arc;\nuse crate::expr::Reference;\nuse crate::io::{FileIO, OutputFile};\nuse crate::spec::{\n        DataContentType, DataFileBuilder, DataFileFormat, Datum, FormatVersion, Literal, Manifest,\n        ManifestContentType, ManifestEntry, ManifestListWriter, ManifestMetadata, ManifestStatus,\n        ManifestWriter, Struct, TableMetadata, EMPTY_SNAPSHOT_ID,\n    };\nuse crate::table::Table;\nuse crate::TableIdent;\nuse arrow_array::{ArrayRef, Int64Array, RecordBatch};\nuse futures::TryStreamExt;\nuse parquet::arrow::{ArrowWriter, PARQUET_FIELD_ID_META_KEY};\nuse parquet::basic::Compression;\nuse parquet::file::properties::WriterProperties;\nuse std::collections::HashMap;\nuse std::fs;\nuse std::fs::File;\nuse std::sync::Arc;\nuse tempfile::TempDir;\nuse tera::{Context, Tera};\nuse uuid::Uuid;\n\npub async fn plan_files(&self) -> Result<FileScanTaskStream> {\n    let snapshot = self.snapshot();\n    if snapshot.is_none() {\n        return Ok(Box::pin(try_stream! {\n            yield FileScanTask::default();\n        }));\n    }\n\n    let snapshot = snapshot.unwrap();\n\n    // step 1: filter manifests using partition summaries\n    let mut manifest_evaluators: HashMap<i32, Box<dyn Fn(&ManifestFile) -> bool>> = HashMap::new();\n    let manifests = snapshot.manifests(self.io()).await?;\n    let filtered_manifests: Vec<ManifestFile> = manifests.into_iter().filter(|manifest_file| {\n        let evaluator = manifest_evaluators.entry(manifest_file.partition_spec_id()).unwrap_or_else(|| {\n            Box::new(self._build_manifest_evaluator(manifest_file.partition_spec_id()))\n        });\n        evaluator(manifest_file)\n    }).collect();\n\n    // step 2: filter the data files in each manifest\n    let mut partition_evaluators: HashMap<i32, Box<dyn Fn(&DataFile) -> bool>> = HashMap::new();\n    let metrics_evaluator = _InclusiveMetricsEvaluator::new(\n        self.table_metadata().schema().clone(),\n        self.row_filter(),\n        self.case_sensitive(),\n        self.options().get("include_empty_files") == Some("true"),\n    ).eval;\n\n    let min_data_sequence_number = _min_data_file_sequence_number(&filtered_manifests).await?;\n\n    let mut data_entries: Vec<ManifestEntry> = Vec::new();\n    let mut positional_delete_entries = SortedList::new();\n\n    let executor = ExecutorFactory::get_or_create().await;\n    let tasks: Vec<_> = executor.map(|args| {\n        let (io, manifest, partition_evaluator, metrics_evaluator) = args;\n        let partition_spec_id = manifest.partition_spec_id();\n        let evaluator = partition_evaluators.entry(partition_spec_id).or_insert_with(|| {\n            Box::new(self._build_partition_evaluator(partition_spec_id))\n        });\n        (io, manifest, evaluator, metrics_evaluator)\n    }).filter_map(|(io, manifest, partition_evaluator, metrics_evaluator)| {\n        if self._check_sequence_number(min_data_sequence_number, &manifest).await? {\n            let entries = _open_manifest(io, manifest, partition_evaluator, metrics_evaluator).await?;\n            Some(entries)\n        } else {\n            None\n        }\n    }).flatten().collect();\n\n    for task in tasks {\n        for entry in task {\n            if entry.data_file().content == DataFileContent::DATA {\n                data_entries.push(entry);\n            } else if entry.data_file().content == DataFileContent::POSITION_DELETES {\n                positional_delete_entries.add(entry);\n            } else if entry.data_file().content == DataFileContent::EQUALITY_DELETES {\n                return Err(Error::new(ErrorKind::Unsupported, "PyIceberg does not yet support equality deletes"));\n            } else {\n                return Err(Error::new(ErrorKind::Unknown, format!("Unknown DataFileContent ({:?})", entry.data_file().content)));\n            }\n        }\n    }\n\n    let file_scan_tasks: Vec<FileScanTask> = data_entries.into_iter().map(|data_entry| {\n        FileScanTask::new(\n            data_entry.data_file().clone(),\n            _match_deletes_to_data_file(data_entry, &positional_delete_entries).await?,\n        )\n    }).collect();\n\n    Ok(Box::pin(try_stream! {\n        for task in file_scan_tasks {\n            yield task;\n        }\n    }))\n}'
+</previous response>
+<error message>
+Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+error[E0412]: cannot find type `DataFile` in this scope
+   --> crates/iceberg/src/scan.rs:221:60
+    |
+221 |     let mut partition_evaluators: HashMap<i32, Box<dyn Fn(&DataFile) -> bool>> = HashMap::new();
+    |                                                            ^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct through its public re-export
+    |
+20  + use crate::spec::DataFile;
+    |
+
+error[E0412]: cannot find type `ManifestEntry` in this scope
+   --> crates/iceberg/src/scan.rs:231:31
+    |
+231 |     let mut data_entries: Vec<ManifestEntry> = Vec::new();
+    |                               ^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct through its public re-export
+    |
+20  + use crate::spec::ManifestEntry;
+    |
+
+warning: unused import: `crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator`
+  --> crates/iceberg/src/scan.rs:22:5
+   |
+22 | use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `DataContentType`
+  --> crates/iceberg/src/scan.rs:28:5
+   |
+28 |     DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef,
+   |     ^^^^^^^^^^^^^^^
+
+warning: unused import: `async_stream::try_stream`
+  --> crates/iceberg/src/scan.rs:34:5
+   |
+34 | use async_stream::try_stream;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `snapshot` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:204:25
+    |
+204 |     let snapshot = self.snapshot();
+    |                         ^^^^^^^^-- help: remove the arguments
+    |                         |
+    |                         field, not a method
+
+error[E0599]: no method named `io` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:213:45
+    |
+213 |     let manifests = snapshot.manifests(self.io()).filter(|manifest_file| {
+    |                                             ^^ method not found in `&TableScan`
+
+error[E0599]: no method named `unwrap_or_else` found for enum `std::collections::hash_map::Entry` in the current scope
+   --> crates/iceberg/src/scan.rs:214:86
+    |
+214 |         let evaluator = manifest_evaluators.entry(manifest_file.partition_spec_id()).unwrap_or_else(|| {
+    |                         -------------------------------------------------------------^^^^^^^^^^^^^^ method not found in `Entry<'_, i32, ManifestEvaluator>`
+
+error[E0599]: no method named `_build_manifest_evaluator` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:215:18
+    |
+215 |             self._build_manifest_evaluator(manifest_file.partition_spec_id())
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&TableScan`
+
+error[E0433]: failed to resolve: use of undeclared crate or module `_InclusiveMetricsEvaluator`
+   --> crates/iceberg/src/scan.rs:222:29
+    |
+222 |     let metrics_evaluator = _InclusiveMetricsEvaluator::new(
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |                             |
+    |                             use of undeclared crate or module `_InclusiveMetricsEvaluator`
+    |                             help: a struct with a similar name exists: `InclusiveMetricsEvaluator`
+
+error[E0599]: no method named `table_metadata` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:223:14
+    |
+223 |         self.table_metadata().schema().clone(),
+    |              ^^^^^^^^^^^^^^-- help: remove the arguments
+    |              |
+    |              field, not a method
+
+error[E0599]: no method named `row_filter` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:224:14
+    |
+224 |         self.row_filter(),
+    |              ^^^^^^^^^^ method not found in `&TableScan`
+
+error[E0599]: no method named `case_sensitive` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:225:14
+    |
+225 |         self.case_sensitive(),
+    |              ^^^^^^^^^^^^^^-- help: remove the arguments
+    |              |
+    |              field, not a method
+
+error[E0599]: no method named `options` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:226:14
+    |
+226 |         self.options().get("include_empty_files") == Some("true"),
+    |              ^^^^^^^ method not found in `&TableScan`
+
+error[E0425]: cannot find function `_min_data_file_sequence_number` in this scope
+   --> crates/iceberg/src/scan.rs:229:36
+    |
+229 |     let min_data_sequence_number = _min_data_file_sequence_number(&manifests);
+    |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `SortedList`
+   --> crates/iceberg/src/scan.rs:232:41
+    |
+232 |     let mut positional_delete_entries = SortedList::new();
+    |                                         ^^^^^^^^^^ use of undeclared type `SortedList`
+
+error[E0433]: failed to resolve: use of undeclared type `ExecutorFactory`
+   --> crates/iceberg/src/scan.rs:234:20
+    |
+234 |     let executor = ExecutorFactory::get_or_create();
+    |                    ^^^^^^^^^^^^^^^ use of undeclared type `ExecutorFactory`
+
+error[E0599]: no method named `_check_sequence_number` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:238:21
+    |
+238 |             if self._check_sequence_number(min_data_sequence_number, &manifest) {
+    |                     ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&TableScan`
+
+error[E0599]: no method named `io` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:240:26
+    |
+240 |                     self.io(),
+    |                          ^^ method not found in `&TableScan`
+
+error[E0599]: no method named `_build_partition_evaluator` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:243:30
+    |
+243 |                         self._build_partition_evaluator(manifest.partition_spec_id())
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&TableScan`
+
+error[E0425]: cannot find function `_open_manifest` in this scope
+   --> crates/iceberg/src/scan.rs:236:16
+    |
+236 |         |args| _open_manifest(*args),
+    |                ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `DataFileContent`
+   --> crates/iceberg/src/scan.rs:253:33
+    |
+253 |         if data_file.content == DataFileContent::DATA {
+    |                                 ^^^^^^^^^^^^^^^ use of undeclared type `DataFileContent`
+
+warning: unused import: `futures::StreamExt`
+  --> crates/iceberg/src/scan.rs:36:5
+   |
+36 | use futures::StreamExt;
+   |     ^^^^^^^^^^^^^^^^^^
+
+Some errors have detailed explanations: E0412, E0425, E0433, E0599.
+For more information about an error, try `rustc --explain E0412`.
+warning: `iceberg` (lib) generated 4 warnings
+error: could not compile `iceberg` (lib) due to 19 previous errors; 4 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+warning: `iceberg` (lib test) generated 4 warnings (4 duplicates)
+error: could not compile `iceberg` (lib test) due to 19 previous errors; 4 warnings emitted
+
+   Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+error[E0412]: cannot find type `DataFile` in this scope
+   --> crates/iceberg/src/scan.rs:221:60
+    |
+221 |     let mut partition_evaluators: HashMap<i32, Box<dyn Fn(&DataFile) -> bool>> = HashMap::new();
+    |                                                            ^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct through its public re-export
+    |
+20  + use crate::spec::DataFile;
+    |
+
+error[E0412]: cannot find type `ManifestEntry` in this scope
+   --> crates/iceberg/src/scan.rs:231:31
+    |
+231 |     let mut data_entries: Vec<ManifestEntry> = Vec::new();
+    |                               ^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct through its public re-export
+    |
+20  + use crate::spec::ManifestEntry;
+    |
+
+warning: unused import: `crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator`
+  --> crates/iceberg/src/scan.rs:22:5
+   |
+22 | use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `DataContentType`
+  --> crates/iceberg/src/scan.rs:28:5
+   |
+28 |     DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef,
+   |     ^^^^^^^^^^^^^^^
+
+warning: unused import: `async_stream::try_stream`
+  --> crates/iceberg/src/scan.rs:34:5
+   |
+34 | use async_stream::try_stream;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `snapshot` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:204:25
+    |
+204 |     let snapshot = self.snapshot();
+    |                         ^^^^^^^^-- help: remove the arguments
+    |                         |
+    |                         field, not a method
+
+error[E0599]: no method named `io` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:213:45
+    |
+213 |     let manifests = snapshot.manifests(self.io()).filter(|manifest_file| {
+    |                                             ^^ method not found in `&TableScan`
+
+error[E0599]: no method named `unwrap_or_else` found for enum `std::collections::hash_map::Entry` in the current scope
+   --> crates/iceberg/src/scan.rs:214:86
+    |
+214 |         let evaluator = manifest_evaluators.entry(manifest_file.partition_spec_id()).unwrap_or_else(|| {
+    |                         -------------------------------------------------------------^^^^^^^^^^^^^^ method not found in `Entry<'_, i32, ManifestEvaluator>`
+
+error[E0599]: no method named `_build_manifest_evaluator` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:215:18
+    |
+215 |             self._build_manifest_evaluator(manifest_file.partition_spec_id())
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&TableScan`
+
+error[E0433]: failed to resolve: use of undeclared crate or module `_InclusiveMetricsEvaluator`
+   --> crates/iceberg/src/scan.rs:222:29
+    |
+222 |     let metrics_evaluator = _InclusiveMetricsEvaluator::new(
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |                             |
+    |                             use of undeclared crate or module `_InclusiveMetricsEvaluator`
+    |                             help: a struct with a similar name exists: `InclusiveMetricsEvaluator`
+
+error[E0599]: no method named `table_metadata` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:223:14
+    |
+223 |         self.table_metadata().schema().clone(),
+    |              ^^^^^^^^^^^^^^-- help: remove the arguments
+    |              |
+    |              field, not a method
+
+error[E0599]: no method named `row_filter` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:224:14
+    |
+224 |         self.row_filter(),
+    |              ^^^^^^^^^^ method not found in `&TableScan`
+
+error[E0599]: no method named `case_sensitive` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:225:14
+    |
+225 |         self.case_sensitive(),
+    |              ^^^^^^^^^^^^^^-- help: remove the arguments
+    |              |
+    |              field, not a method
+
+error[E0599]: no method named `options` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:226:14
+    |
+226 |         self.options().get("include_empty_files") == Some("true"),
+    |              ^^^^^^^ method not found in `&TableScan`
+
+error[E0425]: cannot find function `_min_data_file_sequence_number` in this scope
+   --> crates/iceberg/src/scan.rs:229:36
+    |
+229 |     let min_data_sequence_number = _min_data_file_sequence_number(&manifests);
+    |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `SortedList`
+   --> crates/iceberg/src/scan.rs:232:41
+    |
+232 |     let mut positional_delete_entries = SortedList::new();
+    |                                         ^^^^^^^^^^ use of undeclared type `SortedList`
+
+error[E0433]: failed to resolve: use of undeclared type `ExecutorFactory`
+   --> crates/iceberg/src/scan.rs:234:20
+    |
+234 |     let executor = ExecutorFactory::get_or_create();
+    |                    ^^^^^^^^^^^^^^^ use of undeclared type `ExecutorFactory`
+
+error[E0599]: no method named `_check_sequence_number` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:238:21
+    |
+238 |             if self._check_sequence_number(min_data_sequence_number, &manifest) {
+    |                     ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&TableScan`
+
+error[E0599]: no method named `io` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:240:26
+    |
+240 |                     self.io(),
+    |                          ^^ method not found in `&TableScan`
+
+error[E0599]: no method named `_build_partition_evaluator` found for reference `&TableScan` in the current scope
+   --> crates/iceberg/src/scan.rs:243:30
+    |
+243 |                         self._build_partition_evaluator(manifest.partition_spec_id())
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&TableScan`
+
+error[E0425]: cannot find function `_open_manifest` in this scope
+   --> crates/iceberg/src/scan.rs:236:16
+    |
+236 |         |args| _open_manifest(*args),
+    |                ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `DataFileContent`
+   --> crates/iceberg/src/scan.rs:253:33
+    |
+253 |         if data_file.content == DataFileContent::DATA {
+    |                                 ^^^^^^^^^^^^^^^ use of undeclared type `DataFileContent`
+
+warning: unused import: `futures::StreamExt`
+  --> crates/iceberg/src/scan.rs:36:5
+   |
+36 | use futures::StreamExt;
+   |     ^^^^^^^^^^^^^^^^^^
+
+Some errors have detailed explanations: E0412, E0425, E0433, E0599.
+For more information about an error, try `rustc --explain E0412`.
+warning: `iceberg` (lib) generated 4 warnings
+error: could not compile `iceberg` (lib) due to 19 previous errors; 4 warnings emitted
+</error message>
+<python function>
+def plan_files(self) -> Iterable[FileScanTask]:
+        """Plans the relevant files by filtering on the PartitionSpecs.
+
+        Returns:
+            List of FileScanTasks that contain both data and delete files.
+        """
+        snapshot = self.snapshot()
+        if not snapshot:
+            return iter([])
+
+        # step 1: filter manifests using partition summaries
+        # the filter depends on the partition spec used to write the manifest file, so create a cache of filters for each spec id
+
+        manifest_evaluators: Dict[int, Callable[[ManifestFile], bool]] = KeyDefaultDict(self._build_manifest_evaluator)
+
+        manifests = [
+            manifest_file
+            for manifest_file in snapshot.manifests(self.io)
+            if manifest_evaluators[manifest_file.partition_spec_id](manifest_file)
+        ]
+
+        # step 2: filter the data files in each manifest
+        # this filter depends on the partition spec used to write the manifest file
+
+        partition_evaluators: Dict[int, Callable[[DataFile], bool]] = KeyDefaultDict(self._build_partition_evaluator)
+        metrics_evaluator = _InclusiveMetricsEvaluator(
+            self.table_metadata.schema(), self.row_filter, self.case_sensitive, self.options.get("include_empty_files") == "true"
+        ).eval
+
+        min_data_sequence_number = _min_data_file_sequence_number(manifests)
+
+        data_entries: List[ManifestEntry] = []
+        positional_delete_entries = SortedList(key=lambda entry: entry.data_sequence_number or INITIAL_SEQUENCE_NUMBER)
+
+        executor = ExecutorFactory.get_or_create()
+        for manifest_entry in chain(
+            *executor.map(
+                lambda args: _open_manifest(*args),
+                [
+                    (
+                        self.io,
+                        manifest,
+                        partition_evaluators[manifest.partition_spec_id],
+                        metrics_evaluator,
+                    )
+                    for manifest in manifests
+                    if self._check_sequence_number(min_data_sequence_number, manifest)
+                ],
+            )
+        ):
+            data_file = manifest_entry.data_file
+            if data_file.content == DataFileContent.DATA:
+                data_entries.append(manifest_entry)
+            elif data_file.content == DataFileContent.POSITION_DELETES:
+                positional_delete_entries.add(manifest_entry)
+            elif data_file.content == DataFileContent.EQUALITY_DELETES:
+                raise ValueError("PyIceberg does not yet support equality deletes: https://github.com/apache/iceberg/issues/6568")
+            else:
+                raise ValueError(f"Unknown DataFileContent ({data_file.content}): {manifest_entry}")
+
+        return [
+            FileScanTask(
+                data_entry.data_file,
+                delete_files=_match_deletes_to_data_file(
+                    data_entry,
+                    positional_delete_entries,
+                ),
+            )
+            for data_entry in data_entries
+        ]
+</python function>
+<rust function signature>
+pub async fn plan_files(&self) -> Result<FileScanTaskStream> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn entries(&self) -> &[ManifestEntryRef] {
+        &self.entries
+    }
+
+pub fn content_type(&self) -> DataContentType {
+        self.content
+    }
+
+pub fn file_size_in_bytes(&self) -> u64 {
+        self.file_size_in_bytes
+    }
+
+fn bound_filter(&self) -> Option<&BoundPredicate> {
+        self.bound_filter.as_ref()
+    }
+
+pub fn file_path(&self) -> &str {
+        &self.file_path
+    }
+
+pub fn filter(mut self, predicate: Predicate) -> Self {
+        self.predicates = Some(predicate);
+        self
+    }
+
+pub fn data_file(&self) -> &DataFile {
+        &self.data_file
+    }
+
+pub(crate) fn eval(&self, data_file: &DataFile) -> Result<bool> {
+        let mut visitor = ExpressionEvaluatorVisitor::new(self, data_file.partition());
+
+        visit(&mut visitor, &self.partition_filter)
+    }
+
+fn get(&mut self, spec_id: i32, partition_filter: &BoundPredicate) -> &mut ExpressionEvaluator {
+        self.0
+            .entry(spec_id)
+            .or_insert(ExpressionEvaluator::new(partition_filter.clone()))
+    }
+
+fn new(
+        schema: SchemaRef,
+        snapshot: SnapshotRef,
+        table_metadata: TableMetadataRef,
+        file_io: FileIO,
+        filter: Option<Arc<Predicate>>,
+        case_sensitive: bool,
+    ) -> Result<Self> {
+        let bound_filter = match filter {
+            Some(ref filter) => Some(filter.bind(schema.clone(), case_sensitive)?),
+            None => None,
+        };
+
+        Ok(Self {
+            schema,
+            snapshot,
+            table_metadata,
+            file_io,
+            bound_filter,
+            case_sensitive,
+        })
+    }
+
+fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+fn content_type_is_data(entry: &ManifestFile) -> bool {
+        if let ManifestContentType::Data = entry.content {
+            return true;
+        }
+        false
+    }
+
+pub(crate) fn eval(
+        filter: &'a BoundPredicate,
+        data_file: &'a DataFile,
+        include_empty_files: bool,
+    ) -> crate::Result<bool> {
+        if !include_empty_files && data_file.record_count == 0 {
+            return ROWS_CANNOT_MATCH;
+        }
+
+        let mut evaluator = Self::new(data_file);
+        visit(&mut evaluator, filter)
+    }
+    
+pub struct TableScan {
+    snapshot: SnapshotRef,
+    table_metadata: TableMetadataRef,
+    file_io: FileIO,
+    column_names: Vec<String>,
+    bound_predicates: Option<BoundPredicate>,
+    schema: SchemaRef,
+    batch_size: Option<usize>,
+    case_sensitive: bool,
+    filter: Option<Arc<Predicate>>,
+}
+
+struct FileScanStreamContext {
+    schema: SchemaRef,
+    snapshot: SnapshotRef,
+    table_metadata: TableMetadataRef,
+    file_io: FileIO,
+    bound_filter: Option<BoundPredicate>,
+    case_sensitive: bool,
+}
+
+struct PartitionFilterCache(HashMap<i32, BoundPredicate>);
+
+struct ManifestEvaluatorCache(HashMap<i32, ManifestEvaluator>);
+
+struct ExpressionEvaluatorCache(HashMap<i32, ExpressionEvaluator>);
+
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+
+
+pub enum DataContentType {
+    /// value: 0
+    Data = 0,
+    /// value: 1
+    PositionDeletes = 1,
+    /// value: 2
+    EqualityDeletes = 2,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use crate::arrow::ArrowReaderBuilder;
+use crate::expr::visitors::expression_evaluator::ExpressionEvaluator;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::visitors::inclusive_projection::InclusiveProjection;
+use crate::expr::visitors::manifest_evaluator::ManifestEvaluator;
+use crate::expr::{Bind, BoundPredicate, Predicate};
+use crate::io::FileIO;
+use crate::spec::{
+    DataContentType, ManifestContentType, ManifestFile, Schema, SchemaRef, SnapshotRef,
+    TableMetadataRef,
+};
+use crate::table::Table;
+use crate::{Error, ErrorKind, Result};
+use arrow_array::RecordBatch;
+use async_stream::try_stream;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+use crate::expr::Reference;
+use crate::io::{FileIO, OutputFile};
+use crate::spec::{
+        DataContentType, DataFileBuilder, DataFileFormat, Datum, FormatVersion, Literal, Manifest,
+        ManifestContentType, ManifestEntry, ManifestListWriter, ManifestMetadata, ManifestStatus,
+        ManifestWriter, Struct, TableMetadata, EMPTY_SNAPSHOT_ID,
+    };
+use crate::table::Table;
+use crate::TableIdent;
+use arrow_array::{ArrayRef, Int64Array, RecordBatch};
+use futures::TryStreamExt;
+use parquet::arrow::{ArrowWriter, PARQUET_FIELD_ID_META_KEY};
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
+use std::collections::HashMap;
+use std::fs;
+use std::fs::File;
+use std::sync::Arc;
+use tempfile::TempDir;
+use tera::{Context, Tera};
+use uuid::Uuid;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the error messages and the provided information, I'll make the necessary adjustments to fix the issues in the Rust function. Here's the updated function:
+
+```rust
+use crate::spec::{DataFile, ManifestEntry, DataContentType};
+use std::collections::HashMap;
+use futures::stream::StreamExt;
+use async_stream::try_stream;
+
+pub async fn plan_files(&self) -> Result<FileScanTaskStream> {
+    let snapshot = self.snapshot.as_ref();
+    if snapshot.is_none() {
+        return Ok(Box::pin(try_stream! {
+            yield FileScanTask::default();
+        }));
+    }
+
+    let snapshot = snapshot.unwrap();
+
+    // step 1: filter manifests using partition summaries
+    let mut manifest_evaluators: HashMap<i32, Box<dyn Fn(&ManifestFile) -> bool>> = HashMap::new();
+    let manifests = snapshot.manifests(&self.file_io).await?;
+    let filtered_manifests: Vec<ManifestFile> = manifests.into_iter().filter(|manifest_file| {
+        let evaluator = manifest_evaluators.entry(manifest_file.partition_spec_id()).or_insert_with(|| {
+            Box::new(self.build_manifest_evaluator(manifest_file.partition_spec_id()))
+        });
+        evaluator(manifest_file)
+    }).collect();
+
+    // step 2: filter the data files in each manifest
+    let mut partition_evaluators: HashMap<i32, Box<dyn Fn(&DataFile) -> bool>> = HashMap::new();
+    let metrics_evaluator = InclusiveMetricsEvaluator::new(
+        self.schema.clone(),
+        self.bound_predicates.as_ref(),
+        self.case_sensitive,
+        self.batch_size.map(|size| size > 0).unwrap_or(false),
+    );
+
+    let min_data_sequence_number = self.min_data_file_sequence_number(&filtered_manifests).await?;
+
+    let mut data_entries: Vec<ManifestEntry> = Vec::new();
+    let mut positional_delete_entries = Vec::new();
+
+    for manifest in filtered_manifests {
+        if self.check_sequence_number(min_data_sequence_number, &manifest).await? {
+            let partition_evaluator = partition_evaluators.entry(manifest.partition_spec_id()).or_insert_with(|| {
+                Box::new(self.build_partition_evaluator(manifest.partition_spec_id()))
+            });
+            let entries = self.open_manifest(&self.file_io, manifest, partition_evaluator, &metrics_evaluator).await?;
+            for entry in entries {
+                match entry.data_file().content_type() {
+                    DataContentType::Data => data_entries.push(entry),
+                    DataContentType::PositionDeletes => positional_delete_entries.push(entry),
+                    DataContentType::EqualityDeletes => return Err(Error::new(ErrorKind::FeatureUnsupported, "PyIceberg does not yet support equality deletes")),
+                    _ => return Err(Error::new(ErrorKind::Unexpected, format!("Unknown DataFileContent ({:?})", entry.data_file().content_type()))),
+                }
+            }
+        }
+    }
+
+    let file_scan_tasks: Vec<FileScanTask> = data_entries.into_iter().map(|data_entry| {
+        FileScanTask::new(
+            data_entry.data_file().clone(),
+            self.match_deletes_to_data_file(data_entry, &positional_delete_entries).await?,
+        )
+    }).collect();
+
+    Ok(Box::pin(try_stream! {
+        for task in file_scan_tasks {
+            yield task;
+        }
+    }))
+}
+```
+
+This updated version addresses the following issues:
+
+1. Imported necessary types: `DataFile`, `ManifestEntry`, and `DataContentType`.
+2. Changed `self.snapshot()` to `self.snapshot.as_ref()` to access the field instead of calling a method.
+3. Used `self.file_</reapir response>

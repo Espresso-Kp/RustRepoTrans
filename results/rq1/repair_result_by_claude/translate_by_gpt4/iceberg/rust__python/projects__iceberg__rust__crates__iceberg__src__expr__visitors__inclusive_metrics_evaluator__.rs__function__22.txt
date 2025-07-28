@@ -1,0 +1,333 @@
+<message>
+you were asked to translate the given python function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, python function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'fn not_starts_with(\n    &mut self,\n    reference: &BoundReference,\n    datum: &Datum,\n    _predicate: &BoundPredicate,\n) -> crate::Result<bool> {\n    match reference.field().schema().get_type() {\n        Type::Primitive(p) => {\n            let field_id = reference.field().id();\n\n            if self.may_contain_null(field_id) {\n                Ok(true)\n            } else {\n                let predicate_value = match datum {\n                    Datum::String(s) => s.clone(),\n                    _ => return Err(ErrorKind::InvalidInput("Expected string type for literal value").into()),\n                };\n\n                let lower_bound = match self.lower_bound(field_id) {\n                    Some(Datum::String(s)) => s.clone(),\n                    _ => return Ok(true),\n                };\n\n                let upper_bound = match self.upper_bound(field_id) {\n                    Some(Datum::String(s)) => s.clone(),\n                    _ => return Ok(true),\n                };\n\n                if lower_bound.starts_with(&predicate_value) && upper_bound.starts_with(&predicate_value) {\n                    Ok(false)\n                } else {\n                    Ok(true)\n                }\n            }\n        }\n        _ => Err(ErrorKind::InvalidInput("Expected primitive type for field").into()),\n    }\n}'
+</previous response>
+<error message>
+Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+error[E0308]: mismatched types
+   --> crates/iceberg/src/expr/visitors/inclusive_metrics_evaluator.rs:369:9
+    |
+368 |     match datum {
+    |           ----- this expression has type `&values::Datum`
+369 |         PrimitiveLiteral::String(s) => {
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Datum`, found `PrimitiveLiteral`
+
+error[E0308]: mismatched types
+   --> crates/iceberg/src/expr/visitors/inclusive_metrics_evaluator.rs:377:22
+    |
+376 |                 match (lower_bound_bytes, upper_bound_bytes) {
+    |                       -------------------------------------- this expression has type `(&values::Datum, &values::Datum)`
+377 |                     (PrimitiveLiteral::String(lb), PrimitiveLiteral::String(ub)) =>  {
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Datum`, found `PrimitiveLiteral`
+
+error[E0308]: mismatched types
+   --> crates/iceberg/src/expr/visitors/inclusive_metrics_evaluator.rs:377:52
+    |
+376 |                 match (lower_bound_bytes, upper_bound_bytes) {
+    |                       -------------------------------------- this expression has type `(&values::Datum, &values::Datum)`
+377 |                     (PrimitiveLiteral::String(lb), PrimitiveLiteral::String(ub)) =>  {
+    |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Datum`, found `PrimitiveLiteral`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `iceberg` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `iceberg` (lib test) due to 3 previous errors
+
+   Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+error[E0308]: mismatched types
+   --> crates/iceberg/src/expr/visitors/inclusive_metrics_evaluator.rs:369:9
+    |
+368 |     match datum {
+    |           ----- this expression has type `&values::Datum`
+369 |         PrimitiveLiteral::String(s) => {
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Datum`, found `PrimitiveLiteral`
+
+error[E0308]: mismatched types
+   --> crates/iceberg/src/expr/visitors/inclusive_metrics_evaluator.rs:377:22
+    |
+376 |                 match (lower_bound_bytes, upper_bound_bytes) {
+    |                       -------------------------------------- this expression has type `(&values::Datum, &values::Datum)`
+377 |                     (PrimitiveLiteral::String(lb), PrimitiveLiteral::String(ub)) =>  {
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Datum`, found `PrimitiveLiteral`
+
+error[E0308]: mismatched types
+   --> crates/iceberg/src/expr/visitors/inclusive_metrics_evaluator.rs:377:52
+    |
+376 |                 match (lower_bound_bytes, upper_bound_bytes) {
+    |                       -------------------------------------- this expression has type `(&values::Datum, &values::Datum)`
+377 |                     (PrimitiveLiteral::String(lb), PrimitiveLiteral::String(ub)) =>  {
+    |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Datum`, found `PrimitiveLiteral`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `iceberg` (lib) due to 3 previous errors
+</error message>
+<python function>
+def visit_not_starts_with(self, term: BoundTerm[L], literal: Literal[L]) -> bool:
+        field = term.ref().field
+        field_id: int = field.field_id
+
+        if self._may_contain_null(field_id):
+            return ROWS_MIGHT_MATCH
+
+        if not isinstance(field.field_type, PrimitiveType):
+            raise ValueError(f"Expected PrimitiveType: {field.field_type}")
+
+        prefix = str(literal.value)
+        len_prefix = len(prefix)
+
+        # not_starts_with will match unless all values must start with the prefix. This happens when
+        # the lower and upper bounds both start with the prefix.
+        if (lower_bound_bytes := self.lower_bounds.get(field_id)) and (upper_bound_bytes := self.upper_bounds.get(field_id)):
+            lower_bound = str(from_bytes(field.field_type, lower_bound_bytes))
+            upper_bound = str(from_bytes(field.field_type, upper_bound_bytes))
+
+            # if lower is shorter than the prefix then lower doesn't start with the prefix
+            if len(lower_bound) < len_prefix:
+                return ROWS_MIGHT_MATCH
+
+            if lower_bound[:len_prefix] == prefix:
+                # if upper is shorter than the prefix then upper can't start with the prefix
+                if len(upper_bound) < len_prefix:
+                    return ROWS_MIGHT_MATCH
+
+                if upper_bound[:len_prefix] == prefix:
+                    return ROWS_CANNOT_MATCH
+
+        return ROWS_MIGHT_MATCH
+</python function>
+<rust function signature>
+fn not_starts_with(
+        &mut self,
+        reference: &BoundReference,
+        datum: &Datum,
+        _predicate: &BoundPredicate,
+    ) -> crate::Result<bool> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn contains_nulls_only(&self, field_id: i32) -> bool {
+        let null_count = self.null_count(field_id);
+        let value_count = self.value_count(field_id);
+
+        null_count.is_some() && null_count == value_count
+    }
+
+fn lower_bound(&self, field_id: i32) -> Option<&Datum> {
+        self.data_file.lower_bounds.get(&field_id)
+    }
+
+pub(crate) fn literal(&self) -> &Datum {
+        &self.literal
+    }
+
+fn upper_bound(&self, field_id: i32) -> Option<&Datum> {
+        self.data_file.upper_bounds.get(&field_id)
+    }
+
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+
+pub(crate) struct InclusiveMetricsEvaluator<'a> {
+    data_file: &'a DataFile,
+}
+
+pub struct BoundReference {
+    // This maybe different from [`name`] filed in [`NestedField`] since this contains full path.
+    // For example, if the field is `a.b.c`, then `field.name` is `c`, but `original_name` is `a.b.c`.
+    column_name: String,
+    field: NestedFieldRef,
+    accessor: StructAccessorRef,
+}
+
+pub fn field(&self) -> &NestedField {
+    &self.field
+}
+
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+
+pub enum PrimitiveLiteral {
+    /// 0x00 for false, non-zero byte for true
+    Boolean(bool),
+    /// Stored as 4-byte little-endian
+    Int(i32),
+    /// Stored as 8-byte little-endian
+    Long(i64),
+    /// Stored as 4-byte little-endian
+    Float(OrderedFloat<f32>),
+    /// Stored as 8-byte little-endian
+    Double(OrderedFloat<f64>),
+    /// Stores days from the 1970-01-01 in an 4-byte little-endian int
+    Date(i32),
+    /// Stores microseconds from midnight in an 8-byte little-endian long
+    Time(i64),
+    /// Timestamp without timezone
+    Timestamp(i64),
+    /// Timestamp with timezone
+    Timestamptz(i64),
+    /// UTF-8 bytes (without length)
+    String(String),
+    /// 16-byte big-endian value
+    UUID(Uuid),
+    /// Binary value
+    Fixed(Vec<u8>),
+    /// Binary value (without length)
+    Binary(Vec<u8>),
+    /// Stores unscaled value as big int. According to iceberg spec, the precision must less than 38(`MAX_DECIMAL_PRECISION`) , so i128 is suit here.
+    Decimal(i128),
+}
+
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+
+pub struct NestedField {
+    /// Id unique in table schema
+    pub id: i32,
+    /// Field Name
+    pub name: String,
+    /// Optional or required
+    pub required: bool,
+    /// Datatype
+    pub field_type: Box<Type>,
+    /// Fields may have an optional comment or doc string.
+    pub doc: Option<String>,
+    /// Used to populate the field’s value for all records that were written before the field was added to the schema
+    pub initial_default: Option<Literal>,
+    /// Used to populate the field’s value for any records written after the field was added to the schema, if the writer does not supply the field’s value
+    pub write_default: Option<Literal>,
+}
+
+const ROWS_MIGHT_MATCH: crate::Result<bool> = Ok(true);
+
+const ROWS_CANNOT_MATCH: crate::Result<bool> = Ok(false);
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use crate::expr::visitors::bound_predicate_visitor::{visit, BoundPredicateVisitor};
+use crate::expr::{BoundPredicate, BoundReference};
+use crate::spec::{DataFile, Datum, PrimitiveLiteral};
+use crate::{Error, ErrorKind};
+use fnv::FnvHashSet;
+use crate::expr::visitors::inclusive_metrics_evaluator::InclusiveMetricsEvaluator;
+use crate::expr::PredicateOperator::{
+        Eq, GreaterThan, GreaterThanOrEq, In, IsNan, IsNull, LessThan, LessThanOrEq, NotEq, NotIn,
+        NotNan, NotNull, NotStartsWith, StartsWith,
+    };
+use crate::expr::{
+        BinaryExpression, Bind, BoundPredicate, Predicate, Reference, SetExpression,
+        UnaryExpression,
+    };
+use crate::spec::{
+        DataContentType, DataFile, DataFileFormat, Datum, NestedField, PartitionField,
+        PartitionSpec, PrimitiveType, Schema, Struct, Transform, Type,
+    };
+use fnv::FnvHashSet;
+use std::collections::HashMap;
+use std::ops::Not;
+use std::sync::Arc;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the error messages and the provided information, here's the corrected Rust function:
+
+```rust
+fn not_starts_with(
+    &mut self,
+    reference: &BoundReference,
+    datum: &Datum,
+    _predicate: &BoundPredicate,
+) -> crate::Result<bool> {
+    let field = reference.field();
+    let field_id = field.id;
+
+    if self.contains_nulls_only(field_id) {
+        return ROWS_MIGHT_MATCH;
+    }
+
+    if !matches!(field.field_type.as_ref(), Type::Primitive(_)) {
+        return Err(Error::new(ErrorKind::DataInvalid, "Expected primitive type for field"));
+    }
+
+    let prefix = match datum {
+        Datum::String(s) => s,
+        _ => return Err(Error::new(ErrorKind::DataInvalid, "Expected string type for literal value")),
+    };
+    let len_prefix = prefix.len();
+
+    if let (Some(lower_bound_datum), Some(upper_bound_datum)) = (self.lower_bound(field_id), self.upper_bound(field_id)) {
+        let lower_bound = match lower_bound_datum {
+            Datum::String(s) => s,
+            _ => return ROWS_MIGHT_MATCH,
+        };
+        let upper_bound = match upper_bound_datum {
+            Datum::String(s) => s,
+            _ => return ROWS_MIGHT_MATCH,
+        };
+
+        if lower_bound.len() < len_prefix {
+            return ROWS_MIGHT_MATCH;
+        }
+
+        if lower_bound.starts_with(prefix) {
+            if upper_bound.len() < len_prefix {
+                return ROWS_MIGHT_MATCH;
+            }
+
+            if upper_bound.starts_with(prefix) {
+                return ROWS_CANNOT_MATCH;
+            }
+        }
+    }
+
+    ROWS_MIGHT_MATCH
+}
+```
+
+This version addresses the following issues:
+
+1. It uses `Datum` instead of `PrimitiveLiteral` for pattern matching, as the input `datum` is of type `&Datum`.
+2. It uses `contains_nulls_only` instead of the non-existent `may_contain_null` method.
+3. It checks if the field type is primitive using `matches!` macro instead of `isinstance`.
+4. It uses `starts_with` method for string comparison instead of slicing.
+5. It properly handles the cases where lower or upper bounds might not be strings.
+6. It uses the provided `Error::new` method for creating error instances.
+
+This implementation should now compile without the previous errors and more closely match the behavior of the Python function.</reapir response>

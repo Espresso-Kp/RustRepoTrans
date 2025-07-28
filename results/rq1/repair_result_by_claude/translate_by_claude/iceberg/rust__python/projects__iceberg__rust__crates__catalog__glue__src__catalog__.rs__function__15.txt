@@ -1,0 +1,645 @@
+<message>
+you were asked to translate the given python function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, python function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> {\n    let from_database_name = validate_namespace(src.namespace())?;\n    let from_table_name = src.name();\n    let to_database_name = validate_namespace(dest.namespace())?;\n    let to_table_name = dest.name();\n\n    let get_table_builder = self\n        .client\n        .0\n        .get_table()\n        .database_name(&from_database_name)\n        .name(from_table_name);\n    let get_table_builder = with_catalog_id!(get_table_builder, self.config);\n\n    let get_table_response = get_table_builder\n        .send()\n        .await\n        .map_err(|e| Error::new(ErrorKind::NoSuchTable, format!("Table does not exist: {}.{}", from_database_name, from_table_name)))?;\n\n    let glue_table = get_table_response.table().ok_or_else(|| Error::new(ErrorKind::NoSuchTable, "Table response is empty"))?;\n\n    // Verify that src is a valid iceberg table\n    let metadata_location = get_metadata_location(glue_table)?;\n    let _metadata: TableMetadata = serde_json::from_slice(&self.file_io.new_input(&metadata_location)?.data().await?)?;\n\n    let rename_table_input = TableInput::builder()\n        .name(to_table_name)\n        .description(glue_table.description().map(|s| s.to_string()))\n        .table_type(glue_table.table_type().map(|s| s.to_string()))\n        .parameters(glue_table.parameters().cloned())\n        .storage_descriptor(glue_table.storage_descriptor().cloned())\n        .build()\n        .map_err(from_aws_build_error)?;\n\n    let create_table_builder = self\n        .client\n        .0\n        .create_table()\n        .database_name(&to_database_name)\n        .table_input(rename_table_input);\n    let create_table_builder = with_catalog_id!(create_table_builder, self.config);\n\n    create_table_builder\n        .send()\n        .await\n        .map_err(from_aws_sdk_error)?;\n\n    match self.drop_table(src).await {\n        Ok(_) => Ok(()),\n        Err(e) => {\n            let mut log_message = format!("Failed to drop old table {}.{}. ", from_database_name, from_table_name);\n\n            if let Err(_) = self.drop_table(dest).await {\n                log_message.push_str(&format!("Failed to roll back table creation for {}.{}. Please clean up manually", to_database_name, to_table_name));\n            } else {\n                log_message.push_str(&format!("Rolled back table creation for {}.{}.", to_database_name, to_table_name));\n            }\n\n            Err(Error::new(ErrorKind::Unknown, log_message))\n        }\n    }\n}'
+</previous response>
+<error message>
+Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+   Compiling iceberg-catalog-rest v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/rest)
+   Compiling iceberg-catalog-hms v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/hms)
+   Compiling iceberg-datafusion v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/integrations/datafusion)
+   Compiling iceberg-catalog-glue v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/glue)
+error[E0277]: the trait bound `std::string::String: From<std::option::Option<std::string::String>>` is not satisfied
+   --> crates/catalog/glue/src/catalog.rs:549:22
+    |
+549 |         .description(glue_table.description().map(|s| s.to_string()))
+    |          ----------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<std::option::Option<std::string::String>>` is not implemented for `std::string::String`, which is required by `std::option::Option<std::string::String>: Into<std::string::String>`
+    |          |
+    |          required by a bound introduced by this call
+    |
+    = help: the following other types implement trait `From<T>`:
+              <std::string::String as From<char>>
+              <std::string::String as From<Box<str>>>
+              <std::string::String as From<Cow<'a, str>>>
+              <std::string::String as From<url::Url>>
+              <std::string::String as From<uuid::Uuid>>
+              <std::string::String as From<object_store::path::Path>>
+              <std::string::String as From<SensitiveString>>
+              <std::string::String as From<aws_smithy_runtime_api::http::headers::header_value::HeaderValue>>
+            and 5 others
+    = note: required for `std::option::Option<std::string::String>` to implement `Into<std::string::String>`
+note: required by a bound in `TableInputBuilder::description`
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:174:46
+    |
+174 |     pub fn description(mut self, input: impl ::std::convert::Into<::std::string::String>) -> Self {
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `TableInputBuilder::description`
+
+error[E0277]: the trait bound `std::string::String: From<std::option::Option<std::string::String>>` is not satisfied
+   --> crates/catalog/glue/src/catalog.rs:550:21
+    |
+550 |         .table_type(glue_table.table_type().map(|s| s.to_string()))
+    |          ---------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<std::option::Option<std::string::String>>` is not implemented for `std::string::String`, which is required by `std::option::Option<std::string::String>: Into<std::string::String>`
+    |          |
+    |          required by a bound introduced by this call
+    |
+    = help: the following other types implement trait `From<T>`:
+              <std::string::String as From<char>>
+              <std::string::String as From<Box<str>>>
+              <std::string::String as From<Cow<'a, str>>>
+              <std::string::String as From<url::Url>>
+              <std::string::String as From<uuid::Uuid>>
+              <std::string::String as From<object_store::path::Path>>
+              <std::string::String as From<SensitiveString>>
+              <std::string::String as From<aws_smithy_runtime_api::http::headers::header_value::HeaderValue>>
+            and 5 others
+    = note: required for `std::option::Option<std::string::String>` to implement `Into<std::string::String>`
+note: required by a bound in `TableInputBuilder::table_type`
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:327:45
+    |
+327 |     pub fn table_type(mut self, input: impl ::std::convert::Into<::std::string::String>) -> Self {
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `TableInputBuilder::table_type`
+
+error[E0277]: the trait bound `std::string::String: From<std::option::Option<HashMap<std::string::String, std::string::String>>>` is not satisfied
+   --> crates/catalog/glue/src/catalog.rs:551:21
+    |
+551 |         .parameters(glue_table.parameters().cloned())
+    |          ---------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<std::option::Option<HashMap<std::string::String, std::string::String>>>` is not implemented for `std::string::String`, which is required by `std::option::Option<HashMap<std::string::String, std::string::String>>: Into<std::string::String>`
+    |          |
+    |          required by a bound introduced by this call
+    |
+    = help: the following other types implement trait `From<T>`:
+              <std::string::String as From<char>>
+              <std::string::String as From<Box<str>>>
+              <std::string::String as From<Cow<'a, str>>>
+              <std::string::String as From<url::Url>>
+              <std::string::String as From<uuid::Uuid>>
+              <std::string::String as From<object_store::path::Path>>
+              <std::string::String as From<SensitiveString>>
+              <std::string::String as From<aws_smithy_runtime_api::http::headers::header_value::HeaderValue>>
+            and 5 others
+    = note: required for `std::option::Option<HashMap<std::string::String, std::string::String>>` to implement `Into<std::string::String>`
+note: required by a bound in `TableInputBuilder::parameters`
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:375:41
+    |
+375 | ...t self, k: impl ::std::convert::Into<::std::string::String>, v: impl ::std::convert::Into<::std::string::String>) -> Self {
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `TableInputBuilder::parameters`
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+   --> crates/catalog/glue/src/catalog.rs:551:10
+    |
+551 |         .parameters(glue_table.parameters().cloned())
+    |          ^^^^^^^^^^---------------------------------- an argument is missing
+    |
+note: method defined here
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:375:12
+    |
+375 |     pub fn parameters(mut self, k: impl ::std::convert::Into<::std::string::String>, v: impl ::std::convert::Into<::std::string::String>)...
+    |            ^^^^^^^^^^
+help: provide the argument
+    |
+551 |         .parameters(glue_table.parameters().cloned(), /* v */)
+    |                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+error[E0308]: mismatched types
+   --> crates/catalog/glue/src/catalog.rs:552:29
+    |
+552 |         .storage_descriptor(glue_table.storage_descriptor().cloned())
+    |          ------------------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `StorageDescriptor`, found `Option<StorageDescriptor>`
+    |          |
+    |          arguments to this method are incorrect
+    |
+    = note: expected struct `StorageDescriptor`
+                 found enum `std::option::Option<StorageDescriptor>`
+note: method defined here
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:244:12
+    |
+244 |     pub fn storage_descriptor(mut self, input: crate::types::StorageDescriptor) -> Self {
+    |            ^^^^^^^^^^^^^^^^^^
+help: consider using `Option::expect` to unwrap the `std::option::Option<StorageDescriptor>` value, panicking if the value is an `Option::None`
+    |
+552 |         .storage_descriptor(glue_table.storage_descriptor().cloned().expect("REASON"))
+    |                                                                     +++++++++++++++++
+
+error[E0599]: `&[aws_sdk_glue::types::Column]` is not an iterator
+   --> crates/catalog/glue/src/catalog.rs:553:53
+    |
+553 |         .partition_keys(glue_table.partition_keys().cloned())
+    |                                                     ^^^^^^ `&[aws_sdk_glue::types::Column]` is not an iterator; try calling `.iter()`
+    |
+    = note: the following trait bounds were not satisfied:
+            `&[aws_sdk_glue::types::Column]: Iterator`
+            which is required by `&mut &[aws_sdk_glue::types::Column]: Iterator`
+            `[aws_sdk_glue::types::Column]: Iterator`
+            which is required by `&mut [aws_sdk_glue::types::Column]: Iterator`
+
+Some errors have detailed explanations: E0061, E0277, E0308, E0599.
+For more information about an error, try `rustc --explain E0061`.
+error: could not compile `iceberg-catalog-glue` (lib) due to 6 previous errors
+warning: build failed, waiting for other jobs to finish...
+
+   Compiling iceberg-catalog-glue v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/glue)
+error[E0277]: the trait bound `std::string::String: From<std::option::Option<std::string::String>>` is not satisfied
+   --> crates/catalog/glue/src/catalog.rs:549:22
+    |
+549 |         .description(glue_table.description().map(|s| s.to_string()))
+    |          ----------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<std::option::Option<std::string::String>>` is not implemented for `std::string::String`, which is required by `std::option::Option<std::string::String>: Into<std::string::String>`
+    |          |
+    |          required by a bound introduced by this call
+    |
+    = help: the following other types implement trait `From<T>`:
+              <std::string::String as From<char>>
+              <std::string::String as From<Box<str>>>
+              <std::string::String as From<Cow<'a, str>>>
+              <std::string::String as From<url::Url>>
+              <std::string::String as From<uuid::Uuid>>
+              <std::string::String as From<object_store::path::Path>>
+              <std::string::String as From<SensitiveString>>
+              <std::string::String as From<aws_smithy_runtime_api::http::headers::header_value::HeaderValue>>
+            and 5 others
+    = note: required for `std::option::Option<std::string::String>` to implement `Into<std::string::String>`
+note: required by a bound in `TableInputBuilder::description`
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:174:46
+    |
+174 |     pub fn description(mut self, input: impl ::std::convert::Into<::std::string::String>) -> Self {
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `TableInputBuilder::description`
+
+error[E0277]: the trait bound `std::string::String: From<std::option::Option<std::string::String>>` is not satisfied
+   --> crates/catalog/glue/src/catalog.rs:550:21
+    |
+550 |         .table_type(glue_table.table_type().map(|s| s.to_string()))
+    |          ---------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<std::option::Option<std::string::String>>` is not implemented for `std::string::String`, which is required by `std::option::Option<std::string::String>: Into<std::string::String>`
+    |          |
+    |          required by a bound introduced by this call
+    |
+    = help: the following other types implement trait `From<T>`:
+              <std::string::String as From<char>>
+              <std::string::String as From<Box<str>>>
+              <std::string::String as From<Cow<'a, str>>>
+              <std::string::String as From<url::Url>>
+              <std::string::String as From<uuid::Uuid>>
+              <std::string::String as From<object_store::path::Path>>
+              <std::string::String as From<SensitiveString>>
+              <std::string::String as From<aws_smithy_runtime_api::http::headers::header_value::HeaderValue>>
+            and 5 others
+    = note: required for `std::option::Option<std::string::String>` to implement `Into<std::string::String>`
+note: required by a bound in `TableInputBuilder::table_type`
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:327:45
+    |
+327 |     pub fn table_type(mut self, input: impl ::std::convert::Into<::std::string::String>) -> Self {
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `TableInputBuilder::table_type`
+
+error[E0277]: the trait bound `std::string::String: From<std::option::Option<HashMap<std::string::String, std::string::String>>>` is not satisfied
+   --> crates/catalog/glue/src/catalog.rs:551:21
+    |
+551 |         .parameters(glue_table.parameters().cloned())
+    |          ---------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<std::option::Option<HashMap<std::string::String, std::string::String>>>` is not implemented for `std::string::String`, which is required by `std::option::Option<HashMap<std::string::String, std::string::String>>: Into<std::string::String>`
+    |          |
+    |          required by a bound introduced by this call
+    |
+    = help: the following other types implement trait `From<T>`:
+              <std::string::String as From<char>>
+              <std::string::String as From<Box<str>>>
+              <std::string::String as From<Cow<'a, str>>>
+              <std::string::String as From<url::Url>>
+              <std::string::String as From<uuid::Uuid>>
+              <std::string::String as From<object_store::path::Path>>
+              <std::string::String as From<SensitiveString>>
+              <std::string::String as From<aws_smithy_runtime_api::http::headers::header_value::HeaderValue>>
+            and 5 others
+    = note: required for `std::option::Option<HashMap<std::string::String, std::string::String>>` to implement `Into<std::string::String>`
+note: required by a bound in `TableInputBuilder::parameters`
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:375:41
+    |
+375 | ...t self, k: impl ::std::convert::Into<::std::string::String>, v: impl ::std::convert::Into<::std::string::String>) -> Self {
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `TableInputBuilder::parameters`
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+   --> crates/catalog/glue/src/catalog.rs:551:10
+    |
+551 |         .parameters(glue_table.parameters().cloned())
+    |          ^^^^^^^^^^---------------------------------- an argument is missing
+    |
+note: method defined here
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:375:12
+    |
+375 |     pub fn parameters(mut self, k: impl ::std::convert::Into<::std::string::String>, v: impl ::std::convert::Into<::std::string::String>)...
+    |            ^^^^^^^^^^
+help: provide the argument
+    |
+551 |         .parameters(glue_table.parameters().cloned(), /* v */)
+    |                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+error[E0308]: mismatched types
+   --> crates/catalog/glue/src/catalog.rs:552:29
+    |
+552 |         .storage_descriptor(glue_table.storage_descriptor().cloned())
+    |          ------------------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `StorageDescriptor`, found `Option<StorageDescriptor>`
+    |          |
+    |          arguments to this method are incorrect
+    |
+    = note: expected struct `StorageDescriptor`
+                 found enum `std::option::Option<StorageDescriptor>`
+note: method defined here
+   --> /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/aws-sdk-glue-1.47.0/src/types/_table_input.rs:244:12
+    |
+244 |     pub fn storage_descriptor(mut self, input: crate::types::StorageDescriptor) -> Self {
+    |            ^^^^^^^^^^^^^^^^^^
+help: consider using `Option::expect` to unwrap the `std::option::Option<StorageDescriptor>` value, panicking if the value is an `Option::None`
+    |
+552 |         .storage_descriptor(glue_table.storage_descriptor().cloned().expect("REASON"))
+    |                                                                     +++++++++++++++++
+
+error[E0599]: `&[aws_sdk_glue::types::Column]` is not an iterator
+   --> crates/catalog/glue/src/catalog.rs:553:53
+    |
+553 |         .partition_keys(glue_table.partition_keys().cloned())
+    |                                                     ^^^^^^ `&[aws_sdk_glue::types::Column]` is not an iterator; try calling `.iter()`
+    |
+    = note: the following trait bounds were not satisfied:
+            `&[aws_sdk_glue::types::Column]: Iterator`
+            which is required by `&mut &[aws_sdk_glue::types::Column]: Iterator`
+            `[aws_sdk_glue::types::Column]: Iterator`
+            which is required by `&mut [aws_sdk_glue::types::Column]: Iterator`
+
+Some errors have detailed explanations: E0061, E0277, E0308, E0599.
+For more information about an error, try `rustc --explain E0061`.
+error: could not compile `iceberg-catalog-glue` (lib) due to 6 previous errors
+</error message>
+<python function>
+def rename_table(self, from_identifier: Union[str, Identifier], to_identifier: Union[str, Identifier]) -> Table:
+        """Rename a fully classified table name.
+
+        This method can only rename Iceberg tables in AWS Glue.
+
+        Args:
+            from_identifier: Existing table identifier.
+            to_identifier: New table identifier.
+
+        Returns:
+            Table: the updated table instance with its metadata.
+
+        Raises:
+            ValueError: When from table identifier is invalid.
+            NoSuchTableError: When a table with the name does not exist.
+            NoSuchIcebergTableError: When from table is not a valid iceberg table.
+            NoSuchPropertyException: When from table miss some required properties.
+            NoSuchNamespaceError: When the destination namespace doesn't exist.
+        """
+        from_identifier_tuple = self.identifier_to_tuple_without_catalog(from_identifier)
+        from_database_name, from_table_name = self.identifier_to_database_and_table(from_identifier_tuple, NoSuchTableError)
+        to_database_name, to_table_name = self.identifier_to_database_and_table(to_identifier)
+        try:
+            get_table_response = self.glue.get_table(DatabaseName=from_database_name, Name=from_table_name)
+        except self.glue.exceptions.EntityNotFoundException as e:
+            raise NoSuchTableError(f"Table does not exist: {from_database_name}.{from_table_name}") from e
+
+        glue_table = get_table_response["Table"]
+
+        try:
+            # verify that from_identifier is a valid iceberg table
+            self._convert_glue_to_iceberg(glue_table=glue_table)
+        except NoSuchPropertyException as e:
+            raise NoSuchPropertyException(
+                f"Failed to rename table {from_database_name}.{from_table_name} since it is missing required properties"
+            ) from e
+        except NoSuchIcebergTableError as e:
+            raise NoSuchIcebergTableError(
+                f"Failed to rename table {from_database_name}.{from_table_name} since it is not a valid iceberg table"
+            ) from e
+
+        rename_table_input = _construct_rename_table_input(to_table_name=to_table_name, glue_table=glue_table)
+        self._create_glue_table(database_name=to_database_name, table_name=to_table_name, table_input=rename_table_input)
+
+        try:
+            self.drop_table(from_identifier)
+        except Exception as e:
+            log_message = f"Failed to drop old table {from_database_name}.{from_table_name}. "
+
+            try:
+                self.drop_table(to_identifier)
+                log_message += f"Rolled back table creation for {to_database_name}.{to_table_name}."
+            except NoSuchTableError:
+                log_message += (
+                    f"Failed to roll back table creation for {to_database_name}.{to_table_name}. " f"Please clean up manually"
+                )
+
+            raise ValueError(log_message) from e
+
+        return self.load_table(to_identifier)
+</python function>
+<rust function signature>
+async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+async fn drop_table(&self, table: &TableIdent) -> Result<()> {
+        let db_name = validate_namespace(table.namespace())?;
+        let table_name = table.name();
+
+        let builder = self
+            .client
+            .0
+            .delete_table()
+            .database_name(&db_name)
+            .name(table_name);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        Ok(())
+    }
+
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+
+async fn create_table(
+        &self,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
+    ) -> Result<Table> {
+        let db_name = validate_namespace(namespace)?;
+        let table_name = creation.name.clone();
+
+        let location = match &creation.location {
+            Some(location) => location.clone(),
+            None => {
+                let ns = self.get_namespace(namespace).await?;
+                get_default_table_location(&ns, &db_name, &table_name, &self.config.warehouse)
+            }
+        };
+
+        let metadata = TableMetadataBuilder::from_table_creation(creation)?.build()?;
+        let metadata_location = create_metadata_location(&location, 0)?;
+
+        self.file_io
+            .new_output(&metadata_location)?
+            .write(serde_json::to_vec(&metadata)?.into())
+            .await?;
+
+        let glue_table = convert_to_glue_table(
+            &table_name,
+            metadata_location.clone(),
+            &metadata,
+            metadata.properties(),
+            None,
+        )?;
+
+        let builder = self
+            .client
+            .0
+            .create_table()
+            .database_name(&db_name)
+            .table_input(glue_table);
+        let builder = with_catalog_id!(builder, self.config);
+
+        builder.send().await.map_err(from_aws_sdk_error)?;
+
+        let table = Table::builder()
+            .file_io(self.file_io())
+            .metadata_location(metadata_location)
+            .metadata(metadata)
+            .identifier(TableIdent::new(NamespaceIdent::new(db_name), table_name))
+            .build();
+
+        Ok(table)
+    }
+
+fn build(file_io_builder: FileIOBuilder) -> Result<Self> {
+        let scheme_str = file_io_builder.scheme_str.unwrap_or("".to_string());
+        let scheme = Self::parse_scheme(&scheme_str)?;
+        let mut new_props = HashMap::default();
+        new_props.insert("root".to_string(), DEFAULT_ROOT_PATH.to_string());
+
+        match scheme {
+            Scheme::Fs => Ok(Self::LocalFs {
+                op: Operator::via_map(Scheme::Fs, new_props)?,
+            }),
+            Scheme::S3 => {
+                for prop in file_io_builder.props {
+                    if let Some(op_key) = S3_CONFIG_MAPPING.get(prop.0.as_str()) {
+                        new_props.insert(op_key.to_string(), prop.1);
+                    }
+                }
+
+                Ok(Self::S3 {
+                    scheme_str,
+                    props: new_props,
+                })
+            }
+            _ => Err(Error::new(
+                ErrorKind::FeatureUnsupported,
+                format!("Constructing file io from scheme: {scheme} not supported now",),
+            )),
+        }
+    }
+
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+struct GlueClient(aws_sdk_glue::Client);
+
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the error messages and the provided dependencies, here's the corrected Rust function:
+
+```rust
+async fn rename_table(&self, src: &TableIdent, dest: &TableIdent) -> Result<()> {
+    let from_database_name = validate_namespace(src.namespace())?;
+    let from_table_name = src.name();
+    let to_database_name = validate_namespace(dest.namespace())?;
+    let to_table_name = dest.name();
+
+    let get_table_builder = self
+        .client
+        .0
+        .get_table()
+        .database_name(&from_database_name)
+        .name(from_table_name);
+    let get_table_builder = with_catalog_id!(get_table_builder, self.config);
+
+    let get_table_response = get_table_builder
+        .send()
+        .await
+        .map_err(|e| Error::new(ErrorKind::NoSuchTable, format!("Table does not exist: {}.{}", from_database_name, from_table_name)))?;
+
+    let glue_table = get_table_response.table().ok_or_else(|| Error::new(ErrorKind::NoSuchTable, "Table response is empty"))?;
+
+    // Verify that src is a valid iceberg table
+    let metadata_location = get_metadata_location(glue_table)?;
+    let _metadata: TableMetadata = serde_json::from_slice(&self.file_io.new_input(&metadata_location)?.data().await?)?;
+
+    let mut rename_table_input = TableInput::builder()
+        .name(to_table_name)
+        .build()
+        .map_err(from_aws_build_error)?;
+
+    if let Some(description) = glue_table.description() {
+        rename_table_input = rename_table_input.description(description.to_string());
+    }
+
+    if let Some(table_type) = glue_table.table_type() {
+        rename_table_input = rename_table_input.table_type(table_type.to_string());
+    }
+
+    if let Some(parameters) = glue_table.parameters() {
+        for (k, v) in parameters {
+            rename_table_input = rename_table_input.parameters(k, v);
+        }
+    }
+
+    if let Some(storage_descriptor) = glue_table.storage_descriptor() {
+        rename_table_input = rename_table_input.storage_descriptor(storage_descriptor.clone());
+    }
+
+    if let Some(partition_keys) = glue_table.partition_keys() {
+        rename_table_input = rename_table_input.partition_keys(partition_keys.to_vec());
+    }
+
+    let create_table_builder = self
+        .client
+        .0
+        .create_table()
+        .database_name(&to_database_name)
+        .table_input(rename_table_input);
+    let create_table_builder = with_catalog_id!(create_table_builder, self.config);
+
+    create_table_builder
+        .send()
+        .await
+        .map_err(from_aws_sdk_error)?;
+
+    match self.drop_table(src).await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let mut log_message = format!("Failed to drop old table {}.{}. ", from_database_name, from_table_name);
+
+            if let Err(_) = self.drop_table(dest).await {
+                log_message.push_str(&format!("Failed to roll back table creation for {}.{}. Please clean up manually", to_database_name, to_table_name));
+            } else {
+                log_message.push_str(&format!("Rolled back table creation for {}.{}.", to_database_name, to_table_name));
+            }
+
+            Err(Error::new(ErrorKind::Unexpected, log_message))
+        }
+    }
+}
+```
+
+This corrected version addresses the following issues:
+
+1. Handling optional fields in the `TableInput` builder.
+2. Correctly setting parameters using a loop instead of trying to set them all at once.
+3. Using `to</reapir response>

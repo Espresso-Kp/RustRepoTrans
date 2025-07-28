@@ -1,0 +1,424 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'use std::time::SystemTime;\nuse rusqlite::{params, NO_PARAMS};\nuse crate::{DC_CONTACT_ID_SELF, DC_EVENT_LOCATION_CHANGED};\nuse crate::context::Context;\nuse crate::JobId;\nuse crate::c::constants::DC_CONTEXT_MAGIC;\n\npub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool, Error> {\n    let mut continue_streaming = false;\n    \n    if context.is_none() || context.magic != DC_CONTEXT_MAGIC || \n       (latitude.abs() < f64::EPSILON && longitude.abs() < f64::EPSILON) {\n        continue_streaming = true;\n        return Ok(continue_streaming);\n    }\n\n    let mut chat_ids = context.sql.query_map(\n        "SELECT id FROM chats WHERE locations_send_until>?", \n        params![time::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs()], \n        |row| row.get(0),\n    ).await?;\n\n    while let Ok(chat_id) = chat_ids.next().await {\n\n        let res = context.sql.execute(\n            "INSERT INTO locations (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?)",\n            params![latitude, longitude, accuracy, time::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), chat_id, DC_CONTACT_ID_SELF],\n        ).await?;\n\n        continue_streaming = true;\n    }\n\n    if continue_streaming {\n        context.emit_event(EventType::LocationChanged(Some(DC_CONTACT_ID_SELF)));\n        interrupt_location(context).await?;\n    }\n\n    Ok(continue_streaming)\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error: expected one of `!` or `::`, found `s`
+  --> src/location.rs:16:1
+   |
+15 | u
+   |  - expected one of `!` or `::`
+16 | s
+   | ^ unexpected token
+
+error[E0432]: unresolved import `crate::location::delete_orphaned_poi_locations`
+  --> src/sql.rs:18:5
+   |
+18 | use crate::location::delete_orphaned_poi_locations;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `delete_orphaned_poi_locations` in `location`
+
+error[E0432]: unresolved import `crate::location::delete_poi_location`
+  --> src/message.rs:26:5
+   |
+26 | use crate::location::delete_poi_location;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `delete_poi_location` in `location`
+
+error[E0433]: failed to resolve: could not find `Kml` in `location`
+    --> src/mimeparser.rs:1246:40
+     |
+1246 |                 let parsed = location::Kml::parse(decoded_data)
+     |                                        ^^^ could not find `Kml` in `location`
+
+error[E0425]: cannot find function `set_kml_sent_timestamp` in module `location`
+    --> src/chat.rs:2974:37
+     |
+2974 |         if let Err(err) = location::set_kml_sent_timestamp(context, msg.chat_id, now).await {
+     |                                     ^^^^^^^^^^^^^^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `delete_expired` in module `location`
+   --> src/ephemeral.rs:610:19
+    |
+610 |         location::delete_expired(context, time())
+    |                   ^^^^^^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `get_message_kml` in module `location`
+   --> src/mimefactory.rs:913:34
+    |
+913 |         let kml_file = location::get_message_kml(self.msg.timestamp_sort, latitude, longitude);
+    |                                  ^^^^^^^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `get_kml` in module `location`
+   --> src/mimefactory.rs:931:23
+    |
+931 |             location::get_kml(context, self.msg.chat_id).await?
+    |                       ^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `is_sending_locations_to_chat` in module `location`
+    --> src/mimefactory.rs:1319:22
+     |
+1319 |         if location::is_sending_locations_to_chat(context, Some(self.msg.chat_id)).await? {
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `location`
+
+error[E0412]: cannot find type `Kml` in module `location`
+  --> src/mimeparser.rs:92:40
+   |
+92 |     pub location_kml: Option<location::Kml>,
+   |                                        ^^^ not found in `location`
+
+error[E0412]: cannot find type `Kml` in module `location`
+  --> src/mimeparser.rs:93:39
+   |
+93 |     pub message_kml: Option<location::Kml>,
+   |                                       ^^^ not found in `location`
+
+error[E0425]: cannot find function `location_loop` in module `location`
+   --> src/scheduler.rs:891:27
+    |
+891 |                 location::location_loop(&ctx, location_interrupt_recv).await;
+    |                           ^^^^^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `get_range` in module `location`
+   --> src/webxdc/maps_integration.rs:108:31
+    |
+108 |     let locations = location::get_range(context, chat_id, None, begin, 0).await?;
+    |                               ^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `save` in module `location`
+    --> src/receive_imf.rs:1709:23
+     |
+1709 |             location::save(context, chat_id, from_id, &message_kml.locations, true).await?
+     |                       ^^^^ not found in `location`
+     |
+help: consider importing this function
+     |
+3    + use crate::token::save;
+     |
+help: if you import `save`, refer to it directly
+     |
+1709 -             location::save(context, chat_id, from_id, &message_kml.locations, true).await?
+1709 +             save(context, chat_id, from_id, &message_kml.locations, true).await?
+     |
+
+error[E0425]: cannot find function `set_msg_location_id` in module `location`
+    --> src/receive_imf.rs:1711:23
+     |
+1711 |             location::set_msg_location_id(context, msg_id, newest_location_id).await?;
+     |                       ^^^^^^^^^^^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `save` in module `location`
+    --> src/receive_imf.rs:1720:30
+     |
+1720 |                 if location::save(context, chat_id, from_id, &location_kml.locations, false)
+     |                              ^^^^ not found in `location`
+     |
+help: consider importing this function
+     |
+3    + use crate::token::save;
+     |
+help: if you import `save`, refer to it directly
+     |
+1720 -                 if location::save(context, chat_id, from_id, &location_kml.locations, false)
+1720 +                 if save(context, chat_id, from_id, &location_kml.locations, false)
+     |
+
+error[E0425]: cannot find function `get_range` in module `location`
+    --> src/ephemeral.rs:1399:39
+     |
+1399 |             let locations = location::get_range(account, None, None, 0, 0).await?;
+     |                                       ^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `get_range` in module `location`
+    --> src/ephemeral.rs:1407:39
+     |
+1407 |             let locations = location::get_range(account, None, None, 0, 0).await?;
+     |                                       ^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `get_range` in module `location`
+   --> src/webxdc/maps_integration.rs:222:35
+    |
+222 |         let locations = location::get_range(&t, Some(bob_chat_id), None, 0, 0).await?;
+    |                                   ^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `get_range` in module `location`
+   --> src/webxdc/maps_integration.rs:236:35
+    |
+236 |         let locations = location::get_range(&t, Some(group_id), None, 0, 0).await?;
+    |                                   ^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `get_range` in module `location`
+   --> src/webxdc/maps_integration.rs:252:35
+    |
+252 |         let locations = location::get_range(&t, Some(group_id), None, 0, 0).await?;
+    |                                   ^^^^^^^^^ not found in `location`
+
+error[E0425]: cannot find function `get_range` in module `location`
+   --> src/webxdc/maps_integration.rs:272:35
+    |
+272 |         let locations = location::get_range(&t, None, None, 0, 0).await?;
+    |                                   ^^^^^^^^^ not found in `location`
+
+error[E0282]: type annotations needed
+   --> src/mimeparser.rs:463:27
+    |
+463 |             location_kml: None,
+    |                           ^^^^ cannot infer type of the type parameter `T` declared on the enum `Option`
+    |
+help: consider specifying the generic argument
+    |
+463 |             location_kml: None::<T>,
+    |                               +++++
+
+Some errors have detailed explanations: E0282, E0412, E0425, E0432, E0433.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `deltachat` (lib) due to 17 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `deltachat` (lib test) due to 23 previous errors
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+int dc_set_location(dc_context_t* context,
+                    double latitude, double longitude, double accuracy)
+{
+	sqlite3_stmt* stmt_chats = NULL;
+	sqlite3_stmt* stmt_insert = NULL;
+	int           continue_streaming = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || (latitude==0.0 && longitude==0.0)) {
+		continue_streaming = 1;
+		goto cleanup;
+	}
+
+	stmt_chats = dc_sqlite3_prepare(context->sql,
+		"SELECT id FROM chats WHERE locations_send_until>?;");
+	sqlite3_bind_int64(stmt_chats, 1, time(NULL));
+	while (sqlite3_step(stmt_chats)==SQLITE_ROW)
+	{
+		uint32_t chat_id = sqlite3_column_int(stmt_chats, 0);
+
+		stmt_insert = dc_sqlite3_prepare(context->sql,
+				"INSERT INTO locations "
+				" (latitude, longitude, accuracy, timestamp, chat_id, from_id)"
+				" VALUES (?,?,?,?,?,?);");
+		sqlite3_bind_double(stmt_insert, 1, latitude);
+		sqlite3_bind_double(stmt_insert, 2, longitude);
+		sqlite3_bind_double(stmt_insert, 3, accuracy);
+		sqlite3_bind_int64 (stmt_insert, 4, time(NULL));
+		sqlite3_bind_int   (stmt_insert, 5, chat_id);
+		sqlite3_bind_int   (stmt_insert, 6, DC_CONTACT_ID_SELF);
+		sqlite3_step(stmt_insert);
+
+		continue_streaming = 1;
+	}
+
+	if (continue_streaming) {
+		context->cb(context, DC_EVENT_LOCATION_CHANGED, DC_CONTACT_ID_SELF, 0);
+		schedule_MAYBE_SEND_LOCATIONS(context, 0);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt_chats);
+	sqlite3_finalize(stmt_insert);
+	return continue_streaming;
+}
+</c function>
+<rust function signature>
+pub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) fn time() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+pub async fn query_map<T, F, G, H>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+        mut g: G,
+    ) -> Result<H>
+    where
+        F: Send + FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+        G: Send + FnMut(rusqlite::MappedRows<F>) -> Result<H>,
+        H: Send + 'static,
+    {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let res = stmt.query_map(params, f)?;
+            g(res)
+        })
+        .await
+    }
+
+pub async fn execute(
+        &self,
+        query: &str,
+        params: impl rusqlite::Params + Send,
+    ) -> Result<usize> {
+        self.call_write(move |conn| {
+            let res = conn.execute(query, params)?;
+            Ok(res)
+        })
+        .await
+    }
+
+pub async fn emit_location_changed(&self, contact_id: Option<ContactId>) -> Result<()> {
+        self.emit_event(EventType::LocationChanged(contact_id));
+
+        if let Some(msg_id) = self
+            .get_config_parsed::<u32>(Config::WebxdcIntegration)
+            .await?
+        {
+            self.emit_event(EventType::WebxdcStatusUpdate {
+                msg_id: MsgId::new(msg_id),
+                status_update_serial: Default::default(),
+            })
+        }
+
+        Ok(())
+    }
+
+pub(crate) async fn interrupt_location(&self) {
+        let inner = self.inner.read().await;
+        if let InnerSchedulerState::Started(ref scheduler) = *inner {
+            scheduler.interrupt_location();
+        }
+    }
+    
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+
+pub struct ContactId(u32);
+
+impl ContactId {
+    /// Undefined contact. Used as a placeholder for trashed messages.
+    pub const UNDEFINED: ContactId = ContactId::new(0);
+
+    /// The owner of the account.
+    ///
+    /// The email-address is set by `set_config` using "addr".
+    pub const SELF: ContactId = ContactId::new(1);
+
+    /// ID of the contact for info messages.
+    pub const INFO: ContactId = ContactId::new(2);
+
+    /// ID of the contact for device messages.
+    pub const DEVICE: ContactId = ContactId::new(5);
+    pub(crate) const LAST_SPECIAL: ContactId = ContactId::new(9);
+
+    /// Address to go with [`ContactId::DEVICE`].
+    ///
+    /// This is used by APIs which need to return an email address for this contact.
+    pub const DEVICE_ADDR: &'static str = "device@localhost";
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::time::Duration;
+use anyhow::{ensure, Context as _, Result};
+use async_channel::Receiver;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText};
+use tokio::time::timeout;
+use crate::chat::{self, ChatId};
+use crate::constants::DC_CHAT_ID_TRASH;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::events::EventType;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::tools::{duration_to_str, time};
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::config::Config;
+use crate::message::MessageState;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+b'use std::time::SystemTime;\nuse rusqlite::{params, NO_PARAMS};\nuse crate::{DC_CONTACT_ID_SELF};\nuse crate::tools::time;\nuse crate::message::Kml;\nuse crate::context::Context;\nuse crate::contact::{ContactId};\nuse crate::chat::ChatId;\nuse crate::events::EventType;\n\npub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool, Error> {\n    let mut continue_streaming = false;\n    \n    if context.is_none() ||\n       (latitude.abs() < f64::EPSILON && longitude.abs() < f64::EPSILON) {\n        continue_streaming = true;\n        return Ok(continue_streaming);\n    }\n\n    let mut chat_ids = context.inner.read().unwrap().sql.query_map(\n        "SELECT id FROM chats WHERE locations_send_until>?", \n        params![time().as_secs()], \n        |row| row.get(0),\n    ).await?;\n\n    while let Ok(chat_id) = chat_ids.next().await {\n\n        let res = context.inner.read().unwrap().sql.execute(\n            "INSERT INTO locations (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?)",\n            params![latitude, longitude, accuracy, time().as_secs(), chat_id, DC_CONTACT_ID_SELF],\n        ).await?;\n\n        continue_streaming = true;\n    }\n\n    if continue_streaming {\n        context.inner.read().unwrap().emit_location_changed(Some(DC_CONTACT_ID_SELF));\n        interrupt_location(context).await?;\n    }\n\n    Ok(continue_streaming)\n}'</reapir response>

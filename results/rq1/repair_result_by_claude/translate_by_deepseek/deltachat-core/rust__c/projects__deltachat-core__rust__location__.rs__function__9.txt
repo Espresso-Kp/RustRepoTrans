@@ -1,0 +1,543 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'use std::sync::Arc;\nuse anyhow::{ensure, Context as _, Result};\nuse async_channel::Receiver;\nuse quick_xml::events::{BytesEnd, BytesStart, BytesText};\nuse tokio::time::timeout;\nuse crate::chat::{self, ChatId};\nuse crate::constants::DC_CHAT_ID_TRASH;\nuse crate::contact::ContactId;\nuse crate::context::Context;\nuse crate::events::EventType;\nuse crate::message::{Message, MsgId, Viewtype};\nuse crate::mimeparser::SystemMessage;\nuse crate::tools::{duration_to_str, time};\nuse crate::{chatlist_events, stock_str};\nuse super::*;\nuse crate::config::Config;\nuse crate::message::MessageState;\nuse crate::receive_imf::receive_imf;\nuse crate::test_utils::{TestContext, TestContextManager};\nuse crate::tools::SystemTime;\n\npub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool> {\n    let mut stmt_chats = None;\n    let mut stmt_insert = None;\n    let mut continue_streaming = 0;\n\n    if context.inner.magic != DC_CONTEXT_MAGIC || (latitude == 0.0 && longitude == 0.0) {\n        continue_streaming = 1;\n        goto_cleanup!();\n    }\n\n    stmt_chats = Some(dc_sqlite3_prepare(&context.inner.sql, "SELECT id FROM chats WHERE locations_send_until>?;").await?);\n    sqlite3_bind_int64(&stmt_chats.as_ref().unwrap(), 1, time() as i64).await?;\n    while sqlite3_step(&stmt_chats.as_ref().unwrap()).await? == SQLITE_ROW {\n        let chat_id = sqlite3_column_int(&stmt_chats.as_ref().unwrap(), 0).await?;\n\n        stmt_insert = Some(dc_sqlite3_prepare(&context.inner.sql, "INSERT INTO locations (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?);").await?);\n        sqlite3_bind_double(&stmt_insert.as_ref().unwrap(), 1, latitude).await?;\n        sqlite3_bind_double(&stmt_insert.as_ref().unwrap(), 2, longitude).await?;\n        sqlite3_bind_double(&stmt_insert.as_ref().unwrap(), 3, accuracy).await?;\n        sqlite3_bind_int64(&stmt_insert.as_ref().unwrap(), 4, time() as i64).await?;\n        sqlite3_bind_int(&stmt_insert.as_ref().unwrap(), 5, chat_id).await?;\n        sqlite3_bind_int(&stmt_insert.as_ref().unwrap(), 6, DC_CONTACT_ID_SELF).await?;\n        sqlite3_step(&stmt_insert.as_ref().unwrap()).await?;\n\n        continue_streaming = 1;\n    }\n\n    if continue_streaming != 0 {\n        context.emit_location_changed(Some(DC_CONTACT_ID_SELF)).await?;\n        schedule_MAYBE_SEND_LOCATIONS(&context.inner, 0).await;\n    }\n\n    cleanup!();\n    Ok(continue_streaming != 0)\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error: cannot find macro `goto_cleanup` in this scope
+   --> src/location.rs:352:9
+    |
+352 |         goto_cleanup!();
+    |         ^^^^^^^^^^^^
+
+error: cannot find macro `cleanup` in this scope
+   --> src/location.rs:395:5
+    |
+395 |     cleanup!();
+    |     ^^^^^^^
+
+error[E0425]: cannot find value `DC_CONTEXT_MAGIC` in this scope
+   --> src/location.rs:350:52
+    |
+350 |     if context.inner.is_null() || context.magic != DC_CONTEXT_MAGIC || (latitude == 0.0 && longitude == 0.0) {
+    |                                                    ^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `DC_CONTACT_ID_SELF` in this scope
+   --> src/location.rs:373:25
+    |
+373 |                         DC_CONTACT_ID_SELF.into(),
+    |                         ^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `DC_CONTACT_ID_SELF` in this scope
+   --> src/location.rs:391:44
+    |
+391 |         context.emit_location_changed(Some(DC_CONTACT_ID_SELF)).await?;
+    |                                            ^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0728]: `await` is only allowed inside `async` functions and blocks
+   --> src/location.rs:362:48
+    |
+361 |         |mut rows| {
+    |         ---------- this is not `async`
+362 |             while let Some(row) = rows.next()?.await? {
+    |                                                ^^^^^ only allowed inside `async` functions and blocks
+
+error[E0728]: `await` is only allowed inside `async` functions and blocks
+   --> src/location.rs:379:60
+    |
+378 |                     |mut rows| {
+    |                     ---------- this is not `async`
+379 |                         while let Some(row) = rows.next()?.await? {
+    |                                                            ^^^^^ only allowed inside `async` functions and blocks
+
+error[E0599]: no method named `is_null` found for struct `Arc<InnerContext>` in the current scope
+   --> src/location.rs:350:22
+    |
+350 |     if context.inner.is_null() || context.magic != DC_CONTEXT_MAGIC || (latitude == 0.0 && longitude == 0.0) {
+    |                      ^^^^^^^ method not found in `Arc<InnerContext>`
+
+error[E0609]: no field `magic` on type `&context::Context`
+   --> src/location.rs:350:43
+    |
+350 |     if context.inner.is_null() || context.magic != DC_CONTEXT_MAGIC || (latitude == 0.0 && longitude == 0.0) {
+    |                                           ^^^^^ unknown field
+    |
+    = note: available field is: `inner`
+    = note: available fields are: `blobdir`, `sql`, `smeared_timestamp`, `generating_key_mutex`, `oauth2_mutex` ... and 17 others
+
+error[E0277]: the trait bound `Vec<_>: rusqlite::Params` is not satisfied
+   --> src/location.rs:357:9
+    |
+355 |     stmt_chats = Some(context.sql.query_map(
+    |                                   --------- required by a bound introduced by this call
+356 |         "SELECT id FROM chats WHERE locations_send_until>?;",
+357 |         vec![],
+    |         ^^^^^^ the trait `rusqlite::Params` is not implemented for `Vec<_>`
+    |
+    = help: the following other types implement trait `rusqlite::Params`:
+              ParamsFromIter<I>
+              [&dyn rusqlite::ToSql + std::marker::Send + std::marker::Sync; 0]
+              [T; 1]
+              [T; 2]
+              [T; 3]
+              [T; 4]
+              [T; 5]
+              [T; 6]
+            and 109 others
+note: required by a bound in `Sql::query_map`
+   --> src/sql.rs:428:22
+    |
+425 |     pub async fn query_map<T, F, G, H>(
+    |                  --------- required by a bound in this associated function
+...
+428 |         params: impl rusqlite::Params + Send,
+    |                      ^^^^^^^^^^^^^^^^ required by this bound in `Sql::query_map`
+
+error[E0107]: method takes 1 generic argument but 2 generic arguments were supplied
+   --> src/location.rs:359:20
+    |
+359 |             Ok(row.get_ref::<_, i64>(0)?)
+    |                    ^^^^^^^      --- help: remove this generic argument
+    |                    |
+    |                    expected 1 generic argument
+    |
+note: method defined here, with 1 generic parameter: `I`
+   --> /home/k/.cargo/registry/src/index.crates.io-6f17d22bba15001f/rusqlite-0.31.0/src/row.rs:319:12
+    |
+319 |     pub fn get_ref<I: RowIndex>(&self, idx: I) -> Result<ValueRef<'_>> {
+    |            ^^^^^^^ -
+
+error[E0277]: the trait bound `Vec<_, _>: rusqlite::Params` is not satisfied
+   --> src/location.rs:367:21
+    |
+365 |                   stmt_insert = Some(context.sql.query_map(
+    |                                                  --------- required by a bound introduced by this call
+366 |                       "INSERT INTO locations (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?);",
+367 | /                     vec![
+368 | |                         latitude.into(),
+369 | |                         longitude.into(),
+370 | |                         accuracy.into(),
+...   |
+373 | |                         DC_CONTACT_ID_SELF.into(),
+374 | |                     ],
+    | |_____________________^ the trait `rusqlite::Params` is not implemented for `Vec<_, _>`
+    |
+    = help: the following other types implement trait `rusqlite::Params`:
+              ParamsFromIter<I>
+              [&dyn rusqlite::ToSql + std::marker::Send + std::marker::Sync; 0]
+              [T; 1]
+              [T; 2]
+              [T; 3]
+              [T; 4]
+              [T; 5]
+              [T; 6]
+            and 109 others
+note: required by a bound in `Sql::query_map`
+   --> src/sql.rs:428:22
+    |
+425 |     pub async fn query_map<T, F, G, H>(
+    |                  --------- required by a bound in this associated function
+...
+428 |         params: impl rusqlite::Params + Send,
+    |                      ^^^^^^^^^^^^^^^^ required by this bound in `Sql::query_map`
+
+error[E0599]: no method named `interrupt_location` found for reference `&context::Context` in the current scope
+   --> src/location.rs:392:17
+    |
+392 |         context.interrupt_location().await;
+    |                 ^^^^^^^^^^^^^^^^^^ method not found in `&Context`
+    |
+help: one of the expressions' fields has a method of the same name
+    |
+392 |         context.inner.scheduler.interrupt_location().await;
+    |                 ++++++++++++++++
+help: one of the expressions' fields has a method of the same name
+    |
+392 |         context.scheduler.interrupt_location().await;
+    |                 ++++++++++
+
+error[E0308]: mismatched types
+   --> src/location.rs:396:8
+    |
+396 |     Ok(continue_streaming)
+    |     -- ^^^^^^^^^^^^^^^^^^ expected `bool`, found integer
+    |     |
+    |     arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `{integer}` due to the type of the argument passed
+   --> src/location.rs:396:5
+    |
+396 |     Ok(continue_streaming)
+    |     ^^^------------------^
+    |        |
+    |        this argument influences the type of `Ok`
+note: tuple variant defined here
+   --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:506:5
+    |
+506 |     Ok(#[stable(feature = "rust1", since = "1.0.0")] T),
+    |     ^^
+
+Some errors have detailed explanations: E0107, E0277, E0308, E0425, E0599, E0609, E0728.
+For more information about an error, try `rustc --explain E0107`.
+error: could not compile `deltachat` (lib) due to 14 previous errors
+warning: build failed, waiting for other jobs to finish...
+error[E0277]: the trait bound `Vec<_>: rusqlite::Params` is not satisfied
+   --> src/location.rs:357:9
+    |
+355 |     stmt_chats = Some(context.sql.query_map(
+    |                                   --------- required by a bound introduced by this call
+356 |         "SELECT id FROM chats WHERE locations_send_until>?;",
+357 |         vec![],
+    |         ^^^^^^ the trait `rusqlite::Params` is not implemented for `Vec<_>`
+    |
+    = help: the following other types implement trait `rusqlite::Params`:
+              ParamsFromIter<I>
+              [&dyn rusqlite::ToSql + std::marker::Send + std::marker::Sync; 0]
+              [T; 1]
+              [T; 2]
+              [T; 3]
+              [T; 4]
+              [T; 5]
+              [T; 6]
+            and 109 others
+note: required by a bound in `sql::Sql::query_map`
+   --> src/sql.rs:428:22
+    |
+425 |     pub async fn query_map<T, F, G, H>(
+    |                  --------- required by a bound in this associated function
+...
+428 |         params: impl rusqlite::Params + Send,
+    |                      ^^^^^^^^^^^^^^^^ required by this bound in `Sql::query_map`
+
+error[E0277]: the trait bound `Vec<_, _>: rusqlite::Params` is not satisfied
+   --> src/location.rs:367:21
+    |
+365 |                   stmt_insert = Some(context.sql.query_map(
+    |                                                  --------- required by a bound introduced by this call
+366 |                       "INSERT INTO locations (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?);",
+367 | /                     vec![
+368 | |                         latitude.into(),
+369 | |                         longitude.into(),
+370 | |                         accuracy.into(),
+...   |
+373 | |                         DC_CONTACT_ID_SELF.into(),
+374 | |                     ],
+    | |_____________________^ the trait `rusqlite::Params` is not implemented for `Vec<_, _>`
+    |
+    = help: the following other types implement trait `rusqlite::Params`:
+              ParamsFromIter<I>
+              [&dyn rusqlite::ToSql + std::marker::Send + std::marker::Sync; 0]
+              [T; 1]
+              [T; 2]
+              [T; 3]
+              [T; 4]
+              [T; 5]
+              [T; 6]
+            and 109 others
+note: required by a bound in `sql::Sql::query_map`
+   --> src/sql.rs:428:22
+    |
+425 |     pub async fn query_map<T, F, G, H>(
+    |                  --------- required by a bound in this associated function
+...
+428 |         params: impl rusqlite::Params + Send,
+    |                      ^^^^^^^^^^^^^^^^ required by this bound in `Sql::query_map`
+
+error: could not compile `deltachat` (lib test) due to 14 previous errors
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+int dc_set_location(dc_context_t* context,
+                    double latitude, double longitude, double accuracy)
+{
+	sqlite3_stmt* stmt_chats = NULL;
+	sqlite3_stmt* stmt_insert = NULL;
+	int           continue_streaming = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC
+	 || (latitude==0.0 && longitude==0.0)) {
+		continue_streaming = 1;
+		goto cleanup;
+	}
+
+	stmt_chats = dc_sqlite3_prepare(context->sql,
+		"SELECT id FROM chats WHERE locations_send_until>?;");
+	sqlite3_bind_int64(stmt_chats, 1, time(NULL));
+	while (sqlite3_step(stmt_chats)==SQLITE_ROW)
+	{
+		uint32_t chat_id = sqlite3_column_int(stmt_chats, 0);
+
+		stmt_insert = dc_sqlite3_prepare(context->sql,
+				"INSERT INTO locations "
+				" (latitude, longitude, accuracy, timestamp, chat_id, from_id)"
+				" VALUES (?,?,?,?,?,?);");
+		sqlite3_bind_double(stmt_insert, 1, latitude);
+		sqlite3_bind_double(stmt_insert, 2, longitude);
+		sqlite3_bind_double(stmt_insert, 3, accuracy);
+		sqlite3_bind_int64 (stmt_insert, 4, time(NULL));
+		sqlite3_bind_int   (stmt_insert, 5, chat_id);
+		sqlite3_bind_int   (stmt_insert, 6, DC_CONTACT_ID_SELF);
+		sqlite3_step(stmt_insert);
+
+		continue_streaming = 1;
+	}
+
+	if (continue_streaming) {
+		context->cb(context, DC_EVENT_LOCATION_CHANGED, DC_CONTACT_ID_SELF, 0);
+		schedule_MAYBE_SEND_LOCATIONS(context, 0);
+	}
+
+cleanup:
+	sqlite3_finalize(stmt_chats);
+	sqlite3_finalize(stmt_insert);
+	return continue_streaming;
+}
+</c function>
+<rust function signature>
+pub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub(crate) fn time() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+pub async fn query_map<T, F, G, H>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params + Send,
+        f: F,
+        mut g: G,
+    ) -> Result<H>
+    where
+        F: Send + FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+        G: Send + FnMut(rusqlite::MappedRows<F>) -> Result<H>,
+        H: Send + 'static,
+    {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let res = stmt.query_map(params, f)?;
+            g(res)
+        })
+        .await
+    }
+
+pub async fn execute(
+        &self,
+        query: &str,
+        params: impl rusqlite::Params + Send,
+    ) -> Result<usize> {
+        self.call_write(move |conn| {
+            let res = conn.execute(query, params)?;
+            Ok(res)
+        })
+        .await
+    }
+
+pub async fn emit_location_changed(&self, contact_id: Option<ContactId>) -> Result<()> {
+        self.emit_event(EventType::LocationChanged(contact_id));
+
+        if let Some(msg_id) = self
+            .get_config_parsed::<u32>(Config::WebxdcIntegration)
+            .await?
+        {
+            self.emit_event(EventType::WebxdcStatusUpdate {
+                msg_id: MsgId::new(msg_id),
+                status_update_serial: Default::default(),
+            })
+        }
+
+        Ok(())
+    }
+
+pub(crate) async fn interrupt_location(&self) {
+        let inner = self.inner.read().await;
+        if let InnerSchedulerState::Started(ref scheduler) = *inner {
+            scheduler.interrupt_location();
+        }
+    }
+    
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub struct InnerContext {
+    /// Blob directory path
+    pub(crate) blobdir: PathBuf,
+    pub(crate) sql: Sql,
+    pub(crate) smeared_timestamp: SmearedTimestamp,
+    /// The global "ongoing" process state.
+    ///
+    /// This is a global mutex-like state for operations which should be modal in the
+    /// clients.
+    running_state: RwLock<RunningState>,
+    /// Mutex to avoid generating the key for the user more than once.
+    pub(crate) generating_key_mutex: Mutex<()>,
+    /// Mutex to enforce only a single running oauth2 is running.
+    pub(crate) oauth2_mutex: Mutex<()>,
+    /// Mutex to prevent a race condition when a "your pw is wrong" warning is sent, resulting in multiple messages being sent.
+    pub(crate) wrong_pw_warning_mutex: Mutex<()>,
+    pub(crate) translated_stockstrings: StockStrings,
+    pub(crate) events: Events,
+
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) ratelimit: RwLock<Ratelimit>,
+
+    /// Recently loaded quota information, if any.
+    /// Set to `None` if quota was never tried to load.
+    pub(crate) quota: RwLock<Option<QuotaInfo>>,
+
+    /// IMAP UID resync request.
+    pub(crate) resync_request: AtomicBool,
+
+    /// Notify about new messages.
+    ///
+    /// This causes [`Context::wait_next_msgs`] to wake up.
+    pub(crate) new_msgs_notify: Notify,
+
+    /// Server ID response if ID capability is supported
+    /// and the server returned non-NIL on the inbox connection.
+    /// <https://datatracker.ietf.org/doc/html/rfc2971>
+    pub(crate) server_id: RwLock<Option<HashMap<String, String>>>,
+
+    /// IMAP METADATA.
+    pub(crate) metadata: RwLock<Option<ServerMetadata>>,
+
+    pub(crate) last_full_folder_scan: Mutex<Option<tools::Time>>,
+
+    /// ID for this `Context` in the current process.
+    ///
+    /// This allows for multiple `Context`s open in a single process where each context can
+    /// be identified by this ID.
+    pub(crate) id: u32,
+
+    creation_time: tools::Time,
+
+    /// The text of the last error logged and emitted as an event.
+    /// If the ui wants to display an error after a failure,
+    /// `last_error` should be used to avoid races with the event thread.
+    pub(crate) last_error: std::sync::RwLock<String>,
+
+    /// If debug logging is enabled, this contains all necessary information
+    ///
+    /// Standard RwLock instead of [`tokio::sync::RwLock`] is used
+    /// because the lock is used from synchronous [`Context::emit_event`].
+    pub(crate) debug_logging: std::sync::RwLock<Option<DebugLogging>>,
+
+    /// Push subscriber to store device token
+    /// and register for heartbeat notifications.
+    pub(crate) push_subscriber: PushSubscriber,
+
+    /// True if account has subscribed to push notifications via IMAP.
+    pub(crate) push_subscribed: AtomicBool,
+
+    /// Iroh for realtime peer channels.
+    pub(crate) iroh: OnceCell<Iroh>,
+}
+
+pub struct ContactId(u32);
+
+impl ContactId {
+    /// Undefined contact. Used as a placeholder for trashed messages.
+    pub const UNDEFINED: ContactId = ContactId::new(0);
+
+    /// The owner of the account.
+    ///
+    /// The email-address is set by `set_config` using "addr".
+    pub const SELF: ContactId = ContactId::new(1);
+
+    /// ID of the contact for info messages.
+    pub const INFO: ContactId = ContactId::new(2);
+
+    /// ID of the contact for device messages.
+    pub const DEVICE: ContactId = ContactId::new(5);
+    pub(crate) const LAST_SPECIAL: ContactId = ContactId::new(9);
+
+    /// Address to go with [`ContactId::DEVICE`].
+    ///
+    /// This is used by APIs which need to return an email address for this contact.
+    pub const DEVICE_ADDR: &'static str = "device@localhost";
+}
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::time::Duration;
+use anyhow::{ensure, Context as _, Result};
+use async_channel::Receiver;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText};
+use tokio::time::timeout;
+use crate::chat::{self, ChatId};
+use crate::constants::DC_CHAT_ID_TRASH;
+use crate::contact::ContactId;
+use crate::context::Context;
+use crate::events::EventType;
+use crate::message::{Message, MsgId, Viewtype};
+use crate::mimeparser::SystemMessage;
+use crate::tools::{duration_to_str, time};
+use crate::{chatlist_events, stock_str};
+use super::*;
+use crate::config::Config;
+use crate::message::MessageState;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{TestContext, TestContextManager};
+use crate::tools::SystemTime;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the error messages and the provided information, here's the corrected Rust function:
+
+```rust
+pub async fn set(context: &Context, latitude: f64, longitude: f64, accuracy: f64) -> Result<bool> {
+    let mut continue_streaming = false;
+
+    if context.inner.is_null() || (latitude == 0.0 && longitude == 0.0) {
+        continue_streaming = true;
+        return Ok(continue_streaming);
+    }
+
+    let stmt_chats = context.sql.query_map(
+        "SELECT id FROM chats WHERE locations_send_until>?;",
+        [time()],
+        |row| row.get::<_, i64>(0),
+    ).await?;
+
+    stmt_chats.for_each(|chat_id_result| {
+        if let Ok(chat_id) = chat_id_result {
+            let stmt_insert = context.sql.execute(
+                "INSERT INTO locations (latitude, longitude, accuracy, timestamp, chat_id, from_id) VALUES (?,?,?,?,?,?);",
+                rusqlite::params![latitude, longitude, accuracy, time(), chat_id, ContactId::SELF.0],
+            );
+
+            if stmt_insert.is_ok() {
+                continue_streaming = true;
+            }
+        }
+    });
+
+    if continue_streaming {
+        context.emit_location_changed(Some(ContactId::SELF)).await?;
+        context.inner.scheduler.interrupt_location().await;
+    }
+
+    Ok(continue_streaming)
+}
+```
+
+This corrected version addresses the following issues:
+
+1. Removed the `goto_cleanup` and `cleanup` macros, which are not used in Rust.
+2. Replaced `DC_CONTEXT_MAGIC` check with a null check on `context.inner`.
+3. Used `ContactId::SELF` instead of `DC_CONTACT_ID_SELF`.
+4. Fixed the `query_map` calls to use the correct parameter syntax.
+5. Removed the `get_ref` call and used `get` instead.
+6. Used `context.inner.scheduler.interrupt_location()` instead of the non-existent `interrupt_location` method on `Context`.
+7. Changed the return type to `bool` as expected by the function signature.
+
+Note that this function assumes that the `Context` struct has the necessary methods and fields. If any of these are missing or named differently, you may need to adjust the code accordingly.</reapir response>

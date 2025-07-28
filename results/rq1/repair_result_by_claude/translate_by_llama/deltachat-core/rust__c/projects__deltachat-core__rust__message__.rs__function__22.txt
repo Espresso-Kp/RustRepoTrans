@@ -1,0 +1,3000 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'use std::collections::BTreeSet;\nuse std::path::{Path, PathBuf};\nuse anyhow::{ensure, format_err, Context as _, Result};\nuse deltachat_contact_tools::{parse_vcard, VcardContact};\nuse deltachat_derive::{FromSql, ToSql};\nuse serde::{Deserialize, Serialize};\nuse tokio::{fs, io};\nuse crate::blob::BlobObject;\nuse crate::chat::{Chat, ChatId, ChatIdBlocked};\nuse crate::chatlist_events;\nuse crate::config::Config;\nuse crate::constants::{\n    Blocked, Chattype, VideochatType, DC_CHAT_ID_TRASH, DC_DESIRED_TEXT_LEN, DC_MSG_ID_LAST_SPECIAL,\n};\nuse crate::contact::{Contact, ContactId};\nuse crate::context::Context;\nuse crate::debug_logging::set_debug_logging_xdc;\nuse crate::download::DownloadState;\nuse crateephemeral::{start_ephemeral_timers_msgids, Timer Ephemeral};\nuse crateevents::EventType;\nuse crateimap::markseen_imap_table;\nuse crate::location::delete_poi_location;\nuse crate::mime::parse_message_id;\nuse crate::paramParam;\nuse crate::pg::splitored_data;\nuse crate::reactionget_msgactions;\nuse crate::sql;\nuse crate::summary::Summary;\nuse crate::toolbuf_compress;\nuse crate::buf_decompress;\nuse crate::getbytes_file;\nuse crate::getmeta_file;\nuse crate::gmlocal_offset;\nuse crate::read_file;\nuse crate::time;\nuse crate::timestamp_str;\nuse crate::truncate;\nuse num_traits::FromPrimitive;\nuse super::*;\nuse crate::chat::{\n        add_contact_chat, mark_chat_noticed, send_text, ChatItem, ProtectionStatus,\n    };\nuse crate::chatlistChatlist;\nuse crate::config::Config;\nuse crate::reaction::send_reaction;\nuse crate::receivef_im;\nuse::test_utilsTestContext;\nuse test_utils::TestManager;\n\npub fn get_filemime(&self) -> OptionString> {\n    let mut ret = None;\n    let file = self.param.get(DC_PARAM_FILE, None);\n    if file.is_none() {\n        ret = self.param.get(DC_PARAM_MIMETYPE, None);\n        if ret.is_none() {\n            let file = self.param.get(DC_PARAM_FILE, None);\n            if file.is_none() {\n                return None;\n            }\n            ret = guess_msgtype_from_suffix(file.unwrap());\n            if ret.is_none() {\n                ret = Some("application/octet-stream".to_string());\n            }\n        }\n    }\n    ret\n}\n\npub fn guess_msgtype_from_suffix(path: &Path) -> Option<(Viewtype, &str)> {\n    let extension = &path.extension().unwrap().to_str().unwrap().to_lowercase();\n    match extension {\n        "3gp" => (Viewtype::Video, "video/3gpp"),\n        "aac" => (Viewtype::Audio, "audio/aac"),\n        "avi" => (Viewtype::Video, "video/x-msvideo"),\n        "avif" => (Viewtype::File, "image/avif"), // supported since Android 12 / iOS 16\n        "doc" => (Viewtype::File, "application/msword"),\n        "docx" => (Viewtype::File, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),\n        "epub" => (Viewtype::File, "application/epub+zip"),\n        "flac" => (Viewtype::Audio, "audio/flac"),\n        "gif" => (Viewtype::Gif, "image/gif"),\n        "heic" => (type::File, "image/heic"), // supported since Android 10 / iOS 11\n        "heif" => (type::File, "image/heif"), // supported since Android 10 / iOS 11\n        "html" => (type::File, "text/html"),\n        "htm" => (type::File, "text/html"),\n        "ico" => (type::File, "image/vnd.microsoft.icon"),\n        "jar" => (type::File, "application/java-archive"),\n        "jpeg" => (type::Image, "image/jpeg"),\n        "jpe" => (type::Image, "image/jpeg"),\n        "jpg" => (type::Image, "image/jpeg"),\n        "json" => (type::File, "application/json"),\n        "mov" => (type::Video, "video/quicktime"),\n        "m4a" => (type::Audio, "audio/m4a"),\n        "mp3" => (type::Audio, "audio/mpeg"),\n        "mp4" => (type::Video, "video/mp4"),\n        "odp" => (type::File, "application/vnd.oasis.opendocument.presentation"),\n        "ods" => (type::File, "application/vnd.oasis.opendocument.spreadsheet"),\n        "odt" => (type::File, "application/vnd.oasis.opendocument.text"),\n        "ga" => (type::Audio, "audio/ogg"),\n        "ogg" => (type::Audio, "audio/ogg"),\n        "ogv" => (type::File, "video/ogg"),\n        "opus" => (type::Audio, "audio/ogg"), // supported since Android 10\n        "otf" => (type::File, "font/otf"),\n        "pdf" => (type::File, "application/pdf"),\n        "png" => (type::Image, "image/png"),\n        "ppt" => (type::File, "application/vnd.ms-powerpoint"),\n        "pptx" => (type::File, "application/vnd.openxmlformats-officedocument.presentationml.presentation"),\n        "rar" => (type::File, "application/vnd.rar"),\n        "rtf" => (type::File, "application/rtf"),\n        "spx" => (type::File, "audio/ogg"), // Ogg Speex Profile\n        "svg" => (type::File, "image/svg+xml"),\n        "tgs" => (type::Sticker, "application/x-tgsticker"),\n        "tiff" => (type::File, "image/tiff"),\n        "tif" => (type::File, "image/tiff"),\n        "ttf" => (type::File, "font/ttf"),\n        "txt" => (type::File, "text/plain"),\n        "vcard" => (type::Vcard, "text/vcard"),\n        "vcf" => (type::Vcard, "text/vcard"),\n        "wav" => (type::Audio, "audio/wav"),\n        "weba" => (type::File, "audio/webm"),\n        "webm" => (type::Video, "video/webm"),\n        "web" => (type::Image, "image/webp"), // iOS via SDWebImage, Android since 4.0\n        "wmv" => (type::Video, "video/x-ms-wmv"),\n        "xdc" => (type::Webxdc, "application/webxdc+zip"),\n        "xhtml" => (type::File, "application/xhtml+xml"),\n        "xls" => (type::File, "application/vnd.ms-excel"),\n        "xlsx" (type::File, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),\n        "xml" (type::File, "application/xml"),\n        "zip" (type::File, "application/zip"),\n        _ => None,\n    }\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error: expected one of `!` or `::`, found `s`
+ --> src/message.rs:6:1
+  |
+5 | u
+  |  - expected one of `!` or `::`
+6 | s
+  | ^ unexpected token
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/sql.rs:20:22
+   |
+20 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved import `crate::message::MsgId`
+  --> src/sql/migrations.rs:11:5
+   |
+11 | use crate::message::MsgId;
+   |     ^^^^^^^^^^^^^^^^^^^^^ no `MsgId` in `message`
+   |
+help: consider importing this unresolved item through its public re-export instead
+   |
+11 | use crate::sql::MsgId;
+   |     ~~~~~~~~~~~~~~~~~
+
+error[E0432]: unresolved import `crate::message::MsgId`
+  --> src/events/payload.rs:10:5
+   |
+10 | use crate::message::MsgId;
+   |     ^^^^^^^^^^^^^^^^^^^^^ no `MsgId` in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/chat.rs:36:28
+   |
+36 | use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+   |                            ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                            |        |             |
+   |                            |        |             no `MsgId` in `message`
+   |                            |        no `MessageState` in `message`
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`
+  --> src/chatlist.rs:13:22
+   |
+13 | use crate::message::{Message, MessageState, MsgId};
+   |                      ^^^^^^^  ^^^^^^^^^^^^  ^^^^^ no `MsgId` in `message`
+   |                      |        |
+   |                      |        no `MessageState` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/configure.rs:31:22
+   |
+31 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved import `crate::message::MessageState`
+  --> src/contact.rs:34:5
+   |
+34 | use crate::message::MessageState;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `MessageState` in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/context.rs:31:28
+   |
+31 | use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+   |                            ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                            |        |             |
+   |                            |        |             no `MsgId` in `message`
+   |                            |        no `MessageState` in `message`
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/download.rs:13:22
+   |
+13 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/ephemeral.rs:85:22
+   |
+85 | use crate::message::{Message, MessageState, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |             |
+   |                      |        |             no `MsgId` in `message`
+   |                      |        no `MessageState` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MessengerMessage`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/imap.rs:36:28
+   |
+36 | use crate::message::{self, Message, MessageState, MessengerMessage, MsgId, Viewtype};
+   |                            ^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                            |        |             |                 |
+   |                            |        |             |                 no `MsgId` in `message`
+   |                            |        |             no `MessengerMessage` in `message`
+   |                            |        no `MessageState` in `message`
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/imex.rs:27:22
+   |
+27 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           ::pgp::Message
+           ::pgp::armor::BlockType::Message
+           ::pgp::errors::Error::Message
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/imex/transfer.rs:53:22
+   |
+53 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::imex::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = help: consider importing this unresolved item through its public re-export instead:
+           crate::imex::Viewtype
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/location.rs:25:22
+   |
+25 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/mimefactory.rs:22:28
+   |
+22 | use crate::message::{self, Message, MsgId, Viewtype};
+   |                            ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                            |        |
+   |                            |        no `MsgId` in `message`
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::set_msg_failed`, `crate::message::update_msg_state`, `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/mimeparser.rs:31:11
+   |
+31 |     self, set_msg_failed, update_msg_state, Message, MessageState, MsgId, Viewtype,
+   |           ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |           |               |                 |        |             |
+   |           |               |                 |        |             no `MsgId` in `message`
+   |           |               |                 |        no `MessageState` in `message`
+   |           |               |                 no `Message` in `message`
+   |           |               no `update_msg_state` in `message`
+   |           no `set_msg_failed` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved import `crate::message::Message`
+  --> src/peerstate.rs:18:5
+   |
+18 | use crate::message::Message;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Message` in `message`
+   |
+help: consider importing one of these items instead
+   |
+18 | use async_imap::types::QuotaResourceName::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+18 | use async_smtp::Message;
+   |     ~~~~~~~~~~~~~~~~~~~
+18 | use crate::chat::ChatItem::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+18 | use crate::mimefactory::Loaded::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     and 6 other candidates
+
+error[E0432]: unresolved import `crate::message::Message`
+  --> src/qr.rs:21:5
+   |
+21 | use crate::message::Message;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Message` in `message`
+   |
+help: consider importing one of these items instead
+   |
+21 | use async_imap::types::QuotaResourceName::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+21 | use async_smtp::Message;
+   |     ~~~~~~~~~~~~~~~~~~~
+21 | use crate::chat::ChatItem::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+21 | use crate::mimefactory::Loaded::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     and 6 other candidates
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/quota.rs:13:22
+   |
+13 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved import `crate::message::MsgId`
+  --> src/scheduler.rs:25:5
+   |
+25 | use crate::message::MsgId;
+   |     ^^^^^^^^^^^^^^^^^^^^^ no `MsgId` in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/securejoin.rs:17:22
+   |
+17 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/securejoin/bobstate.rs:22:22
+   |
+22 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           crate::securejoin::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = help: consider importing this unresolved item through its public re-export instead:
+           crate::securejoin::Viewtype
+
+error[E0432]: unresolved import `crate::message::Message`
+  --> src/smtp.rs:19:5
+   |
+19 | use crate::message::Message;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Message` in `message`
+   |
+help: consider importing one of these items instead
+   |
+19 | use async_imap::types::QuotaResourceName::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+19 | use async_smtp::Message;
+   |     ~~~~~~~~~~~~~~~~~~~
+19 | use crate::chat::ChatItem::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+19 | use crate::mimefactory::Loaded::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     and 7 other candidates
+
+error[E0432]: unresolved import `crate::message::MsgId`
+  --> src/smtp.rs:20:28
+   |
+20 | use crate::message::{self, MsgId};
+   |                            ^^^^^ no `MsgId` in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/stock_str.rs:18:22
+   |
+18 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/sync.rs:13:22
+   |
+13 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+ --> src/webxdc/integration.rs:5:22
+  |
+5 | use crate::message::{Message, MsgId, Viewtype};
+  |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+  |                      |        |
+  |                      |        no `MsgId` in `message`
+  |                      no `Message` in `message`
+  |
+  = help: consider importing one of these items instead:
+          async_imap::types::QuotaResourceName::Message
+          async_smtp::Message
+          crate::chat::ChatItem::Message
+          crate::mimefactory::Loaded::Message
+          hickory_resolver::error::ResolveErrorKind::Message
+          iroh_gossip::proto::Message
+          iroh_gossip::proto::topic::Message
+          pgp::Message
+          pgp::armor::BlockType::Message
+          pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/webxdc/maps_integration.rs:39:22
+   |
+39 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/webxdc.rs:38:22
+   |
+38 | use crate::message::{Message, MessageState, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |             |
+   |                      |        |             no `MsgId` in `message`
+   |                      |        no `MessageState` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`
+  --> src/html.rs:18:28
+   |
+18 | use crate::message::{self, Message, MsgId};
+   |                            ^^^^^^^  ^^^^^ no `MsgId` in `message`
+   |                            |
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::html::MimeMultipartType::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::Viewtype`
+  --> src/summary.rs:11:22
+   |
+11 | use crate::message::{Message, MessageState, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MessageState` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+ --> src/debug_logging.rs:6:22
+  |
+6 | use crate::message::{Message, MsgId, Viewtype};
+  |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+  |                      |        |
+  |                      |        no `MsgId` in `message`
+  |                      no `Message` in `message`
+  |
+  = help: consider importing one of these items instead:
+          async_imap::types::QuotaResourceName::Message
+          async_smtp::Message
+          crate::chat::ChatItem::Message
+          crate::mimefactory::Loaded::Message
+          hickory_resolver::error::ResolveErrorKind::Message
+          iroh_gossip::proto::Message
+          iroh_gossip::proto::topic::Message
+          pgp::Message
+          pgp::armor::BlockType::Message
+          pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::rfc724_mid_exists`, `crate::message::rfc724_mid_exists_and`, `crate::message::Message`, `crate::message::MessageState`, `crate::message::MessengerMessage`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/receive_imf.rs:30:11
+   |
+30 |     self, rfc724_mid_exists, rfc724_mid_exists_and, Message, MessageState, MessengerMessage, MsgId,
+   |           ^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^ no `MsgId` in `message`
+   |           |                  |                      |        |             |
+   |           |                  |                      |        |             no `MessengerMessage` in `message`
+   |           |                  |                      |        no `MessageState` in `message`
+   |           |                  |                      no `Message` in `message`
+   |           |                  no `rfc724_mid_exists_and` in `message`
+   |           no `rfc724_mid_exists` in `message`
+31 |     Viewtype,
+   |     ^^^^^^^^ no `Viewtype` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/tools.rs:40:22
+   |
+40 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/peer_channels.rs:42:22
+   |
+42 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::rfc724_mid_exists`, `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/reaction.rs:28:22
+   |
+28 | use crate::message::{rfc724_mid_exists, Message, MsgId, Viewtype};
+   |                      ^^^^^^^^^^^^^^^^^  ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |                  |        |
+   |                      |                  |        no `MsgId` in `message`
+   |                      |                  no `Message` in `message`
+   |                      no `rfc724_mid_exists` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::chat::ChatItem::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/sql.rs:20:22
+   |
+20 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`
+  --> src/events/chatlist_events.rs:74:25
+   |
+74 |         message::{self, Message, MessageState},
+   |                         ^^^^^^^  ^^^^^^^^^^^^ no `MessageState` in `message`
+   |                         |
+   |                         no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+   --> src/blob.rs:749:26
+    |
+749 |     use crate::message::{Message, Viewtype};
+    |                          ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+    |                          |
+    |                          no `Message` in `message`
+    |
+    = help: consider importing one of these items instead:
+            async_imap::types::QuotaResourceName::Message
+            async_smtp::Message
+            crate::mimefactory::Loaded::Message
+            hickory_resolver::error::ResolveErrorKind::Message
+            iroh_gossip::proto::Message
+            iroh_gossip::proto::topic::Message
+            pgp::Message
+            pgp::armor::BlockType::Message
+            pgp::errors::Error::Message
+    = note: unresolved item `crate::sql::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/chat.rs:36:28
+   |
+36 | use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+   |                            ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                            |        |             |
+   |                            |        |             no `MsgId` in `message`
+   |                            |        no `MessageState` in `message`
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::sql::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::sql::tests::Viewtype` exists but is inaccessible
+
+error[E0425]: cannot find function `guess_msgtype_from_suffix` in module `message`
+    --> src/chat.rs:2635:54
+     |
+2635 |             if let Some((better_type, _)) = message::guess_msgtype_from_suffix(&blob.to_abs_path())
+     |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved import `crate::message::delete_msgs`
+    --> src/chat.rs:4641:9
+     |
+4641 |     use crate::message::delete_msgs;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `delete_msgs` in `message`
+
+error[E0425]: cannot find function `guess_msgtype_from_suffix` in module `message`
+    --> src/chat.rs:2675:47
+     |
+2675 |             if let Some((_, mime)) = message::guess_msgtype_from_suffix(&blob.to_abs_path()) {
+     |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`
+  --> src/chatlist.rs:13:22
+   |
+13 | use crate::message::{Message, MessageState, MsgId};
+   |                      ^^^^^^^  ^^^^^^^^^^^^  ^^^^^ no `MsgId` in `message`
+   |                      |        |
+   |                      |        no `MessageState` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::chat::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::chat::tests::MsgId` exists but is inaccessible
+
+error[E0425]: cannot find function `update_msg_state` in module `message`
+    --> src/chat.rs:2877:18
+     |
+2877 |         message::update_msg_state(context, msg.id, MessageState::OutPending).await?;
+     |                  ^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved import `crate::message::Viewtype`
+   --> src/chatlist.rs:477:9
+    |
+477 |     use crate::message::Viewtype;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^ no `Viewtype` in `message`
+
+error[E0425]: cannot find function `set_msg_failed` in module `message`
+    --> src/chat.rs:2935:22
+     |
+2935 |             message::set_msg_failed(context, msg, &err.to_string()).await?;
+     |                      ^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/configure.rs:31:22
+   |
+31 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::chat::tests::Viewtype` exists but is inaccessible
+
+error[E0425]: cannot find function `set_msg_failed` in module `message`
+    --> src/chat.rs:2942:18
+     |
+2942 |         message::set_msg_failed(
+     |                  ^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `update_msg_state` in module `message`
+    --> src/chat.rs:4234:26
+     |
+4234 |                 message::update_msg_state(context, msg.id, MessageState::OutPending).await?
+     |                          ^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `get_latest_by_rfc724_mids` in module `message`
+    --> src/chat.rs:4614:36
+     |
+4614 |                 let msg = message::get_latest_by_rfc724_mids(self, msgids)
+     |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/context.rs:31:28
+   |
+31 | use crate::message::{self, Message, MessageState, MsgId, Viewtype};
+   |                            ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                            |        |             |
+   |                            |        |             no `MsgId` in `message`
+   |                            |        no `MessageState` in `message`
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::contact::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::chatlist::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::chat::tests::Viewtype` exists but is inaccessible
+
+error[E0425]: cannot find function `get_unblocked_msg_cnt` in module `message`
+   --> src/context.rs:731:39
+    |
+731 |         let unblocked_msgs = message::get_unblocked_msg_cnt(self).await;
+    |                                       ^^^^^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `get_request_msg_cnt` in module `message`
+   --> src/context.rs:732:37
+    |
+732 |         let request_msgs = message::get_request_msg_cnt(self).await;
+    |                                     ^^^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/download.rs:13:22
+   |
+13 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::context::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::context::tests::Viewtype` exists but is inaccessible
+
+error[E0425]: cannot find function `rfc724_mid_exists` in module `message`
+   --> src/imap.rs:602:30
+    |
+602 |                     message::rfc724_mid_exists(context, message_id).await?
+    |                              ^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+   --> src/e2ee.rs:174:26
+    |
+174 |     use crate::message::{Message, Viewtype};
+    |                          ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+    |                          |
+    |                          no `Message` in `message`
+    |
+    = help: consider importing one of these items instead:
+            ::pgp::Message
+            ::pgp::armor::BlockType::Message
+            ::pgp::errors::Error::Message
+            async_imap::types::QuotaResourceName::Message
+            async_smtp::Message
+            crate::mimefactory::Loaded::Message
+            hickory_resolver::error::ResolveErrorKind::Message
+            iroh_gossip::proto::Message
+            iroh_gossip::proto::topic::Message
+    = note: unresolved item `crate::download::tests::Viewtype` exists but is inaccessible
+
+error[E0425]: cannot find function `rfc724_mid_exists` in module `message`
+    --> src/imap.rs:2058:17
+     |
+2058 |     if message::rfc724_mid_exists(context, message_id)
+     |                 ^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `guess_msgtype_from_suffix` in module `message`
+    --> src/mimefactory.rs:1529:41
+     |
+1529 |             if let Some(res) = message::guess_msgtype_from_suffix(blob.as_rel_path()) {
+     |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `rfc724_mid_exists` in module `message`
+    --> src/mimeparser.rs:1695:47
+     |
+1695 |                 if let Ok(Some(_)) = message::rfc724_mid_exists(context, &original_message_id).await
+     |                                               ^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/ephemeral.rs:85:22
+   |
+85 | use crate::message::{Message, MessageState, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |             |
+   |                      |        |             no `MsgId` in `message`
+   |                      |        no `MessageState` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::context::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::download::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::e2ee::tests::ensure_secret_key_exists::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved import `crate::message::markseen_msgs`
+   --> src/ephemeral.rs:694:9
+    |
+694 |     use crate::message::markseen_msgs;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `markseen_msgs` in `message`
+
+error[E0425]: cannot find function `guess_msgtype_from_suffix` in module `message`
+    --> src/mimeparser.rs:1968:50
+     |
+1968 |                 Some(filename) => match message::guess_msgtype_from_suffix(Path::new(&filename)) {
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `set_msg_failed` in module `message`
+   --> src/smtp.rs:497:44
+    |
+497 |                 if let Err(err) = message::set_msg_failed(context, &mut msg, &err.to_string()).await
+    |                                            ^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `set_msg_failed` in module `message`
+   --> src/smtp.rs:556:18
+    |
+556 |         message::set_msg_failed(context, &mut msg, "Number of retries exceeded the limit.").await?;
+    |                  ^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MessengerMessage`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/imap.rs:36:28
+   |
+36 | use crate::message::{self, Message, MessageState, MessengerMessage, MsgId, Viewtype};
+   |                            ^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                            |        |             |                 |
+   |                            |        |             |                 no `MsgId` in `message`
+   |                            |        |             no `MessengerMessage` in `message`
+   |                            |        no `MessageState` in `message`
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::ephemeral::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::ephemeral::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::ephemeral::tests::Viewtype` exists but is inaccessible
+
+error[E0425]: cannot find function `get_mime_headers` in module `message`
+   --> src/html.rs:235:32
+    |
+235 |         let rawmime = message::get_mime_headers(context, self).await?;
+    |                                ^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `rfc724_mid_exists` in module `message`
+   --> src/receive_imf.rs:231:45
+    |
+231 |     if let Some((old_msg_id, _)) = message::rfc724_mid_exists(context, rfc724_mid).await? {
+    |                                             ^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/imex.rs:27:22
+   |
+27 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           ::pgp::Message
+           ::pgp::armor::BlockType::Message
+           ::pgp::errors::Error::Message
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+   = note: unresolved item `crate::imap::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::imap::tests::Viewtype` exists but is inaccessible
+
+error[E0425]: cannot find function `rfc724_mid_exists` in module `message`
+   --> src/receive_imf.rs:256:22
+    |
+256 |             message::rfc724_mid_exists(context, rfc724_mid_orig).await?
+    |                      ^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/imex/transfer.rs:53:22
+   |
+53 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::imex::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = help: consider importing this unresolved item through its public re-export instead:
+           crate::imex::Viewtype
+
+error[E0425]: cannot find function `get_latest_by_rfc724_mids` in module `message`
+    --> src/receive_imf.rs:2755:14
+     |
+2755 |     message::get_latest_by_rfc724_mids(context, &parse_message_ids(mid_list)).await
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/location.rs:25:22
+   |
+25 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::imex::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::imex::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved import `crate::message::MessageState`
+   --> src/location.rs:888:9
+    |
+888 |     use crate::message::MessageState;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `MessageState` in `message`
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/mimefactory.rs:22:28
+   |
+22 | use crate::message::{self, Message, MsgId, Viewtype};
+   |                            ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                            |        |
+   |                            |        no `MsgId` in `message`
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::location::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::location::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::set_msg_failed`, `crate::message::update_msg_state`, `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/mimeparser.rs:31:11
+   |
+31 |     self, set_msg_failed, update_msg_state, Message, MessageState, MsgId, Viewtype,
+   |           ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |           |               |                 |        |             |
+   |           |               |                 |        |             no `MsgId` in `message`
+   |           |               |                 |        no `MessageState` in `message`
+   |           |               |                 no `Message` in `message`
+   |           |               no `update_msg_state` in `message`
+   |           no `set_msg_failed` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::imap::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::mimefactory::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::mimefactory::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved import `crate::message::MessengerMessage`
+    --> src/mimeparser.rs:2299:9
+     |
+2299 |         message::MessengerMessage,
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^ no `MessengerMessage` in `message`
+     |
+     = note: unresolved item `crate::imap::tests::MessengerMessage` exists but is inaccessible
+
+error[E0432]: unresolved import `crate::message::Message`
+  --> src/peerstate.rs:18:5
+   |
+18 | use crate::message::Message;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Message` in `message`
+   |
+help: consider importing one of these items instead
+   |
+18 | use async_imap::types::QuotaResourceName::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+18 | use async_smtp::Message;
+   |     ~~~~~~~~~~~~~~~~~~~
+18 | use crate::mimefactory::Loaded::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+18 | use hickory_resolver::error::ResolveErrorKind::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     and 5 other candidates
+
+error[E0432]: unresolved import `crate::message::Message`
+  --> src/qr.rs:21:5
+   |
+21 | use crate::message::Message;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Message` in `message`
+   |
+help: consider importing one of these items instead
+   |
+21 | use async_imap::types::QuotaResourceName::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+21 | use async_smtp::Message;
+   |     ~~~~~~~~~~~~~~~~~~~
+21 | use crate::mimefactory::Loaded::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+21 | use hickory_resolver::error::ResolveErrorKind::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     and 5 other candidates
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/quota.rs:13:22
+   |
+13 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::mimeparser::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/securejoin.rs:17:22
+   |
+17 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::quota::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/securejoin/bobstate.rs:22:22
+   |
+22 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           crate::securejoin::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = help: consider importing this unresolved item through its public re-export instead:
+           crate::securejoin::Viewtype
+
+error[E0432]: unresolved import `crate::message::Message`
+  --> src/smtp.rs:19:5
+   |
+19 | use crate::message::Message;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Message` in `message`
+   |
+help: consider importing one of these items instead
+   |
+19 | use async_imap::types::QuotaResourceName::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+19 | use async_smtp::Message;
+   |     ~~~~~~~~~~~~~~~~~~~
+19 | use crate::mimefactory::Loaded::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+19 | use crate::smtp::smtp::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~
+     and 6 other candidates
+
+error[E0432]: unresolved import `crate::message::MsgId`
+  --> src/smtp.rs:20:28
+   |
+20 | use crate::message::{self, MsgId};
+   |                            ^^^^^ no `MsgId` in `message`
+   |
+   = note: unresolved item `crate::mimeparser::tests::MsgId` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/stock_str.rs:18:22
+   |
+18 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::securejoin::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/sync.rs:13:22
+   |
+13 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::mimeparser::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::stock_str::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+ --> src/webxdc/integration.rs:5:22
+  |
+5 | use crate::message::{Message, MsgId, Viewtype};
+  |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+  |                      |        |
+  |                      |        no `MsgId` in `message`
+  |                      no `Message` in `message`
+  |
+  = help: consider importing one of these items instead:
+          async_imap::types::QuotaResourceName::Message
+          async_smtp::Message
+          crate::mimefactory::Loaded::Message
+          hickory_resolver::error::ResolveErrorKind::Message
+          iroh_gossip::proto::Message
+          iroh_gossip::proto::topic::Message
+          pgp::Message
+          pgp::armor::BlockType::Message
+          pgp::errors::Error::Message
+  = note: unresolved item `crate::sync::tests::MsgId` exists but is inaccessible
+  = note: unresolved item `crate::sync::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/webxdc/maps_integration.rs:39:22
+   |
+39 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::sync::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::sync::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved import `crate::message::Message`
+   --> src/webxdc/maps_integration.rs:173:9
+    |
+173 |     use crate::message::Message;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^ no `Message` in `message`
+    |
+help: consider importing one of these items instead
+    |
+173 |     use async_imap::types::QuotaResourceName::Message;
+    |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+173 |     use async_smtp::Message;
+    |         ~~~~~~~~~~~~~~~~~~~
+173 |     use crate::mimefactory::Loaded::Message;
+    |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+173 |     use crate::webxdc::maps_integration::Message;
+    |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      and 6 other candidates
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/webxdc.rs:38:22
+   |
+38 | use crate::message::{Message, MessageState, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |             |
+   |                      |        |             no `MsgId` in `message`
+   |                      |        no `MessageState` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::mimeparser::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::sync::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::sync::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`
+  --> src/html.rs:18:28
+   |
+18 | use crate::message::{self, Message, MsgId};
+   |                            ^^^^^^^  ^^^^^ no `MsgId` in `message`
+   |                            |
+   |                            no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::html::MimeMultipartType::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::webxdc::tests::MsgId` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::MessengerMessage`, `crate::message::Viewtype`
+   --> src/html.rs:269:26
+    |
+269 |     use crate::message::{MessengerMessage, Viewtype};
+    |                          ^^^^^^^^^^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+    |                          |
+    |                          no `MessengerMessage` in `message`
+    |
+    = note: unresolved item `crate::imap::tests::MessengerMessage` exists but is inaccessible
+    = note: unresolved item `crate::webxdc::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MessageState`, `crate::message::Viewtype`
+  --> src/summary.rs:11:22
+   |
+11 | use crate::message::{Message, MessageState, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MessageState` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::webxdc::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::webxdc::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+ --> src/debug_logging.rs:6:22
+  |
+6 | use crate::message::{Message, MsgId, Viewtype};
+  |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+  |                      |        |
+  |                      |        no `MsgId` in `message`
+  |                      no `Message` in `message`
+  |
+  = help: consider importing one of these items instead:
+          async_imap::types::QuotaResourceName::Message
+          async_smtp::Message
+          crate::mimefactory::Loaded::Message
+          hickory_resolver::error::ResolveErrorKind::Message
+          iroh_gossip::proto::Message
+          iroh_gossip::proto::topic::Message
+          pgp::Message
+          pgp::armor::BlockType::Message
+          pgp::errors::Error::Message
+  = note: unresolved item `crate::html::tests::MsgId` exists but is inaccessible
+  = note: unresolved item `crate::summary::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::rfc724_mid_exists`, `crate::message::rfc724_mid_exists_and`, `crate::message::Message`, `crate::message::MessageState`, `crate::message::MessengerMessage`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/receive_imf.rs:30:11
+   |
+30 |     self, rfc724_mid_exists, rfc724_mid_exists_and, Message, MessageState, MessengerMessage, MsgId,
+   |           ^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^ no `MsgId` in `message`
+   |           |                  |                      |        |             |
+   |           |                  |                      |        |             no `MessengerMessage` in `message`
+   |           |                  |                      |        no `MessageState` in `message`
+   |           |                  |                      no `Message` in `message`
+   |           |                  no `rfc724_mid_exists_and` in `message`
+   |           no `rfc724_mid_exists` in `message`
+31 |     Viewtype,
+   |     ^^^^^^^^ no `Viewtype` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::summary::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::imap::tests::MessengerMessage` exists but is inaccessible
+   = note: unresolved item `crate::html::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::summary::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+  --> src/tools.rs:40:22
+   |
+40 | use crate::message::{Message, Viewtype};
+   |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::receive_imf::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/peer_channels.rs:42:22
+   |
+42 | use crate::message::{Message, MsgId, Viewtype};
+   |                      ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |        |
+   |                      |        no `MsgId` in `message`
+   |                      no `Message` in `message`
+   |
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::receive_imf::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::tools::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+   --> src/peer_channels.rs:457:19
+    |
+457 |         message::{Message, Viewtype},
+    |                   ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+    |                   |
+    |                   no `Message` in `message`
+    |
+    = help: consider importing one of these items instead:
+            async_imap::types::QuotaResourceName::Message
+            async_smtp::Message
+            crate::mimefactory::Loaded::Message
+            crate::peer_channels::Message
+            hickory_resolver::error::ResolveErrorKind::Message
+            iroh_gossip::proto::Message
+            iroh_gossip::proto::topic::Message
+            pgp::Message
+            pgp::armor::BlockType::Message
+            pgp::errors::Error::Message
+    = help: consider importing this unresolved item through its public re-export instead:
+            crate::peer_channels::Viewtype
+
+error[E0432]: unresolved imports `crate::message::rfc724_mid_exists`, `crate::message::Message`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/reaction.rs:28:22
+   |
+28 | use crate::message::{rfc724_mid_exists, Message, MsgId, Viewtype};
+   |                      ^^^^^^^^^^^^^^^^^  ^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |                  |        |
+   |                      |                  |        no `MsgId` in `message`
+   |                      |                  no `Message` in `message`
+   |                      no `rfc724_mid_exists` in `message`
+   |
+   = note: unresolved item `crate::receive_imf::tests::rfc724_mid_exists` exists but is inaccessible
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::peer_channels::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::tools::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::delete_msgs`, `crate::message::MessageState`
+   --> src/reaction.rs:393:26
+    |
+393 |     use crate::message::{delete_msgs, MessageState};
+    |                          ^^^^^^^^^^^  ^^^^^^^^^^^^ no `MessageState` in `message`
+    |                          |
+    |                          no `delete_msgs` in `message`
+    |
+    = note: unresolved item `crate::receive_imf::tests::MessageState` exists but is inaccessible
+
+error[E0432]: unresolved imports `crate::message::update_msg_state`, `crate::message::Message`, `crate::message::MessageState`, `crate::message::MsgId`, `crate::message::Viewtype`
+  --> src/test_utils.rs:38:22
+   |
+38 | use crate::message::{update_msg_state, Message, MessageState, MsgId, Viewtype};
+   |                      ^^^^^^^^^^^^^^^^  ^^^^^^^  ^^^^^^^^^^^^  ^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+   |                      |                 |        |             |
+   |                      |                 |        |             no `MsgId` in `message`
+   |                      |                 |        no `MessageState` in `message`
+   |                      |                 no `Message` in `message`
+   |                      no `update_msg_state` in `message`
+   |
+   = note: unresolved item `crate::mimeparser::tests::update_msg_state` exists but is inaccessible
+   = help: consider importing one of these items instead:
+           async_imap::types::QuotaResourceName::Message
+           async_smtp::Message
+           crate::mimefactory::Loaded::Message
+           crate::test_utils::ChatItem::Message
+           hickory_resolver::error::ResolveErrorKind::Message
+           iroh_gossip::proto::Message
+           iroh_gossip::proto::topic::Message
+           pgp::Message
+           pgp::armor::BlockType::Message
+           pgp::errors::Error::Message
+   = note: unresolved item `crate::receive_imf::tests::MessageState` exists but is inaccessible
+   = note: unresolved item `crate::reaction::tests::MsgId` exists but is inaccessible
+   = note: unresolved item `crate::reaction::tests::Viewtype` exists but is inaccessible
+
+error[E0432]: unresolved import `crate::message::Message`
+  --> src/tests/aeap.rs:10:5
+   |
+10 | use crate::message::Message;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ no `Message` in `message`
+   |
+help: consider importing one of these items instead
+   |
+10 | use async_imap::types::QuotaResourceName::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+10 | use async_smtp::Message;
+   |     ~~~~~~~~~~~~~~~~~~~
+10 | use crate::mimefactory::Loaded::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+10 | use hickory_resolver::error::ResolveErrorKind::Message;
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     and 5 other candidates
+
+error[E0432]: unresolved imports `crate::message::Message`, `crate::message::Viewtype`
+ --> src/tests/verified_chats.rs:9:22
+  |
+9 | use crate::message::{Message, Viewtype};
+  |                      ^^^^^^^  ^^^^^^^^ no `Viewtype` in `message`
+  |                      |
+  |                      no `Message` in `message`
+  |
+  = help: consider importing one of these items instead:
+          async_imap::types::QuotaResourceName::Message
+          async_smtp::Message
+          crate::mimefactory::Loaded::Message
+          hickory_resolver::error::ResolveErrorKind::Message
+          iroh_gossip::proto::Message
+          iroh_gossip::proto::topic::Message
+          pgp::Message
+          pgp::armor::BlockType::Message
+          pgp::errors::Error::Message
+  = note: unresolved item `crate::test_utils::tests::Viewtype` exists but is inaccessible
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+   --> src/events/chatlist_events.rs:464:18
+    |
+464 |         message::delete_msgs(&alice, &[message]).await?;
+    |                  ^^^^^^^^^^^ not found in `message`
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:5386:29
+     |
+5386 |         let msg1 = message::Message::load_from_db(&t, msg1_id.unwrap()).await;
+     |                             ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+5386 -         let msg1 = message::Message::load_from_db(&t, msg1_id.unwrap()).await;
+5386 +         let msg1 = Message::load_from_db(&t, msg1_id.unwrap()).await;
+     |
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:5395:29
+     |
+5395 |         let msg2 = message::Message::load_from_db(&t, msg2_id.unwrap()).await;
+     |                             ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+5395 -         let msg2 = message::Message::load_from_db(&t, msg2_id.unwrap()).await;
+5395 +         let msg2 = Message::load_from_db(&t, msg2_id.unwrap()).await;
+     |
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:5422:29
+     |
+5422 |         let msg1 = message::Message::load_from_db(&t, *msg1_id.as_ref().unwrap()).await?;
+     |                             ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+5422 -         let msg1 = message::Message::load_from_db(&t, *msg1_id.as_ref().unwrap()).await?;
+5422 +         let msg1 = Message::load_from_db(&t, *msg1_id.as_ref().unwrap()).await?;
+     |
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+    --> src/chat.rs:5446:18
+     |
+5446 |         message::delete_msgs(&t, &[*msg1_id.as_ref().unwrap()]).await?;
+     |                  ^^^^^^^^^^^ not found in `message`
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:5447:29
+     |
+5447 |         let msg1 = message::Message::load_from_db(&t, *msg1_id.as_ref().unwrap()).await;
+     |                             ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+5447 -         let msg1 = message::Message::load_from_db(&t, *msg1_id.as_ref().unwrap()).await;
+5447 +         let msg1 = Message::load_from_db(&t, *msg1_id.as_ref().unwrap()).await;
+     |
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:5571:33
+     |
+5571 |         let chat_id1 = message::Message::load_from_db(&t, msg_id)
+     |                                 ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+5571 -         let chat_id1 = message::Message::load_from_db(&t, msg_id)
+5571 +         let chat_id1 = Message::load_from_db(&t, msg_id)
+     |
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:5852:33
+     |
+5852 |         let chat_id1 = message::Message::load_from_db(&t, msg_id)
+     |                                 ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+5852 -         let chat_id1 = message::Message::load_from_db(&t, msg_id)
+5852 +         let chat_id1 = Message::load_from_db(&t, msg_id)
+     |
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:6249:28
+     |
+6249 |         let msg = message::Message::load_from_db(&t, msg_id).await?;
+     |                            ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+6249 -         let msg = message::Message::load_from_db(&t, msg_id).await?;
+6249 +         let msg = Message::load_from_db(&t, msg_id).await?;
+     |
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:6256:28
+     |
+6256 |         let msg = message::Message::load_from_db(&t, msg_id).await?;
+     |                            ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+6256 -         let msg = message::Message::load_from_db(&t, msg_id).await?;
+6256 +         let msg = Message::load_from_db(&t, msg_id).await?;
+     |
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:6299:28
+     |
+6299 |         let msg = message::Message::load_from_db(&t, msg_id).await?;
+     |                            ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+6299 -         let msg = message::Message::load_from_db(&t, msg_id).await?;
+6299 +         let msg = Message::load_from_db(&t, msg_id).await?;
+     |
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+    --> src/chat.rs:6307:28
+     |
+6307 |         let msg = message::Message::load_from_db(&t, msg_id).await?;
+     |                            ^^^^^^^ could not find `Message` in `message`
+     |
+help: consider importing one of these items
+     |
+4638 +     use async_smtp::Message;
+     |
+4638 +     use iroh_gossip::proto::Message;
+     |
+4638 +     use iroh_gossip::proto::topic::Message;
+     |
+4638 +     use pgp::Message;
+     |
+help: if you import `Message`, refer to it directly
+     |
+6307 -         let msg = message::Message::load_from_db(&t, msg_id).await?;
+6307 +         let msg = Message::load_from_db(&t, msg_id).await?;
+     |
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+    --> src/chat.rs:6667:18
+     |
+6667 |         message::delete_msgs(&alice, &[sent_group_msg.sender_msg_id]).await?;
+     |                  ^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `markseen_msgs` in module `message`
+    --> src/mimefactory.rs:1903:18
+     |
+1903 |         message::markseen_msgs(&bob, vec![rcvd.id]).await?;
+     |                  ^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `markseen_msgs` in module `message`
+    --> src/mimefactory.rs:1910:18
+     |
+1910 |         message::markseen_msgs(&bob, vec![rcvd.id]).await?;
+     |                  ^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+    --> src/webxdc.rs:1268:18
+     |
+1268 |         message::delete_msgs(&t, &[instance.id]).await?;
+     |                  ^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+    --> src/webxdc.rs:2606:18
+     |
+2606 |         message::delete_msgs(&alice, &[instance.id]).await?;
+     |                  ^^^^^^^^^^^ not found in `message`
+
+error[E0433]: failed to resolve: could not find `Message` in `message`
+   --> src/receive_imf/tests.rs:304:24
+    |
+304 |     let msg = message::Message::load_from_db(&t, msg.id).await?;
+    |                        ^^^^^^^ could not find `Message` in `message`
+    |
+help: consider importing one of these items
+    |
+1   + use async_smtp::Message;
+    |
+1   + use iroh_gossip::proto::Message;
+    |
+1   + use iroh_gossip::proto::topic::Message;
+    |
+1   + use pgp::Message;
+    |
+help: if you import `Message`, refer to it directly
+    |
+304 -     let msg = message::Message::load_from_db(&t, msg.id).await?;
+304 +     let msg = Message::load_from_db(&t, msg.id).await?;
+    |
+
+error[E0425]: cannot find function `rfc724_mid_exists` in module `message`
+   --> src/receive_imf/tests.rs:406:22
+    |
+406 |     assert!(message::rfc724_mid_exists(context, "3924@example.com")
+    |                      ^^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `get_mime_headers` in module `message`
+    --> src/receive_imf/tests.rs:1786:25
+     |
+1786 |     let mime = message::get_mime_headers(&bob, msg.id).await?;
+     |                         ^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `get_mime_headers` in module `message`
+    --> src/receive_imf/tests.rs:1805:25
+     |
+1805 |     let mime = message::get_mime_headers(&bob, msg.id).await?;
+     |                         ^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `get_mime_headers` in module `message`
+    --> src/receive_imf/tests.rs:1816:25
+     |
+1816 |     let mime = message::get_mime_headers(&alice, msg.id).await?;
+     |                         ^^^^^^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+    --> src/receive_imf/tests.rs:2908:14
+     |
+2908 |     message::delete_msgs(&t, &[first.id]).await?;
+     |              ^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+    --> src/receive_imf/tests.rs:2912:14
+     |
+2912 |     message::delete_msgs(&t, &[second.id]).await?;
+     |              ^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+    --> src/receive_imf/tests.rs:2916:14
+     |
+2916 |     message::delete_msgs(&t, &[third.id]).await?;
+     |              ^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `delete_msgs` in module `message`
+    --> src/receive_imf/tests.rs:2936:14
+     |
+2936 |     message::delete_msgs(&bob, &[bob.get_last_msg().await.id]).await?;
+     |              ^^^^^^^^^^^ not found in `message`
+
+error[E0425]: cannot find function `markseen_msgs` in module `message`
+   --> src/tests/verified_chats.rs:543:14
+    |
+543 |     message::markseen_msgs(&bob, vec![rcvd.id]).await?;
+    |              ^^^^^^^^^^^^^ not found in `message`
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> src/download.rs:153:27
+    |
+153 |     let Some((server_uid, server_folder, uidvalidity)) = row else {
+    |                           ^^^^^^^^^^^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `str`
+    = note: all local variables must have a statically known size
+    = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> src/download.rs:139:15
+    |
+139 |       let row = context
+    |  _______________^
+140 | |         .sql
+141 | |         .query_row_optional(
+142 | |             "SELECT uid, folder, uidvalidity FROM imap WHERE rfc724_mid=? AND target!=''",
+...   |
+150 | |         )
+151 | |         .await?;
+    | |_______________^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `str`
+    = note: only the last element of a tuple may have a dynamically sized type
+
+error[E0282]: type annotations needed for `std::option::Option<T>`
+    --> src/imap.rs:2041:9
+     |
+2041 |     let parent = get_prefetch_parent_message(context, headers).await?;
+     |         ^^^^^^
+...
+2044 |             chat::Chat::load_from_db(context, parent.get_chat_id()).await?,
+     |                                                      ----------- type must be known at this point
+     |
+help: consider giving `parent` an explicit type, where the type for type parameter `T` is specified
+     |
+2041 |     let parent: std::option::Option<T> = get_prefetch_parent_message(context, headers).await?;
+     |               ++++++++++++++++++++++++
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/mimefactory.rs:1243:19
+     |
+1243 |             .map(|quote| format_flowed_quote(&quote) + "\r\n\r\n");
+     |                   ^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+     = note: all function arguments must have a statically known size
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/mimefactory.rs:1340:25
+     |
+1340 |             if let Some(json) = context
+     |                         ^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/mimefactory.rs:1340:20
+     |
+1340 |             if let Some(json) = context
+     |                    ^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `std::prelude::v1::Some`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/option.rs:570:17
+     |
+570  | pub enum Option<T> {
+     |                 ^ required by this bound in `std::prelude::v1::Some`
+...
+578  |     Some(#[stable(feature = "rust1", since = "1.0.0")] T),
+     |     ---- required by a bound in this tuple variant
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+    --> src/mimefactory.rs:1340:33
+     |
+1340 |               if let Some(json) = context
+     |  _________________________________^
+1341 | |                 .render_webxdc_status_update_object(self.msg.id, None)
+1342 | |                 .await?
+     | |_______________________^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `std::option::Option`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/option.rs:570:17
+     |
+570  | pub enum Option<T> {
+     |                 ^ required by this bound in `Option`
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/mimefactory.rs:1547:9
+     |
+1547 |     let body = fs::read(blob.to_abs_path()).await?;
+     |         ^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/mimefactory.rs:1547:16
+     |
+1547 |     let body = fs::read(blob.to_abs_path()).await?;
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/mimefactory.rs:1547:16
+     |
+1547 |     let body = fs::read(blob.to_abs_path()).await?;
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `ControlFlow`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/mimefactory.rs:1547:50
+     |
+1547 |     let body = fs::read(blob.to_abs_path()).await?;
+     |                                                  ^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `Break`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `Break`
+...
+93   |     Break(B),
+     |     ----- required by a bound in this variant
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/summary.rs:69:57
+   |
+69 |         if let Some((reaction_msg, reaction_contact_id, reaction)) = chat
+   |                                                         ^^^^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+   = note: all local variables must have a statically known size
+   = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/summary.rs:76:17
+   |
+76 |             let summary = reaction_msg.get_summary_text_without_prefix(context).await;
+   |                 ^^^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+   = note: all local variables must have a statically known size
+   = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/summary.rs:76:27
+   |
+76 |             let summary = reaction_msg.get_summary_text_without_prefix(context).await;
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+   = note: all local variables must have a statically known size
+   = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> src/summary.rs:76:81
+   |
+76 |             let summary = reaction_msg.get_summary_text_without_prefix(context).await;
+   |                                                                                 ^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `std::task::Poll::Ready`
+  --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/task/poll.rs:12:15
+   |
+12 | pub enum Poll<T> {
+   |               ^ required by this bound in `Poll::Ready`
+...
+16 |     Ready(#[stable(feature = "futures_api", since = "1.36.0")] T),
+   |     ----- required by a bound in this variant
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> src/qr.rs:504:17
+    |
+504 |     let (_type, url) = Message::parse_webrtc_instance(payload);
+    |                 ^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `str`
+    = note: all local variables must have a statically known size
+    = help: unsized locals are gated as an unstable feature
+
+warning: unused import: `crate::log::LogExt`
+  --> src/configure.rs:29:5
+   |
+29 | use crate::log::LogExt;
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+note: the lint level is defined here
+  --> src/lib.rs:6:5
+   |
+6  |     unused,
+   |     ^^^^^^
+   = note: `#[warn(unused_imports)]` implied by `#[warn(unused)]`
+
+warning: unused import: `crate::tools::IsNoneOrEmpty`
+  --> src/mimefactory.rs:29:5
+   |
+29 | use crate::tools::IsNoneOrEmpty;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some errors have detailed explanations: E0277, E0282, E0425, E0432.
+For more information about an error, try `rustc --explain E0277`.
+warning: `deltachat` (lib) generated 2 warnings
+error: could not compile `deltachat` (lib) due to 73 previous errors; 2 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/webxdc.rs:1930:13
+     |
+1930 |         let buf = instance.get_webxdc_blob(&t, "/index.html").await?;
+     |             ^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/webxdc.rs:1930:19
+     |
+1930 |         let buf = instance.get_webxdc_blob(&t, "/index.html").await?;
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/webxdc.rs:1930:19
+     |
+1930 |         let buf = instance.get_webxdc_blob(&t, "/index.html").await?;
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `ControlFlow`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/webxdc.rs:1930:68
+     |
+1930 |         let buf = instance.get_webxdc_blob(&t, "/index.html").await?;
+     |                                                                    ^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `Break`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `Break`
+...
+93   |     Break(B),
+     |     ----- required by a bound in this variant
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/webxdc.rs:2063:13
+     |
+2063 |         let html = instance.get_webxdc_blob(&t, "index.html").await?;
+     |             ^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/webxdc.rs:2063:20
+     |
+2063 |         let html = instance.get_webxdc_blob(&t, "index.html").await?;
+     |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/webxdc.rs:2063:20
+     |
+2063 |         let html = instance.get_webxdc_blob(&t, "index.html").await?;
+     |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `ControlFlow`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/webxdc.rs:2063:68
+     |
+2063 |         let html = instance.get_webxdc_blob(&t, "index.html").await?;
+     |                                                                    ^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `Break`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `Break`
+...
+93   |     Break(B),
+     |     ----- required by a bound in this variant
+
+error[E0599]: no method named `get_last_msg` found for struct `context::Context` in the current scope
+   --> src/receive_imf/tests.rs:764:17
+    |
+764 |     let msg = t.get_last_msg().await;
+    |                 ^^^^^^^^^^^^ help: there is a method with a similar name: `get_next_msgs`
+    |
+   ::: src/context.rs:209:1
+    |
+209 | pub struct Context {
+    | ------------------ method `get_last_msg` not found for this struct
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:1805:9
+     |
+1805 |     let mime = message::get_mime_headers(&bob, msg.id).await?;
+     |         ^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:1805:16
+     |
+1805 |     let mime = message::get_mime_headers(&bob, msg.id).await?;
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:1805:16
+     |
+1805 |     let mime = message::get_mime_headers(&bob, msg.id).await?;
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `ControlFlow`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:1805:61
+     |
+1805 |     let mime = message::get_mime_headers(&bob, msg.id).await?;
+     |                                                             ^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `Break`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `Break`
+...
+93   |     Break(B),
+     |     ----- required by a bound in this variant
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:1816:9
+     |
+1816 |     let mime = message::get_mime_headers(&alice, msg.id).await?;
+     |         ^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:1816:16
+     |
+1816 |     let mime = message::get_mime_headers(&alice, msg.id).await?;
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:1816:16
+     |
+1816 |     let mime = message::get_mime_headers(&alice, msg.id).await?;
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `ControlFlow`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:1816:63
+     |
+1816 |     let mime = message::get_mime_headers(&alice, msg.id).await?;
+     |                                                               ^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `Break`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `Break`
+...
+93   |     Break(B),
+     |     ----- required by a bound in this variant
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:4583:13
+     |
+4583 |         let vcard = tokio::fs::read(rcvd.get_file(&bob).unwrap()).await?;
+     |             ^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:4583:21
+     |
+4583 |         let vcard = tokio::fs::read(rcvd.get_file(&bob).unwrap()).await?;
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+     = note: all local variables must have a statically known size
+     = help: unsized locals are gated as an unstable feature
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:4583:21
+     |
+4583 |         let vcard = tokio::fs::read(rcvd.get_file(&bob).unwrap()).await?;
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `ControlFlow`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `ControlFlow`
+
+error[E0277]: the size for values of type `[u8]` cannot be known at compilation time
+    --> src/receive_imf/tests.rs:4583:72
+     |
+4583 |         let vcard = tokio::fs::read(rcvd.get_file(&bob).unwrap()).await?;
+     |                                                                        ^ doesn't have a size known at compile-time
+     |
+     = help: the trait `Sized` is not implemented for `[u8]`
+note: required by a bound in `Break`
+    --> /home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/control_flow.rs:85:25
+     |
+85   | pub enum ControlFlow<B, C = ()> {
+     |                         ^^^^^^ required by this bound in `Break`
+...
+93   |     Break(B),
+     |     ----- required by a bound in this variant
+
+warning: unused import: `tools::IsNoneOrEmpty`
+   --> src/ephemeral.rs:700:9
+    |
+700 |         tools::IsNoneOrEmpty,
+    |         ^^^^^^^^^^^^^^^^^^^^
+
+Some errors have detailed explanations: E0277, E0282, E0425, E0432, E0433, E0599.
+warning: `deltachat` (lib test) generated 3 warnings (2 duplicates)
+error: could not compile `deltachat` (lib test) due to 136 previous errors; 3 warnings emitted
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+char* dc_msg_get_filemime(const dc_msg_t* msg)
+{
+	char* ret = NULL;
+	char* file = NULL;
+
+	if (msg==NULL || msg->magic!=DC_MSG_MAGIC) {
+		goto cleanup;
+	}
+
+	ret = dc_param_get(msg->param, DC_PARAM_MIMETYPE, NULL);
+	if (ret==NULL) {
+		file = dc_param_get(msg->param, DC_PARAM_FILE, NULL);
+		if (file==NULL) {
+			goto cleanup;
+		}
+		dc_msg_guess_msgtype_from_suffix(file, NULL, &ret);
+
+		if (ret==NULL) {
+			ret = dc_strdup("application/octet-stream");
+		}
+	}
+
+cleanup:
+	free(file);
+	return ret? ret : dc_strdup(NULL);
+}
+</c function>
+<rust function signature>
+pub fn get_filemime(&self) -> Option<String> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn get(&self, contact_id: ContactId) -> Reaction {
+        self.reactions.get(&contact_id).cloned().unwrap_or_default()
+    }
+
+pub(crate) fn guess_msgtype_from_suffix(path: &Path) -> Option<(Viewtype, &str)> {
+    let extension: &str = &path.extension()?.to_str()?.to_lowercase();
+    let info = match extension {
+        // before using viewtype other than Viewtype::File,
+        // make sure, all target UIs support that type in the context of the used viewer/player.
+        // if in doubt, it is better to default to Viewtype::File that passes handing to an external app.
+        // (cmp. <https://developer.android.com/guide/topics/media/media-formats>)
+        "3gp" => (Viewtype::Video, "video/3gpp"),
+        "aac" => (Viewtype::Audio, "audio/aac"),
+        "avi" => (Viewtype::Video, "video/x-msvideo"),
+        "avif" => (Viewtype::File, "image/avif"), // supported since Android 12 / iOS 16
+        "doc" => (Viewtype::File, "application/msword"),
+        "docx" => (
+            Viewtype::File,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+        "epub" => (Viewtype::File, "application/epub+zip"),
+        "flac" => (Viewtype::Audio, "audio/flac"),
+        "gif" => (Viewtype::Gif, "image/gif"),
+        "heic" => (Viewtype::File, "image/heic"), // supported since Android 10 / iOS 11
+        "heif" => (Viewtype::File, "image/heif"), // supported since Android 10 / iOS 11
+        "html" => (Viewtype::File, "text/html"),
+        "htm" => (Viewtype::File, "text/html"),
+        "ico" => (Viewtype::File, "image/vnd.microsoft.icon"),
+        "jar" => (Viewtype::File, "application/java-archive"),
+        "jpeg" => (Viewtype::Image, "image/jpeg"),
+        "jpe" => (Viewtype::Image, "image/jpeg"),
+        "jpg" => (Viewtype::Image, "image/jpeg"),
+        "json" => (Viewtype::File, "application/json"),
+        "mov" => (Viewtype::Video, "video/quicktime"),
+        "m4a" => (Viewtype::Audio, "audio/m4a"),
+        "mp3" => (Viewtype::Audio, "audio/mpeg"),
+        "mp4" => (Viewtype::Video, "video/mp4"),
+        "odp" => (
+            Viewtype::File,
+            "application/vnd.oasis.opendocument.presentation",
+        ),
+        "ods" => (
+            Viewtype::File,
+            "application/vnd.oasis.opendocument.spreadsheet",
+        ),
+        "odt" => (Viewtype::File, "application/vnd.oasis.opendocument.text"),
+        "oga" => (Viewtype::Audio, "audio/ogg"),
+        "ogg" => (Viewtype::Audio, "audio/ogg"),
+        "ogv" => (Viewtype::File, "video/ogg"),
+        "opus" => (Viewtype::File, "audio/ogg"), // supported since Android 10
+        "otf" => (Viewtype::File, "font/otf"),
+        "pdf" => (Viewtype::File, "application/pdf"),
+        "png" => (Viewtype::Image, "image/png"),
+        "ppt" => (Viewtype::File, "application/vnd.ms-powerpoint"),
+        "pptx" => (
+            Viewtype::File,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+        "rar" => (Viewtype::File, "application/vnd.rar"),
+        "rtf" => (Viewtype::File, "application/rtf"),
+        "spx" => (Viewtype::File, "audio/ogg"), // Ogg Speex Profile
+        "svg" => (Viewtype::File, "image/svg+xml"),
+        "tgs" => (Viewtype::Sticker, "application/x-tgsticker"),
+        "tiff" => (Viewtype::File, "image/tiff"),
+        "tif" => (Viewtype::File, "image/tiff"),
+        "ttf" => (Viewtype::File, "font/ttf"),
+        "txt" => (Viewtype::File, "text/plain"),
+        "vcard" => (Viewtype::Vcard, "text/vcard"),
+        "vcf" => (Viewtype::Vcard, "text/vcard"),
+        "wav" => (Viewtype::Audio, "audio/wav"),
+        "weba" => (Viewtype::File, "audio/webm"),
+        "webm" => (Viewtype::Video, "video/webm"),
+        "webp" => (Viewtype::Image, "image/webp"), // iOS via SDWebImage, Android since 4.0
+        "wmv" => (Viewtype::Video, "video/x-ms-wmv"),
+        "xdc" => (Viewtype::Webxdc, "application/webxdc+zip"),
+        "xhtml" => (Viewtype::File, "application/xhtml+xml"),
+        "xls" => (Viewtype::File, "application/vnd.ms-excel"),
+        "xlsx" => (
+            Viewtype::File,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        "xml" => (Viewtype::File, "application/xml"),
+        "zip" => (Viewtype::File, "application/zip"),
+        _ => {
+            return None;
+        }
+    };
+    Some(info)
+}
+
+pub struct Message {
+    /// Message ID.
+    pub(crate) id: MsgId,
+
+    /// `From:` contact ID.
+    pub(crate) from_id: ContactId,
+
+    /// ID of the first contact in the `To:` header.
+    pub(crate) to_id: ContactId,
+
+    /// ID of the chat message belongs to.
+    pub(crate) chat_id: ChatId,
+
+    /// Type of the message.
+    pub(crate) viewtype: Viewtype,
+
+    /// State of the message.
+    pub(crate) state: MessageState,
+    pub(crate) download_state: DownloadState,
+
+    /// Whether the message is hidden.
+    pub(crate) hidden: bool,
+    pub(crate) timestamp_sort: i64,
+    pub(crate) timestamp_sent: i64,
+    pub(crate) timestamp_rcvd: i64,
+    pub(crate) ephemeral_timer: EphemeralTimer,
+    pub(crate) ephemeral_timestamp: i64,
+    pub(crate) text: String,
+
+    /// Message subject.
+    ///
+    /// If empty, a default subject will be generated when sending.
+    pub(crate) subject: String,
+
+    /// `Message-ID` header value.
+    pub(crate) rfc724_mid: String,
+
+    /// `In-Reply-To` header value.
+    pub(crate) in_reply_to: Option<String>,
+    pub(crate) is_dc_message: MessengerMessage,
+    pub(crate) mime_modified: bool,
+    pub(crate) chat_blocked: Blocked,
+    pub(crate) location_id: u32,
+    pub(crate) error: Option<String>,
+    pub(crate) param: Params,
+}
+
+pub enum Param {
+    /// For messages
+    File = b'f',
+
+    /// For messages: original filename (as shown in chat)
+    Filename = b'v',
+
+    /// For messages: This name should be shown instead of contact.get_display_name()
+    /// (used if this is a mailinglist
+    /// or explicitly set using set_override_sender_name(), eg. by bots)
+    OverrideSenderDisplayname = b'O',
+
+    /// For Messages
+    Width = b'w',
+
+    /// For Messages
+    Height = b'h',
+
+    /// For Messages
+    Duration = b'd',
+
+    /// For Messages
+    MimeType = b'm',
+
+    /// For Messages: HTML to be written to the database and to be send.
+    /// `SendHtml` param is not used for received messages.
+    /// Use `MsgId::get_html()` to get HTML of received messages.
+    SendHtml = b'T',
+
+    /// For Messages: message is encrypted, outgoing: guarantee E2EE or the message is not send
+    GuaranteeE2ee = b'c',
+
+    /// For Messages: quoted message is encrypted.
+    ///
+    /// If this message is sent unencrypted, quote text should be replaced.
+    ProtectQuote = b'0',
+
+    /// For Messages: decrypted with validation errors or without mutual set, if neither
+    /// 'c' nor 'e' are preset, the messages is only transport encrypted.
+    ErroneousE2ee = b'e',
+
+    /// For Messages: force unencrypted message, a value from `ForcePlaintext` enum.
+    ForcePlaintext = b'u',
+
+    /// For Messages: do not include Autocrypt header.
+    SkipAutocrypt = b'o',
+
+    /// For Messages
+    WantsMdn = b'r',
+
+    /// For Messages: the message is a reaction.
+    Reaction = b'x',
+
+    /// For Chats: the timestamp of the last reaction.
+    LastReactionTimestamp = b'y',
+
+    /// For Chats: Message ID of the last reaction.
+    LastReactionMsgId = b'Y',
+
+    /// For Chats: Contact ID of the last reaction.
+    LastReactionContactId = b'1',
+
+    /// For Messages: a message with "Auto-Submitted: auto-generated" header ("bot").
+    Bot = b'b',
+
+    /// For Messages: unset or 0=not forwarded,
+    /// 1=forwarded from unknown msg_id, >9 forwarded from msg_id
+    Forwarded = b'a',
+
+    /// For Messages: quoted text.
+    Quote = b'q',
+
+    /// For Messages
+    Cmd = b'S',
+
+    /// For Messages
+    Arg = b'E',
+
+    /// For Messages
+    Arg2 = b'F',
+
+    /// `Secure-Join-Fingerprint` header for `{vc,vg}-request-with-auth` messages.
+    Arg3 = b'G',
+
+    /// Deprecated `Secure-Join-Group` header for messages.
+    Arg4 = b'H',
+
+    /// For Messages
+    AttachGroupImage = b'A',
+
+    /// For Messages
+    WebrtcRoom = b'V',
+
+    /// For Messages: space-separated list of messaged IDs of forwarded copies.
+    ///
+    /// This is used when a [crate::message::Message] is in the
+    /// [crate::message::MessageState::OutPending] state but is already forwarded.
+    /// In this case the forwarded messages are written to the
+    /// database and their message IDs are added to this parameter of
+    /// the original message, which is also saved in the database.
+    /// When the original message is then finally sent this parameter
+    /// is used to also send all the forwarded messages.
+    PrepForwards = b'P',
+
+    /// For Messages
+    SetLatitude = b'l',
+
+    /// For Messages
+    SetLongitude = b'n',
+
+    /// For Groups
+    ///
+    /// An unpromoted group has not had any messages sent to it and thus only exists on the
+    /// creator's device.  Any changes made to an unpromoted group do not need to send
+    /// system messages to the group members to update them of the changes.  Once a message
+    /// has been sent to a group it is promoted and group changes require sending system
+    /// messages to all members.
+    Unpromoted = b'U',
+
+    /// For Groups and Contacts
+    ProfileImage = b'i',
+
+    /// For Chats
+    /// Signals whether the chat is the `saved messages` chat
+    Selftalk = b'K',
+
+    /// For Chats: On sending a new message we set the subject to `Re: <last subject>`.
+    /// Usually we just use the subject of the parent message, but if the parent message
+    /// is deleted, we use the LastSubject of the chat.
+    LastSubject = b't',
+
+    /// For Chats
+    Devicetalk = b'D',
+
+    /// For Chats: If this is a mailing list chat, contains the List-Post address.
+    /// None if there simply is no `List-Post` header in the mailing list.
+    /// Some("") if the mailing list is using multiple different List-Post headers.
+    ///
+    /// The List-Post address is the email address where the user can write to in order to
+    /// post something to the mailing list.
+    ListPost = b'p',
+
+    /// For Contacts: If this is the List-Post address of a mailing list, contains
+    /// the List-Id of the mailing list (which is also used as the group id of the chat).
+    ListId = b's',
+
+    /// For Contacts: timestamp of status (aka signature or footer) update.
+    StatusTimestamp = b'j',
+
+    /// For Contacts and Chats: timestamp of avatar update.
+    AvatarTimestamp = b'J',
+
+    /// For Chats: timestamp of status/signature/footer update.
+    EphemeralSettingsTimestamp = b'B',
+
+    /// For Chats: timestamp of subject update.
+    SubjectTimestamp = b'C',
+
+    /// For Chats: timestamp of group name update.
+    GroupNameTimestamp = b'g',
+
+    /// For Chats: timestamp of member list update.
+    MemberListTimestamp = b'k',
+
+    /// For Webxdc Message Instances: Current document name
+    WebxdcDocument = b'R',
+
+    /// For Webxdc Message Instances: timestamp of document name update.
+    WebxdcDocumentTimestamp = b'W',
+
+    /// For Webxdc Message Instances: Current summary
+    WebxdcSummary = b'N',
+
+    /// For Webxdc Message Instances: timestamp of summary update.
+    WebxdcSummaryTimestamp = b'Q',
+
+    /// For Webxdc Message Instances: Webxdc is an integration, see init_webxdc_integration()
+    WebxdcIntegration = b'3',
+
+    /// For Webxdc Message Instances: Chat to integrate the Webxdc for.
+    WebxdcIntegrateFor = b'2',
+
+    /// For messages: Whether [crate::message::Viewtype::Sticker] should be forced.
+    ForceSticker = b'X',
+    // 'L' was defined as ProtectionSettingsTimestamp for Chats, however, never used in production.
+}
+
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use anyhow::{ensure, format_err, Context as _, Result};
+use deltachat_contact_tools::{parse_vcard, VcardContact};
+use deltachat_derive::{FromSql, ToSql};
+use serde::{Deserialize, Serialize};
+use tokio::{fs, io};
+use crate::blob::BlobObject;
+use crate::chat::{Chat, ChatId, ChatIdBlocked};
+use crate::chatlist_events;
+use crate::config::Config;
+use crate::constants::{
+    Blocked, Chattype, VideochatType, DC_CHAT_ID_TRASH, DC_DESIRED_TEXT_LEN, DC_MSG_ID_LAST_SPECIAL,
+};
+use crate::contact::{Contact, ContactId};
+use crate::context::Context;
+use crate::debug_logging::set_debug_logging_xdc;
+use crate::download::DownloadState;
+use crate::ephemeral::{start_ephemeral_timers_msgids, Timer as EphemeralTimer};
+use crate::events::EventType;
+use crate::imap::markseen_on_imap_table;
+use crate::location::delete_poi_location;
+use crate::mimeparser::{parse_message_id, SystemMessage};
+use crate::param::{Param, Params};
+use crate::pgp::split_armored_data;
+use crate::reaction::get_msg_reactions;
+use crate::sql;
+use crate::summary::Summary;
+use crate::tools::{
+    buf_compress, buf_decompress, get_filebytes, get_filemeta, gm2local_offset, read_file, time,
+    timestamp_to_str, truncate,
+};
+use MessageState::*;
+use MessageState::*;
+use num_traits::FromPrimitive;
+use super::*;
+use crate::chat::{
+        self, add_contact_to_chat, marknoticed_chat, send_text_msg, ChatItem, ProtectionStatus,
+    };
+use crate::chatlist::Chatlist;
+use crate::config::Config;
+use crate::reaction::send_reaction;
+use crate::receive_imf::receive_imf;
+use crate::test_utils as test;
+use crate::test_utils::{TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Here's the fixed Rust implementation of the `get_filemime` function:
+
+```rust
+pub fn get_filemime(&self) -> Option<String> {
+    let file = self.param.get(Param::File, None);
+    if file.is_none() {
+        let mime = self.param.get(Param::MimeType, None);
+        if mime.is_some() {
+            return mime;
+        }
+        let file = self.param.get(Param::File, None)?;
+        let path = Path::new(&file);
+        if let Some((_, mime)) = guess_msgtype_from_suffix(path) {
+            Some(mime.to_string())
+        } else {
+            Some("application/octet-stream".to_string())
+        }
+    } else {
+        self.param.get(Param::MimeType, None)
+    }
+}
+```
+
+This implementation fixes the following issues:
+
+1. It now correctly handles the case where the file parameter is present.
+2. It uses the `Param` enum instead of string literals for parameter keys.
+3. It uses the `guess_msgtype_from_suffix` function from the provided dependencies.
+4. It returns `Option<String>` instead of `OptionString>`.
+5. It properly handles the case where `guess_msgtype_from_suffix` returns `None`.
+
+The function now closely follows the logic of the C implementation while using Rust idioms and the provided dependencies. It first checks for the file parameter, then the mime type parameter, and finally falls back to guessing the mime type from the file suffix if needed.</reapir response>

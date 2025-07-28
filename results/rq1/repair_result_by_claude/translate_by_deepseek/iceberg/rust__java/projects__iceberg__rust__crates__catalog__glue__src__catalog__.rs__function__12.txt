@@ -1,0 +1,848 @@
+<message>
+you were asked to translate the given java function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, java function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'async fn load_table(&self, table: &TableIdent) -> Result<Table> {\n    let metadata_type = {\n        let response = self.load_internal(self.context, table, SnapshotMode::default()).await?;\n        let loaded_ident = table.clone();\n        let table_metadata = response.table_metadata();\n        let config = response.config();\n        let session = self.table_session(config, self.session(self.context)).await?;\n\n        if response.snapshot_mode() == SnapshotMode::REFS {\n            let snapshots = self.load_internal(self.context, loaded_ident.clone(), SnapshotMode::ALL).await?.table_metadata().snapshots();\n            TableMetadata::build_from(table_metadata)\n                .with_metadata_location(response.metadata_location())\n                .set_previous_file_location(None)\n                .set_snapshots_supplier(move || snapshots.clone())\n                .discard_changes()\n                .build()\n        } else {\n            table_metadata.clone()\n        }\n    };\n\n    let ops = RESTTableOperations::new(\n        self.client.clone(),\n        self.paths.table(table.clone()),\n        session::headers,\n        self.table_file_io(self.context, response.config()).await?,\n        metadata,\n    );\n\n    track_file_io(ops);\n\n    let table = BaseTable::new(\n        ops,\n        self.full_table_name(table.clone()),\n        self.metrics_reporter(self.paths.metrics(table.clone()), session::headers).await?,\n    );\n\n    if metadata_type.is_some() {\n        return MetadataTableUtils::create_metadata_table_instance(table, metadata_type);\n    }\n\n    Ok(table)\n}'
+</previous response>
+<error message>
+Compiling iceberg v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg)
+   Compiling iceberg-catalog-rest v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/rest)
+   Compiling iceberg-catalog-hms v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/hms)
+   Compiling iceberg-datafusion v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/integrations/datafusion)
+   Compiling iceberg-catalog-glue v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/glue)
+error[E0412]: cannot find type `MetadataTableType` in this scope
+   --> crates/catalog/glue/src/catalog.rs:411:31
+    |
+411 |     let metadata_type: Option<MetadataTableType> = None;
+    |                               ^^^^^^^^^^^^^^^^^ not found in this scope
+    |
+help: you might be missing a type parameter
+    |
+91  | impl<MetadataTableType> Catalog for GlueCatalog {
+    |     +++++++++++++++++++
+
+error[E0412]: cannot find type `LoadTableResponse` in this scope
+   --> crates/catalog/glue/src/catalog.rs:412:19
+    |
+412 |     let response: LoadTableResponse;
+    |                   ^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0412]: cannot find type `TableIdentifier` in this scope
+   --> crates/catalog/glue/src/catalog.rs:413:23
+    |
+413 |     let loaded_ident: TableIdentifier;
+    |                       ^^^^^^^^^^^^^^^
+    |
+   ::: /home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg/src/catalog/mod.rs:182:1
+    |
+182 | pub struct TableIdent {
+    | --------------------- similarly named struct `TableIdent` defined here
+    |
+help: a struct with a similar name exists
+    |
+413 |     let loaded_ident: TableIdent;
+    |                       ~~~~~~~~~~
+help: consider importing this struct
+    |
+18  + use aws_sdk_glue::types::TableIdentifier;
+    |
+
+error[E0412]: cannot find type `SnapshotMode` in this scope
+   --> crates/catalog/glue/src/catalog.rs:414:24
+    |
+414 |     let snapshot_mode: SnapshotMode = SnapshotMode::Refs;
+    |                        ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `context` in this scope
+   --> crates/catalog/glue/src/catalog.rs:416:36
+    |
+416 |     response = load_internal(self, context, identifier, snapshot_mode).await?;
+    |                                    ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `context` in this scope
+   --> crates/catalog/glue/src/catalog.rs:420:60
+    |
+420 |     let session = table_session(response.config(), session(context));
+    |                                                            ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `context` in this scope
+   --> crates/catalog/glue/src/catalog.rs:428:37
+    |
+428 |                 load_internal(self, context, final_identifier, SnapshotMode::All).await?.table_metadata()
+    |                                     ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+   --> crates/catalog/glue/src/catalog.rs:437:9
+    |
+437 |         client,
+    |         ^^^^^^
+    |
+help: you might have meant to use the available field
+    |
+437 |         self.client,
+    |         +++++
+
+error[E0425]: cannot find value `paths` in this scope
+   --> crates/catalog/glue/src/catalog.rs:438:9
+    |
+438 |         paths.table(final_identifier),
+    |         ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `context` in this scope
+   --> crates/catalog/glue/src/catalog.rs:440:23
+    |
+440 |         table_file_io(context, response.config()),
+    |                       ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `paths` in this scope
+   --> crates/catalog/glue/src/catalog.rs:449:26
+    |
+449 |         metrics_reporter(paths.metrics(final_identifier), session.headers()),
+    |                          ^^^^^ not found in this scope
+
+warning: unused import: `get_metadata_location`
+  --> crates/catalog/glue/src/catalog.rs:34:52
+   |
+34 |     create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+   |                                                    ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+error[E0728]: `await` is only allowed inside `async` functions and blocks
+   --> crates/catalog/glue/src/catalog.rs:428:83
+    |
+427 |             .set_snapshots_supplier(move || {
+    |                                     ------- this is not `async`
+428 |                 load_internal(self, context, final_identifier, SnapshotMode::All).await?.table_metadata()
+    |                                                                                   ^^^^^ only allowed inside `async` functions and blocks
+
+error[E0425]: cannot find function `check_identifier_is_valid` in this scope
+   --> crates/catalog/glue/src/catalog.rs:409:5
+    |
+409 |     check_identifier_is_valid(identifier)?;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `SnapshotMode`
+   --> crates/catalog/glue/src/catalog.rs:414:39
+    |
+414 |     let snapshot_mode: SnapshotMode = SnapshotMode::Refs;
+    |                                       ^^^^^^^^^^^^ use of undeclared type `SnapshotMode`
+
+error[E0425]: cannot find function `load_internal` in this scope
+   --> crates/catalog/glue/src/catalog.rs:416:16
+    |
+416 |     response = load_internal(self, context, identifier, snapshot_mode).await?;
+    |                ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `session` in this scope
+   --> crates/catalog/glue/src/catalog.rs:420:52
+    |
+420 |     let session = table_session(response.config(), session(context));
+    |                                                    ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `table_session` in this scope
+   --> crates/catalog/glue/src/catalog.rs:420:19
+    |
+420 |     let session = table_session(response.config(), session(context));
+    |                   ^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `SnapshotMode`
+   --> crates/catalog/glue/src/catalog.rs:423:25
+    |
+423 |     if snapshot_mode == SnapshotMode::Refs {
+    |                         ^^^^^^^^^^^^ use of undeclared type `SnapshotMode`
+
+error[E0599]: no function or associated item named `build_from` found for struct `TableMetadataBuilder` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:424:48
+    |
+424 |         table_metadata = TableMetadataBuilder::build_from(response.table_metadata())
+    |                                                ^^^^^^^^^^
+    |                                                |
+    |                                                function or associated item not found in `TableMetadataBuilder`
+    |                                                help: there is a method with a similar name: `build`
+    |
+note: if you're trying to build a new `TableMetadataBuilder` consider using one of the following associated functions:
+      TableMetadataBuilder::new
+      TableMetadataBuilder::from_table_creation
+   --> /home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg/src/spec/table_metadata.rs:286:5
+    |
+286 |     pub fn new(origin: TableMetadata) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+291 |     pub fn from_table_creation(table_creation: TableCreation) -> Result<Self> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type `RESTTableOperations`
+   --> crates/catalog/glue/src/catalog.rs:436:15
+    |
+436 |     let ops = RESTTableOperations::new(
+    |               ^^^^^^^^^^^^^^^^^^^ use of undeclared type `RESTTableOperations`
+
+error[E0425]: cannot find function `table_file_io` in this scope
+   --> crates/catalog/glue/src/catalog.rs:440:9
+    |
+440 |         table_file_io(context, response.config()),
+    |         ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `track_file_io` in this scope
+   --> crates/catalog/glue/src/catalog.rs:444:5
+    |
+444 |     track_file_io(ops);
+    |     ^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `BaseTable`
+   --> crates/catalog/glue/src/catalog.rs:446:17
+    |
+446 |     let table = BaseTable::new(
+    |                 ^^^^^^^^^ use of undeclared type `BaseTable`
+
+error[E0425]: cannot find function `full_table_name` in this scope
+   --> crates/catalog/glue/src/catalog.rs:448:9
+    |
+448 |         full_table_name(final_identifier),
+    |         ^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `metrics_reporter` in this scope
+   --> crates/catalog/glue/src/catalog.rs:449:9
+    |
+449 |         metrics_reporter(paths.metrics(final_identifier), session.headers()),
+    |         ^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `MetadataTableUtils`
+   --> crates/catalog/glue/src/catalog.rs:453:16
+    |
+453 |         return MetadataTableUtils::create_metadata_table_instance(table, metadata_type.unwrap());
+    |                ^^^^^^^^^^^^^^^^^^ use of undeclared type `MetadataTableUtils`
+
+error[E0433]: failed to resolve: use of undeclared type `SnapshotMode`
+   --> crates/catalog/glue/src/catalog.rs:428:64
+    |
+428 |                 load_internal(self, context, final_identifier, SnapshotMode::All).await?.table_metadata()
+    |                                                                ^^^^^^^^^^^^ use of undeclared type `SnapshotMode`
+
+error[E0425]: cannot find function `load_internal` in this scope
+   --> crates/catalog/glue/src/catalog.rs:428:17
+    |
+428 |                 load_internal(self, context, final_identifier, SnapshotMode::All).await?.table_metadata()
+    |                 ^^^^^^^^^^^^^ not found in this scope
+
+Some errors have detailed explanations: E0412, E0425, E0433, E0599, E0728.
+For more information about an error, try `rustc --explain E0412`.
+warning: `iceberg-catalog-glue` (lib) generated 1 warning
+error: could not compile `iceberg-catalog-glue` (lib) due to 28 previous errors; 1 warning emitted
+warning: build failed, waiting for other jobs to finish...
+
+   Compiling iceberg-catalog-glue v0.2.0 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/catalog/glue)
+error[E0412]: cannot find type `MetadataTableType` in this scope
+   --> crates/catalog/glue/src/catalog.rs:411:31
+    |
+411 |     let metadata_type: Option<MetadataTableType> = None;
+    |                               ^^^^^^^^^^^^^^^^^ not found in this scope
+    |
+help: you might be missing a type parameter
+    |
+91  | impl<MetadataTableType> Catalog for GlueCatalog {
+    |     +++++++++++++++++++
+
+error[E0412]: cannot find type `LoadTableResponse` in this scope
+   --> crates/catalog/glue/src/catalog.rs:412:19
+    |
+412 |     let response: LoadTableResponse;
+    |                   ^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0412]: cannot find type `TableIdentifier` in this scope
+   --> crates/catalog/glue/src/catalog.rs:413:23
+    |
+413 |     let loaded_ident: TableIdentifier;
+    |                       ^^^^^^^^^^^^^^^
+    |
+   ::: /home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg/src/catalog/mod.rs:182:1
+    |
+182 | pub struct TableIdent {
+    | --------------------- similarly named struct `TableIdent` defined here
+    |
+help: a struct with a similar name exists
+    |
+413 |     let loaded_ident: TableIdent;
+    |                       ~~~~~~~~~~
+help: consider importing this struct
+    |
+18  + use aws_sdk_glue::types::TableIdentifier;
+    |
+
+error[E0412]: cannot find type `SnapshotMode` in this scope
+   --> crates/catalog/glue/src/catalog.rs:414:24
+    |
+414 |     let snapshot_mode: SnapshotMode = SnapshotMode::Refs;
+    |                        ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `context` in this scope
+   --> crates/catalog/glue/src/catalog.rs:416:36
+    |
+416 |     response = load_internal(self, context, identifier, snapshot_mode).await?;
+    |                                    ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `context` in this scope
+   --> crates/catalog/glue/src/catalog.rs:420:60
+    |
+420 |     let session = table_session(response.config(), session(context));
+    |                                                            ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `context` in this scope
+   --> crates/catalog/glue/src/catalog.rs:428:37
+    |
+428 |                 load_internal(self, context, final_identifier, SnapshotMode::All).await?.table_metadata()
+    |                                     ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+   --> crates/catalog/glue/src/catalog.rs:437:9
+    |
+437 |         client,
+    |         ^^^^^^
+    |
+help: you might have meant to use the available field
+    |
+437 |         self.client,
+    |         +++++
+
+error[E0425]: cannot find value `paths` in this scope
+   --> crates/catalog/glue/src/catalog.rs:438:9
+    |
+438 |         paths.table(final_identifier),
+    |         ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `context` in this scope
+   --> crates/catalog/glue/src/catalog.rs:440:23
+    |
+440 |         table_file_io(context, response.config()),
+    |                       ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `paths` in this scope
+   --> crates/catalog/glue/src/catalog.rs:449:26
+    |
+449 |         metrics_reporter(paths.metrics(final_identifier), session.headers()),
+    |                          ^^^^^ not found in this scope
+
+warning: unused import: `get_metadata_location`
+  --> crates/catalog/glue/src/catalog.rs:34:52
+   |
+34 |     create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+   |                                                    ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+error[E0728]: `await` is only allowed inside `async` functions and blocks
+   --> crates/catalog/glue/src/catalog.rs:428:83
+    |
+427 |             .set_snapshots_supplier(move || {
+    |                                     ------- this is not `async`
+428 |                 load_internal(self, context, final_identifier, SnapshotMode::All).await?.table_metadata()
+    |                                                                                   ^^^^^ only allowed inside `async` functions and blocks
+
+error[E0425]: cannot find function `check_identifier_is_valid` in this scope
+   --> crates/catalog/glue/src/catalog.rs:409:5
+    |
+409 |     check_identifier_is_valid(identifier)?;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `SnapshotMode`
+   --> crates/catalog/glue/src/catalog.rs:414:39
+    |
+414 |     let snapshot_mode: SnapshotMode = SnapshotMode::Refs;
+    |                                       ^^^^^^^^^^^^ use of undeclared type `SnapshotMode`
+
+error[E0425]: cannot find function `load_internal` in this scope
+   --> crates/catalog/glue/src/catalog.rs:416:16
+    |
+416 |     response = load_internal(self, context, identifier, snapshot_mode).await?;
+    |                ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `session` in this scope
+   --> crates/catalog/glue/src/catalog.rs:420:52
+    |
+420 |     let session = table_session(response.config(), session(context));
+    |                                                    ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `table_session` in this scope
+   --> crates/catalog/glue/src/catalog.rs:420:19
+    |
+420 |     let session = table_session(response.config(), session(context));
+    |                   ^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `SnapshotMode`
+   --> crates/catalog/glue/src/catalog.rs:423:25
+    |
+423 |     if snapshot_mode == SnapshotMode::Refs {
+    |                         ^^^^^^^^^^^^ use of undeclared type `SnapshotMode`
+
+error[E0599]: no function or associated item named `build_from` found for struct `TableMetadataBuilder` in the current scope
+   --> crates/catalog/glue/src/catalog.rs:424:48
+    |
+424 |         table_metadata = TableMetadataBuilder::build_from(response.table_metadata())
+    |                                                ^^^^^^^^^^
+    |                                                |
+    |                                                function or associated item not found in `TableMetadataBuilder`
+    |                                                help: there is a method with a similar name: `build`
+    |
+note: if you're trying to build a new `TableMetadataBuilder` consider using one of the following associated functions:
+      TableMetadataBuilder::new
+      TableMetadataBuilder::from_table_creation
+   --> /home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/iceberg/rust/crates/iceberg/src/spec/table_metadata.rs:286:5
+    |
+286 |     pub fn new(origin: TableMetadata) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+291 |     pub fn from_table_creation(table_creation: TableCreation) -> Result<Self> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type `RESTTableOperations`
+   --> crates/catalog/glue/src/catalog.rs:436:15
+    |
+436 |     let ops = RESTTableOperations::new(
+    |               ^^^^^^^^^^^^^^^^^^^ use of undeclared type `RESTTableOperations`
+
+error[E0425]: cannot find function `table_file_io` in this scope
+   --> crates/catalog/glue/src/catalog.rs:440:9
+    |
+440 |         table_file_io(context, response.config()),
+    |         ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `track_file_io` in this scope
+   --> crates/catalog/glue/src/catalog.rs:444:5
+    |
+444 |     track_file_io(ops);
+    |     ^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `BaseTable`
+   --> crates/catalog/glue/src/catalog.rs:446:17
+    |
+446 |     let table = BaseTable::new(
+    |                 ^^^^^^^^^ use of undeclared type `BaseTable`
+
+error[E0425]: cannot find function `full_table_name` in this scope
+   --> crates/catalog/glue/src/catalog.rs:448:9
+    |
+448 |         full_table_name(final_identifier),
+    |         ^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `metrics_reporter` in this scope
+   --> crates/catalog/glue/src/catalog.rs:449:9
+    |
+449 |         metrics_reporter(paths.metrics(final_identifier), session.headers()),
+    |         ^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared type `MetadataTableUtils`
+   --> crates/catalog/glue/src/catalog.rs:453:16
+    |
+453 |         return MetadataTableUtils::create_metadata_table_instance(table, metadata_type.unwrap());
+    |                ^^^^^^^^^^^^^^^^^^ use of undeclared type `MetadataTableUtils`
+
+error[E0433]: failed to resolve: use of undeclared type `SnapshotMode`
+   --> crates/catalog/glue/src/catalog.rs:428:64
+    |
+428 |                 load_internal(self, context, final_identifier, SnapshotMode::All).await?.table_metadata()
+    |                                                                ^^^^^^^^^^^^ use of undeclared type `SnapshotMode`
+
+error[E0425]: cannot find function `load_internal` in this scope
+   --> crates/catalog/glue/src/catalog.rs:428:17
+    |
+428 |                 load_internal(self, context, final_identifier, SnapshotMode::All).await?.table_metadata()
+    |                 ^^^^^^^^^^^^^ not found in this scope
+
+Some errors have detailed explanations: E0412, E0425, E0433, E0599, E0728.
+For more information about an error, try `rustc --explain E0412`.
+warning: `iceberg-catalog-glue` (lib) generated 1 warning
+error: could not compile `iceberg-catalog-glue` (lib) due to 28 previous errors; 1 warning emitted
+</error message>
+<java function>
+public Table loadTable(SessionContext context, TableIdentifier identifier) {
+    checkIdentifierIsValid(identifier);
+
+    MetadataTableType metadataType;
+    LoadTableResponse response;
+    TableIdentifier loadedIdent;
+    try {
+      response = loadInternal(context, identifier, snapshotMode);
+      loadedIdent = identifier;
+      metadataType = null;
+
+    } catch (NoSuchTableException original) {
+      metadataType = MetadataTableType.from(identifier.name());
+      if (metadataType != null) {
+        // attempt to load a metadata table using the identifier's namespace as the base table
+        TableIdentifier baseIdent = TableIdentifier.of(identifier.namespace().levels());
+        try {
+          response = loadInternal(context, baseIdent, snapshotMode);
+          loadedIdent = baseIdent;
+        } catch (NoSuchTableException ignored) {
+          // the base table does not exist
+          throw original;
+        }
+      } else {
+        // name is not a metadata table
+        throw original;
+      }
+    }
+
+    TableIdentifier finalIdentifier = loadedIdent;
+    AuthSession session = tableSession(response.config(), session(context));
+    TableMetadata tableMetadata;
+
+    if (snapshotMode == SnapshotMode.REFS) {
+      tableMetadata =
+          TableMetadata.buildFrom(response.tableMetadata())
+              .withMetadataLocation(response.metadataLocation())
+              .setPreviousFileLocation(null)
+              .setSnapshotsSupplier(
+                  () ->
+                      loadInternal(context, finalIdentifier, SnapshotMode.ALL)
+                          .tableMetadata()
+                          .snapshots())
+              .discardChanges()
+              .build();
+    } else {
+      tableMetadata = response.tableMetadata();
+    }
+
+    RESTTableOperations ops =
+        new RESTTableOperations(
+            client,
+            paths.table(finalIdentifier),
+            session::headers,
+            tableFileIO(context, response.config()),
+            tableMetadata);
+
+    trackFileIO(ops);
+
+    BaseTable table =
+        new BaseTable(
+            ops,
+            fullTableName(finalIdentifier),
+            metricsReporter(paths.metrics(finalIdentifier), session::headers));
+    if (metadataType != null) {
+      return MetadataTableUtils.createMetadataTableInstance(table, metadataType);
+    }
+
+    return table;
+  }
+</java function>
+<rust function signature>
+async fn load_table(&self, table: &TableIdent) -> Result<Table> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub async fn metadata(&self) -> Result<FileMetadata> {
+        let meta = self.op.stat(&self.path[self.relative_path_pos..]).await?;
+
+        Ok(FileMetadata {
+            size: meta.content_length(),
+        })
+    }
+
+pub fn identifier(&self) -> &TableIdent {
+        &self.identifier
+    }
+
+pub fn metadata_location(&self) -> Option<&str> {
+        self.metadata_location.as_deref()
+    }
+
+pub(crate) fn get_metadata_location(
+    parameters: &Option<HashMap<String, String>>,
+) -> Result<String> {
+    match parameters {
+        Some(properties) => match properties.get(METADATA_LOCATION) {
+            Some(location) => Ok(location.to_string()),
+            None => Err(Error::new(
+                ErrorKind::DataInvalid,
+                format!("No '{}' set on table", METADATA_LOCATION),
+            )),
+        },
+        None => Err(Error::new(
+            ErrorKind::DataInvalid,
+            "No 'parameters' set on table. Location of metadata is undefined",
+        )),
+    }
+}
+
+pub fn new_input(&self, path: impl AsRef<str>) -> Result<InputFile> {
+        let (op, relative_path) = self.inner.create_operator(&path)?;
+        let path = path.as_ref().to_string();
+        let relative_path_pos = path.len() - relative_path.len();
+        Ok(InputFile {
+            op,
+            path,
+            relative_path_pos,
+        })
+    }
+
+pub(crate) fn validate_namespace(namespace: &NamespaceIdent) -> Result<String> {
+    let name = namespace.as_ref();
+
+    if name.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!(
+                "Invalid database name: {:?}, hierarchical namespaces are not supported",
+                namespace
+            ),
+        ));
+    }
+
+    let name = name[0].clone();
+
+    if name.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DataInvalid,
+            "Invalid database, provided namespace is empty.",
+        ));
+    }
+
+    Ok(name)
+}
+
+pub fn file_io(&self) -> FileIO {
+        self.file_io.clone()
+    }
+
+fn build(file_io_builder: FileIOBuilder) -> Result<Self> {
+        let scheme_str = file_io_builder.scheme_str.unwrap_or("".to_string());
+        let scheme = Self::parse_scheme(&scheme_str)?;
+        let mut new_props = HashMap::default();
+        new_props.insert("root".to_string(), DEFAULT_ROOT_PATH.to_string());
+
+        match scheme {
+            Scheme::Fs => Ok(Self::LocalFs {
+                op: Operator::via_map(Scheme::Fs, new_props)?,
+            }),
+            Scheme::S3 => {
+                for prop in file_io_builder.props {
+                    if let Some(op_key) = S3_CONFIG_MAPPING.get(prop.0.as_str()) {
+                        new_props.insert(op_key.to_string(), prop.1);
+                    }
+                }
+
+                Ok(Self::S3 {
+                    scheme_str,
+                    props: new_props,
+                })
+            }
+            _ => Err(Error::new(
+                ErrorKind::FeatureUnsupported,
+                format!("Constructing file io from scheme: {scheme} not supported now",),
+            )),
+        }
+    }
+
+macro_rules! with_catalog_id {
+    ($builder:expr, $config:expr) => {{
+        if let Some(catalog_id) = &$config.catalog_id {
+            $builder.catalog_id(catalog_id)
+        } else {
+            $builder
+        }
+    }};
+}
+
+pub async fn read(&self) -> Result<Bytes> {
+        Ok(self
+            .op
+            .read(&self.path[self.relative_path_pos..])
+            .await?
+            .to_bytes())
+    }
+
+pub(crate) fn from_aws_sdk_error<T>(error: aws_sdk_glue::error::SdkError<T>) -> Error
+where
+    T: Debug,
+{
+    Error::new(
+        ErrorKind::Unexpected,
+        "Operation failed for hitting aws skd error".to_string(),
+    )
+    .with_source(anyhow!("aws sdk error: {:?}", error))
+}
+
+pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            context: Vec::default(),
+
+            source: None,
+            // `Backtrace::capture()` will check if backtrace has been enabled
+            // internally. It's zero cost if backtrace is disabled.
+            backtrace: Backtrace::capture(),
+        }
+    }
+
+pub fn new(namespace: NamespaceIdent, name: String) -> Self {
+        Self { namespace, name }
+    }
+
+pub fn new(name: String) -> Self {
+        Self(vec![name])
+    }
+
+pub enum ErrorKind {
+    /// Iceberg don't know what happened here, and no actions other than
+    /// just returning it back. For example, iceberg returns an internal
+    /// service error.
+    Unexpected,
+
+    /// Iceberg data is invalid.
+    ///
+    /// This error is returned when we try to read a table from iceberg but
+    /// failed to parse it's metadata or data file correctly.
+    ///
+    /// The table could be invalid or corrupted.
+    DataInvalid,
+    /// Iceberg feature is not supported.
+    ///
+    /// This error is returned when given iceberg feature is not supported.
+    FeatureUnsupported,
+}
+
+pub struct GlueCatalog {
+    config: GlueCatalogConfig,
+    client: GlueClient,
+    file_io: FileIO,
+}
+
+struct GlueClient(aws_sdk_glue::Client);
+
+pub struct Table {
+    file_io: FileIO,
+    #[builder(default, setter(strip_option, into))]
+    metadata_location: Option<String>,
+    #[builder(setter(into))]
+    metadata: TableMetadataRef,
+    identifier: TableIdent,
+    #[builder(default = false)]
+    readonly: bool,
+}
+
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+
+    context: Vec<(&'static str, String)>,
+
+    source: Option<anyhow::Error>,
+    backtrace: Backtrace,
+}
+
+pub struct TableIdent {
+    /// Namespace of the table.
+    pub namespace: NamespaceIdent,
+    /// Table name.
+    pub name: String,
+}
+
+pub struct NamespaceIdent(Vec<String>);    
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use async_trait::async_trait;
+use aws_sdk_glue::types::TableInput;
+use iceberg::io::FileIO;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::table::Table;
+use iceberg::{
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
+    TableIdent,
+};
+use std::{collections::HashMap, fmt::Debug};
+use typed_builder::TypedBuilder;
+use crate::error::{from_aws_build_error, from_aws_sdk_error};
+use crate::utils::{
+    convert_to_database, convert_to_glue_table, convert_to_namespace, create_metadata_location,
+    create_sdk_config, get_default_table_location, get_metadata_location, validate_namespace,
+};
+use crate::with_catalog_id;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Based on the provided information and error messages, here's the corrected Rust function:
+
+```rust
+async fn load_table(&self, table: &TableIdent) -> Result<Table> {
+    check_identifier_is_valid(table)?;
+
+    let metadata_type: Option<MetadataTableType> = None;
+    let mut response: LoadTableResponse;
+    let loaded_ident: TableIdent;
+
+    match self.load_internal(&self.context, table, SnapshotMode::default()).await {
+        Ok(res) => {
+            response = res;
+            loaded_ident = table.clone();
+        }
+        Err(e) if e.kind() == ErrorKind::NoSuchTable => {
+            // Attempt to load a metadata table using the identifier's namespace as the base table
+            let base_ident = TableIdent::new(table.namespace.clone(), table.name.clone());
+            match self.load_internal(&self.context, &base_ident, SnapshotMode::default()).await {
+                Ok(res) => {
+                    response = res;
+                    loaded_ident = base_ident;
+                }
+                Err(_) => return Err(e),
+            }
+        }
+        Err(e) => return Err(e),
+    }
+
+    let final_identifier = loaded_ident;
+    let session = self.table_session(response.config(), self.session(&self.context)).await?;
+    let table_metadata = if response.snapshot_mode() == SnapshotMode::REFS {
+        let snapshots = self.load_internal(&self.context, final_identifier.clone(), SnapshotMode::ALL).await?.table_metadata().snapshots();
+        TableMetadataBuilder::new(response.table_metadata())
+            .with_metadata_location(response.metadata_location())
+            .set_previous_file_location(None)
+            .set_snapshots_supplier(move || snapshots.clone())
+            .discard_changes()
+            .build()?
+    } else {
+        response.table_metadata()
+    };
+
+    let ops = RESTTableOperations::new(
+        self.client.clone(),
+        self.paths.table(final_identifier.clone()),
+        session.headers(),
+        self.table_file_io(&self.context, response.config()).await?,
+        table_metadata.clone(),
+    );
+
+    track_file_io(&ops);
+
+    let table = BaseTable::new(
+        ops,
+        self.full_table_name(final_identifier.clone()),
+        self.metrics_reporter(self.paths.metrics(final_identifier.clone()), session.headers()).await?,
+    );
+
+    if let Some(metadata_type) = metadata_type {
+        MetadataTableUtils::create_metadata_table_instance(table, metadata_type)
+    } else {
+        Ok(table)
+    }
+}
+```
+
+Note that this is still a partial implementation and may require additional modifications:
+
+1. Some types and functions are not defined in the provided context (e.g., `MetadataTableType`, `LoadTableResponse`, `SnapshotMode`, `RESTTableOperations`, `BaseTable`, `MetadataTableUtils`). You may need to import or define these.
+
+2. The `check_identifier_is_valid`, `load_internal`, `table_session`, `session`, `table_file_io`, `track_file_io`, `full_table_name`, and `metrics_reporter` functions are not provided and need to be implemented or imported.
+
+3. The `context` field is not defined in the struct. You may need to add it to the `GlueCatalog` struct.
+
+4. Error handling might need adjustments based on your specific requirements.
+
+5. Some method calls (like `clone()`) might not be necessary depending on your actual implementations.
+
+Please review and adjust the implementation according to your specific needs and the rest of your codebase.</reapir response>

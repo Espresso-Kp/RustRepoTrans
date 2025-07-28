@@ -1,0 +1,238 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+None
+</previous response>
+<error message>
+error
+the error is 
+</error message>
+<c function>
+void KDF2(int sha,const octet *z,const octet *p,int olen,octet *key)
+{
+    /* NOTE: the parameter olen is the length of the output k in bytes */
+    char h[64];
+    octet H= {0,sizeof(h),h};
+    int cthreshold;
+    int hlen=sha;
+
+    OCT_empty(key);
+
+    cthreshold=ROUNDUP(olen,hlen);
+
+    for (int counter=1; counter<=cthreshold; counter++)
+    {
+        ehashit(sha,z,counter,p,&H,0);
+        if (key->len+hlen>olen)  OCT_jbytes(key,H.val,olen%hlen);
+        else                     OCT_joctet(key,&H);
+    }
+
+}
+</c function>
+<rust function signature>
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn hashit(sha: usize, a: &[u8], n: usize, b: Option<&[u8]>, pad: usize, w: &mut [u8]) {
+    let mut r: [u8; 64] = [0; 64];
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+
+    if pad == 0 {
+        for i in 0..sha {
+            w[i] = r[i]
+        }
+    } else {
+        if pad <= sha {
+            for i in 0..pad {
+                w[i] = r[i]
+            }
+        } else {
+            for i in 0..sha {
+                w[i + pad - sha] = r[i]
+            }
+            for i in 0..(pad - sha) {
+                w[i] = 0
+            }
+        }
+    }
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+ Based on the provided C function and the Rust function signature, dependencies, and data type declarations, the Rust implementation of the KDF2 function is as follows:
+
+```rust
+use super::big;
+use super::big::Big;
+use super::ecp;
+use super::ecp::ECP;
+use super::rom;
+use crate::aes;
+use crate::aes::AES;
+use crate::hash256::HASH256;
+use crate::hash384::HASH384;
+use crate::hash512::HASH512;
+use crate::rand::RAND;
+use super::*;
+use crate::test_utils::*;
+use crate::types::CurveType;
+
+pub fn kdf2(sha: usize, z: &[u8], p: Option<&[u8]>, olen: usize, k: &mut [u8]) {
+    let h_len = if sha == SHA256 { 32 } else if sha == SHA384 { 48 } else if sha == SHA512 { 64 } else { 0 };
+    if h_len == 0 {
+        panic!("Unsupported SHA variant");
+    }
+
+    let mut key = vec![0u8; 0];
+    let c_threshold = (olen + h_len - 1) / h_len;
+
+    for counter in 1..=c_threshold {
+        let mut h = vec![0u8; h_len];
+        hashit(sha, z, counter, p, 0, &mut h);
+
+        if key.len() + h_len > olen {
+            for i in 0..(olen % h_len) {
+                key.push(h[i]);
+            }
+        } else {
+            for i in 0..h_len {
+                key.push(h[i]);
+            }
+        }
+    }
+
+    for i in 0..olen {
+        k[i] = key[i];
+    }
+}
+
+fn hashit(sha: usize, a: &[u8], n: usize, b: Option<&[u8]>, pad: usize, w: &mut [u8]) {
+    let mut r: [u8; 64] = [0; 64];
+    if sha == SHA256 {
+        let mut h = HASH256::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA384 {
+        let mut h = HASH384::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+    if sha == SHA512 {
+        let mut h = HASH512::new();
+        h.process_array(a);
+        if n > 0 {
+            h.process_num(n as i32)
+        }
+        if let Some(x) = b {
+            h.process_array(x);
+        }
+        let hs = h.hash();
+        for i in 0..sha {
+            r[i] = hs[i];
+        }
+    }
+
+    if pad == 0 {
+        for i in 0..sha {
+            w[i] = r[i]
+        }
+    } else {
+        if pad <= sha {
+            for i in 0..pad {
+                w[i] = r[i]
+            }
+        } else {
+            for i in 0..sha {
+                w[i + pad - sha] = r[i]
+            }
+            for i in 0..(pad - sha) {
+                w[i] = 0
+            }
+        }
+    }
+}
+```
+
+This implementation should address the error message provided and correctly translate the C function to Rust. The `hashit` function is adapted from the provided dependencies to handle the hashing logic as per the C function's requirements.</reapir response>

@@ -1,0 +1,174 @@
+<message>
+you were asked to translate the given python function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, python function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+
+<previous response>
+b'use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};\nuse crate::consts::TOO_SMALL_SEQUENCE;\nuse crate::entity::{CoherenceMatch, CoherenceMatches, Language};\nuse crate::utils::{\n    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,\n    is_unicode_range_secondary, unicode_range,\n};\nuse ahash::{HashMap, HashMapExt, HashSet};\nuse cached::proc_macro::cached;\nuse counter::Counter;\nuse encoding::label::encoding_from_whatwg_label;\nuse encoding::DecoderTrap;\nuse ordered_float::OrderedFloat;\nuse strsim::jaro;\n\npub(crate) fn filter_alt_coherence_matches(results: &CoherenceMatches) -> CoherenceMatches {\n    let mut index_results: HashMap<&\'static Language, Vec<f32>> = HashMap::new();\n\n    for result in results {\n        let language = result.language;\n        let ratio = result.score;\n        let no_em_name = language.name.replace("", "");\n\n        if !index_results.contains_key(&language) {\n            index_results.insert(&language, Vec::new());\n        }\n\n        if let Some(entry) = index_results.get_mut(&language) {\n            entry.push(ratio);\n        }\n    }\n\n    let mut filtered_results: CoherenceMatches = Vec::new();\n\n    for (language, ratios) in index_results {\n        if ratios.len() > 1 {\n            if let Some(max_ratio) = ratios.into_iter().max_by(|a, b| a.partial_cmp(b).unwrap()) {\n                filtered_results.push(CoherenceMatch {\n                    language,\n                    score: max_ratio,\n                });\n            }\n        } else {\n            filtered_results.push(CoherenceMatch {\n                language,\n                score: ratios[0],\n            });\n        }\n    }\n\n    if filtered_results.is_empty() {\n        results.clone()\n    } else {\n        filtered_results\n    }\n}'
+</previous response>
+<error message>
+Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling charset-normalizer-rs v1.0.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/charset-normalizer/rust)
+error[E0599]: no method named `replace` found for reference `&Language` in the current scope
+   --> src/cd.rs:168:35
+    |
+168 |         let no_em_name = language.replace("", "");
+    |                                   ^^^^^^^ method not found in `&Language`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `charset-normalizer-rs` (lib) due to previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `charset-normalizer-rs` (lib test) due to previous error
+</error message>
+<python function>
+def filter_alt_coherence_matches(results: CoherenceMatches) -> CoherenceMatches:
+    """
+    We shall NOT return "English" in CoherenceMatches because it is an alternative
+    of "English". This function only keeps the best match and remove the em-dash in it.
+    """
+    index_results: Dict[str, List[float]] = dict()
+
+    for result in results:
+        language, ratio = result
+        no_em_name: str = language.replace("", "")
+
+        if no_em_name not in index_results:
+            index_results[no_em_name] = []
+
+        index_results[no_em_name].append(ratio)
+
+    if any(len(index_results[e]) > 1 for e in index_results):
+        filtered_results: CoherenceMatches = []
+
+        for language in index_results:
+            filtered_results.append((language, max(index_results[language])))
+
+        return filtered_results
+
+    return results
+</python function>
+<rust function signature>
+pub(crate) fn filter_alt_coherence_matches(results: &CoherenceMatches) -> CoherenceMatches 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+pub struct CoherenceMatch {
+    pub language: &'static Language,
+    pub score: f32,
+}
+
+pub enum Language {
+    English,
+    German,
+    French,
+    Dutch,
+    Italian,
+    Polish,
+    Spanish,
+    Russian,
+    Japanese,
+    Portuguese,
+    Swedish,
+    Chinese,
+    Ukrainian,
+    Norwegian,
+    Finnish,
+    Vietnamese,
+    Czech,
+    Hungarian,
+    Korean,
+    Indonesian,
+    Turkish,
+    Romanian,
+    Farsi,
+    Arabic,
+    Danish,
+    Serbian,
+    Lithuanian,
+    Slovene,
+    Slovak,
+    Hebrew,
+    Bulgarian,
+    Croatian,
+    Hindi,
+    Estonian,
+    Thai,
+    Greek,
+    Tamil,
+    Kazakh,
+    Unknown,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use crate::assets::{ENCODING_TO_LANGUAGE, LANGUAGES, LANGUAGE_SUPPORTED_COUNT};
+use crate::consts::TOO_SMALL_SEQUENCE;
+use crate::entity::{CoherenceMatch, CoherenceMatches, Language};
+use crate::utils::{
+    get_language_data, is_accentuated, is_multi_byte_encoding, is_suspiciously_successive_range,
+    is_unicode_range_secondary, unicode_range,
+};
+use ahash::{HashMap, HashMapExt, HashSet};
+use cached::proc_macro::cached;
+use counter::Counter;
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
+use ordered_float::OrderedFloat;
+use strsim::jaro;
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Here's the corrected Rust function:
+
+```rust
+pub(crate) fn filter_alt_coherence_matches(results: &CoherenceMatches) -> CoherenceMatches {
+    let mut index_results: HashMap<&'static Language, Vec<f32>> = HashMap::new();
+
+    for result in results {
+        let language = result.language;
+        let ratio = result.score;
+
+        index_results.entry(language).or_insert_with(Vec::new).push(ratio);
+    }
+
+    let mut filtered_results: CoherenceMatches = Vec::new();
+
+    for (language, ratios) in index_results {
+        if ratios.len() > 1 {
+            if let Some(max_ratio) = ratios.into_iter().max_by(|a, b| a.partial_cmp(b).unwrap()) {
+                filtered_results.push(CoherenceMatch {
+                    language,
+                    score: max_ratio,
+                });
+            }
+        } else {
+            filtered_results.push(CoherenceMatch {
+                language,
+                score: ratios[0],
+            });
+        }
+    }
+
+    if filtered_results.is_empty() {
+        results.clone()
+    } else {
+        filtered_results
+    }
+}
+```
+
+I've made the following changes to address the error and align the function more closely with the Python version:
+
+1. Removed the `no_em_name` variable and the `replace` method call, as the `Language` enum doesn't have a `replace` method.
+2. Simplified the logic for inserting values into `index_results` using the `entry` API.
+3. Kept the rest of the logic similar to the previous version, as it already handles the filtering and max score selection correctly.
+
+This version should compile without errors and maintain the functionality of the original Python function.</reapir response>

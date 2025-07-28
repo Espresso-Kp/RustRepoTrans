@@ -1,0 +1,853 @@
+<message>
+you were asked to translate the given c function to rust and execute your response and get some error message.
+Fix the bug in your previous response according to error message, c function, rust function signature, rust function dependencies(including function and variable dependencies), and data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+Only response the function results.
+<previous response>
+b'pub async fn add_address_book(context: &Context, addr_book: &str) -> Result<usize> {\n    let mut modify_cnt = 0;\n\n    let lines = split_address_book(addr_book);\n\n    context.sql.transaction(|transaction| {\n        for (name, addr) in lines {\n            let mut name = name.to_string();\n            normalize_name(&mut name);\n            let mut sth_modified = false;\n            if let Ok(_) = context.add_or_lookup_contact(&name, addr, Origin::AddressBook, &mut sth_modified) {\n                if sth_modified {\n                    modify_cnt += 1;\n                }\n            }\n        }\n        Ok(())\n    })?;\n\n    if modify_cnt > 0 {\n        context.emit_event(EventType::ContactsChanged);\n    }\n\n    Ok(modify_cnt)\n}'
+</previous response>
+<error message>
+Compiling deltachat v1.139.6 (/home/k/ogs_PHD/LLM4SE/2Rust_projects/auto_get_functionPair/projects/deltachat-core/rust)
+error[E0425]: cannot find function `normalize_name` in this scope
+   --> src/contact.rs:972:28
+    |
+972 |             let mut name = normalize_name(name);
+    |                            ^^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing one of these items
+    |
+3   + use crate::contact::contact_tools::normalize_name;
+    |
+3   + use deltachat_contact_tools::normalize_name;
+    |
+
+error[E0728]: `await` is only allowed inside `async` functions and blocks
+   --> src/contact.rs:974:95
+    |
+970 |     context.sql.transaction(|transaction| {
+    |                             ------------- this is not `async`
+...
+974 |             let (_, sth_modified) = add_or_lookup(context, &name, &addr, Origin::AddressBook).await?;
+    |                                                                                               ^^^^^ only allowed inside `async` functions and blocks
+
+error[E0425]: cannot find function `add_or_lookup` in this scope
+   --> src/contact.rs:974:37
+    |
+974 |             let (_, sth_modified) = add_or_lookup(context, &name, &addr, Origin::AddressBook).await?;
+    |                                     ^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider using the associated function on `Self`
+    |
+974 |             let (_, sth_modified) = Self::add_or_lookup(context, &name, &addr, Origin::AddressBook).await?;
+    |                                     ++++++
+
+Some errors have detailed explanations: E0425, E0728.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `deltachat` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `deltachat` (lib test) due to 3 previous errors
+error: command `/home/k/.rustup/toolchains/1.77.1-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics` exited with code 101
+</error message>
+<c function>
+*      unless it was edited manually by dc_create_contact() before.
+ * @return The number of modified or added contacts.
+ */
+int dc_add_address_book(dc_context_t* context, const char* adr_book)
+{
+	carray* lines = NULL;
+	size_t  i = 0;
+	size_t  iCnt = 0;
+	int     sth_modified = 0;
+	int     modify_cnt = 0;
+
+	if (context==NULL || context->magic!=DC_CONTEXT_MAGIC || adr_book==NULL) {
+		goto cleanup;
+	}
+
+	if ((lines=dc_split_into_lines(adr_book))==NULL) {
+		goto cleanup;
+	}
+
+	dc_sqlite3_begin_transaction(context->sql);
+
+		iCnt = carray_count(lines);
+		for (i = 0; i+1 < iCnt; i += 2) {
+			char* name = (char*)carray_get(lines, i);
+			char* addr = (char*)carray_get(lines, i+1);
+			dc_normalize_name(name);
+            dc_normalize_addr(addr);
+			dc_add_or_lookup_contact(context, name, addr, DC_ORIGIN_ADRESS_BOOK, &sth_modified);
+			if (sth_modified) {
+				modify_cnt++;
+			}
+		}
+
+	dc_sqlite3_commit(context->sql);
+
+	if (modify_cnt) {
+		context->cb(context, DC_EVENT_CONTACTS_CHANGED, 0, 0);
+	}
+
+cleanup:
+	dc_free_splitted_lines(lines);
+
+	return modify_cnt;
+}
+</c function>
+<rust function signature>
+pub async fn add_address_book(context: &Context, addr_book: &str) -> Result<usize> 
+</rust function signature>
+<rust function dependencies, and data type declarations>
+fn split_address_book(book: &str) -> Vec<(&str, &str)> {
+    book.lines()
+        .collect::<Vec<&str>>()
+        .chunks(2)
+        .filter_map(|chunk| {
+            let name = chunk.first()?;
+            let addr = chunk.get(1)?;
+            Some((*name, *addr))
+        })
+        .collect()
+}
+
+pub(crate) async fn add_or_lookup(
+        context: &Context,
+        name: &str,
+        addr: &ContactAddress,
+        mut origin: Origin,
+    ) -> Result<(ContactId, Modifier)> {
+        let mut sth_modified = Modifier::None;
+
+        ensure!(!addr.is_empty(), "Can not add_or_lookup empty address");
+        ensure!(origin != Origin::Unknown, "Missing valid origin");
+
+        if context.is_self_addr(addr).await? {
+            return Ok((ContactId::SELF, sth_modified));
+        }
+
+        let mut name = strip_rtlo_characters(name);
+        #[allow(clippy::collapsible_if)]
+        if origin <= Origin::OutgoingTo {
+            // The user may accidentally have written to a "noreply" address with another MUA:
+            if addr.contains("noreply")
+                || addr.contains("no-reply")
+                || addr.starts_with("notifications@")
+                // Filter out use-once addresses (like reply+AEJDGPOECLAP...@reply.github.com):
+                || (addr.len() > 50 && addr.contains('+'))
+            {
+                info!(context, "hiding contact {}", addr);
+                origin = Origin::Hidden;
+                // For these kind of email addresses, sender and address often don't belong together
+                // (like hocuri <notifications@github.com>). In this example, hocuri shouldn't
+                // be saved as the displayname for notifications@github.com.
+                name = "".to_string();
+            }
+        }
+
+        // If the origin indicates that user entered the contact manually, from the address book or
+        // from the QR-code scan (potentially from the address book of their other phone), then name
+        // should go into the "name" column and never into "authname" column, to avoid leaking it
+        // into the network.
+        let manual = matches!(
+            origin,
+            Origin::ManuallyCreated | Origin::AddressBook | Origin::UnhandledQrScan
+        );
+
+        let mut update_addr = false;
+
+        let row_id = context.sql.transaction(|transaction| {
+            let row = transaction.query_row(
+                "SELECT id, name, addr, origin, authname
+                 FROM contacts WHERE addr=? COLLATE NOCASE",
+                 [addr.to_string()],
+                |row| {
+                    let row_id: isize = row.get(0)?;
+                    let row_name: String = row.get(1)?;
+                    let row_addr: String = row.get(2)?;
+                    let row_origin: Origin = row.get(3)?;
+                    let row_authname: String = row.get(4)?;
+
+                    Ok((row_id, row_name, row_addr, row_origin, row_authname))
+                }).optional()?;
+
+            let row_id;
+            if let Some((id, row_name, row_addr, row_origin, row_authname)) = row {
+                let update_name = manual && name != row_name;
+                let update_authname = !manual
+                    && name != row_authname
+                    && !name.is_empty()
+                    && (origin >= row_origin
+                        || origin == Origin::IncomingUnknownFrom
+                        || row_authname.is_empty());
+
+                row_id = u32::try_from(id)?;
+                if origin >= row_origin && addr.as_ref() != row_addr {
+                    update_addr = true;
+                }
+                if update_name || update_authname || update_addr || origin > row_origin {
+                    let new_name = if update_name {
+                        name.to_string()
+                    } else {
+                        row_name
+                    };
+
+                    transaction
+                        .execute(
+                            "UPDATE contacts SET name=?, addr=?, origin=?, authname=? WHERE id=?;",
+                            (
+                                new_name,
+                                if update_addr {
+                                    addr.to_string()
+                                } else {
+                                    row_addr
+                                },
+                                if origin > row_origin {
+                                    origin
+                                } else {
+                                    row_origin
+                                },
+                                if update_authname {
+                                    name.to_string()
+                                } else {
+                                    row_authname
+                                },
+                                row_id
+                            ),
+                        )?;
+
+                    if update_name || update_authname {
+                        // Update the contact name also if it is used as a group name.
+                        // This is one of the few duplicated data, however, getting the chat list is easier this way.
+                        let chat_id: Option<ChatId> = transaction.query_row(
+                            "SELECT id FROM chats WHERE type=? AND id IN(SELECT chat_id FROM chats_contacts WHERE contact_id=?)",
+                            (Chattype::Single, isize::try_from(row_id)?),
+                            |row| {
+                                let chat_id: ChatId = row.get(0)?;
+                                Ok(chat_id)
+                            }
+                        ).optional()?;
+
+                        if let Some(chat_id) = chat_id {
+                            let contact_id = ContactId::new(row_id);
+                            let (addr, name, authname) =
+                                transaction.query_row(
+                                    "SELECT addr, name, authname
+                                     FROM contacts
+                                     WHERE id=?",
+                                     (contact_id,),
+                                |row| {
+                                    let addr: String = row.get(0)?;
+                                    let name: String = row.get(1)?;
+                                    let authname: String = row.get(2)?;
+                                    Ok((addr, name, authname))
+                                })?;
+
+                            let chat_name = if !name.is_empty() {
+                                name
+                            } else if !authname.is_empty() {
+                                authname
+                            } else {
+                                addr
+                            };
+
+                            let count = transaction.execute(
+                                    "UPDATE chats SET name=?1 WHERE id=?2 AND name!=?1",
+                                    (chat_name, chat_id))?;
+
+                            if count > 0 {
+                                // Chat name updated
+                                context.emit_event(EventType::ChatModified(chat_id));
+                                chatlist_events::emit_chatlist_items_changed_for_contact(context, contact_id);
+                            }
+                        }
+                    }
+                    sth_modified = Modifier::Modified;
+                }
+            } else {
+                let update_name = manual;
+                let update_authname = !manual;
+
+                transaction
+                    .execute(
+                        "INSERT INTO contacts (name, addr, origin, authname)
+                         VALUES (?, ?, ?, ?);",
+                         (
+                            if update_name {
+                                name.to_string()
+                            } else {
+                                "".to_string()
+                            },
+                            &addr,
+                            origin,
+                            if update_authname {
+                                name.to_string()
+                            } else {
+                                "".to_string()
+                            }
+                        ),
+                    )?;
+
+                sth_modified = Modifier::Created;
+                row_id = u32::try_from(transaction.last_insert_rowid())?;
+                info!(context, "Added contact id={row_id} addr={addr}.");
+            }
+            Ok(row_id)
+        }).await?;
+
+        let contact_id = ContactId::new(row_id);
+
+        Ok((contact_id, sth_modified))
+    }
+
+impl ContactAddress {
+    /// Constructs a new contact address from string,
+    /// normalizing and validating it.
+    pub fn new(s: &str) -> Result<Self> {
+        let addr = addr_normalize(s);
+        if !may_be_valid_addr(&addr) {
+            bail!("invalid address {:?}", s);
+        }
+        Ok(Self(addr.to_string()))
+    }
+}  
+
+macro_rules! warn {
+    ($ctx:expr, $msg:expr) => {
+        warn!($ctx, $msg,)
+    };
+    ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
+        let formatted = format!($msg, $($args),*);
+        let full = format!("{file}:{line}: {msg}",
+                           file = file!(),
+                           line = line!(),
+                           msg = &formatted);
+        $ctx.emit_event($crate::EventType::Warning(full));
+    }};
+}
+
+pub fn emit_event(&self, event: EventType) {
+        {
+            let lock = self.debug_logging.read().expect("RwLock is poisoned");
+            if let Some(debug_logging) = &*lock {
+                debug_logging.log_event(event.clone());
+            }
+        }
+        self.events.emit(Event {
+            id: self.id,
+            typ: event,
+        });
+    }
+
+pub struct Context {
+    pub(crate) inner: Arc<InnerContext>,
+}
+
+pub enum Origin {
+    /// Unknown origin. Can be used as a minimum origin to specify that the caller does not care
+    /// about origin of the contact.
+    #[default]
+    Unknown = 0,
+
+    /// The contact is a mailing list address, needed to unblock mailing lists
+    MailinglistAddress = 0x2,
+
+    /// Hidden on purpose, e.g. addresses with the word "noreply" in it
+    Hidden = 0x8,
+
+    /// From: of incoming messages of unknown sender
+    IncomingUnknownFrom = 0x10,
+
+    /// Cc: of incoming messages of unknown sender
+    IncomingUnknownCc = 0x20,
+
+    /// To: of incoming messages of unknown sender
+    IncomingUnknownTo = 0x40,
+
+    /// address scanned but not verified
+    UnhandledQrScan = 0x80,
+
+    /// Reply-To: of incoming message of known sender
+    /// Contacts with at least this origin value are shown in the contact list.
+    IncomingReplyTo = 0x100,
+
+    /// Cc: of incoming message of known sender
+    IncomingCc = 0x200,
+
+    /// additional To:'s of incoming message of known sender
+    IncomingTo = 0x400,
+
+    /// a chat was manually created for this user, but no message yet sent
+    CreateChat = 0x800,
+
+    /// message sent by us
+    OutgoingBcc = 0x1000,
+
+    /// message sent by us
+    OutgoingCc = 0x2000,
+
+    /// message sent by us
+    OutgoingTo = 0x4000,
+
+    /// internal use
+    Internal = 0x40000,
+
+    /// address is in our address book
+    AddressBook = 0x80000,
+
+    /// set on Alice's side for contacts like Bob that have scanned the QR code offered by her. Only means the contact has once been established using the "securejoin" procedure in the past, getting the current key verification status requires calling contact_is_verified() !
+    SecurejoinInvited = 0x0100_0000,
+
+    /// set on Bob's side for contacts scanned and verified from a QR code. Only means the contact has once been established using the "securejoin" procedure in the past, getting the current key verification status requires calling contact_is_verified() !
+    SecurejoinJoined = 0x0200_0000,
+
+    /// contact added manually by create_contact(), this should be the largest origin as otherwise the user cannot modify the names
+    ManuallyCreated = 0x0400_0000,
+}
+
+pub enum EventType {
+    /// The library-user may write an informational string to the log.
+    ///
+    /// This event should *not* be reported to the end-user using a popup or something like
+    /// that.
+    Info(String),
+
+    /// Emitted when SMTP connection is established and login was successful.
+    SmtpConnected(String),
+
+    /// Emitted when IMAP connection is established and login was successful.
+    ImapConnected(String),
+
+    /// Emitted when a message was successfully sent to the SMTP server.
+    SmtpMessageSent(String),
+
+    /// Emitted when an IMAP message has been marked as deleted
+    ImapMessageDeleted(String),
+
+    /// Emitted when an IMAP message has been moved
+    ImapMessageMoved(String),
+
+    /// Emitted before going into IDLE on the Inbox folder.
+    ImapInboxIdle,
+
+    /// Emitted when an new file in the $BLOBDIR was created
+    NewBlobFile(String),
+
+    /// Emitted when an file in the $BLOBDIR was deleted
+    DeletedBlobFile(String),
+
+    /// The library-user should write a warning string to the log.
+    ///
+    /// This event should *not* be reported to the end-user using a popup or something like
+    /// that.
+    Warning(String),
+
+    /// The library-user should report an error to the end-user.
+    ///
+    /// As most things are asynchronous, things may go wrong at any time and the user
+    /// should not be disturbed by a dialog or so.  Instead, use a bubble or so.
+    ///
+    /// However, for ongoing processes (eg. configure())
+    /// or for functions that are expected to fail (eg. dc_continue_key_transfer())
+    /// it might be better to delay showing these events until the function has really
+    /// failed (returned false). It should be sufficient to report only the *last* error
+    /// in a messasge box then.
+    Error(String),
+
+    /// An action cannot be performed because the user is not in the group.
+    /// Reported eg. after a call to
+    /// dc_set_chat_name(), dc_set_chat_profile_image(),
+    /// dc_add_contact_to_chat(), dc_remove_contact_from_chat(),
+    /// dc_send_text_msg() or another sending function.
+    ErrorSelfNotInGroup(String),
+
+    /// Messages or chats changed.  One or more messages or chats changed for various
+    /// reasons in the database:
+    /// - Messages sent, received or removed
+    /// - Chats created, deleted or archived
+    /// - A draft has been set
+    ///
+    MsgsChanged {
+        /// Set if only a single chat is affected by the changes, otherwise 0.
+        chat_id: ChatId,
+
+        /// Set if only a single message is affected by the changes, otherwise 0.
+        msg_id: MsgId,
+    },
+
+    /// Reactions for the message changed.
+    ReactionsChanged {
+        /// ID of the chat which the message belongs to.
+        chat_id: ChatId,
+
+        /// ID of the message for which reactions were changed.
+        msg_id: MsgId,
+
+        /// ID of the contact whose reaction set is changed.
+        contact_id: ContactId,
+    },
+
+    /// There is a fresh message. Typically, the user will show an notification
+    /// when receiving this message.
+    ///
+    /// There is no extra #DC_EVENT_MSGS_CHANGED event send together with this event.
+    IncomingMsg {
+        /// ID of the chat where the message is assigned.
+        chat_id: ChatId,
+
+        /// ID of the message.
+        msg_id: MsgId,
+    },
+
+    /// Downloading a bunch of messages just finished.
+    IncomingMsgBunch,
+
+    /// Messages were seen or noticed.
+    /// chat id is always set.
+    MsgsNoticed(ChatId),
+
+    /// A single message is sent successfully. State changed from  DC_STATE_OUT_PENDING to
+    /// DC_STATE_OUT_DELIVERED, see dc_msg_get_state().
+    MsgDelivered {
+        /// ID of the chat which the message belongs to.
+        chat_id: ChatId,
+
+        /// ID of the message that was successfully sent.
+        msg_id: MsgId,
+    },
+
+    /// A single message could not be sent. State changed from DC_STATE_OUT_PENDING or DC_STATE_OUT_DELIVERED to
+    /// DC_STATE_OUT_FAILED, see dc_msg_get_state().
+    MsgFailed {
+        /// ID of the chat which the message belongs to.
+        chat_id: ChatId,
+
+        /// ID of the message that could not be sent.
+        msg_id: MsgId,
+    },
+
+    /// A single message is read by the receiver. State changed from DC_STATE_OUT_DELIVERED to
+    /// DC_STATE_OUT_MDN_RCVD, see dc_msg_get_state().
+    MsgRead {
+        /// ID of the chat which the message belongs to.
+        chat_id: ChatId,
+
+        /// ID of the message that was read.
+        msg_id: MsgId,
+    },
+
+    /// A single message was deleted.
+    ///
+    /// This event means that the message will no longer appear in the messagelist.
+    /// UI should remove the message from the messagelist
+    /// in response to this event if the message is currently displayed.
+    ///
+    /// The message may have been explicitly deleted by the user or expired.
+    /// Internally the message may have been removed from the database,
+    /// moved to the trash chat or hidden.
+    ///
+    /// This event does not indicate the message
+    /// deletion from the server.
+    MsgDeleted {
+        /// ID of the chat where the message was prior to deletion.
+        /// Never 0 or trash chat.
+        chat_id: ChatId,
+
+        /// ID of the deleted message. Never 0.
+        msg_id: MsgId,
+    },
+
+    /// Chat changed.  The name or the image of a chat group was changed or members were added or removed.
+    /// Or the verify state of a chat has changed.
+    /// See dc_set_chat_name(), dc_set_chat_profile_image(), dc_add_contact_to_chat()
+    /// and dc_remove_contact_from_chat().
+    ///
+    /// This event does not include ephemeral timer modification, which
+    /// is a separate event.
+    ChatModified(ChatId),
+
+    /// Chat ephemeral timer changed.
+    ChatEphemeralTimerModified {
+        /// Chat ID.
+        chat_id: ChatId,
+
+        /// New ephemeral timer value.
+        timer: EphemeralTimer,
+    },
+
+    /// Contact(s) created, renamed, blocked, deleted or changed their "recently seen" status.
+    ///
+    /// @param data1 (int) If set, this is the contact_id of an added contact that should be selected.
+    ContactsChanged(Option<ContactId>),
+
+    /// Location of one or more contact has changed.
+    ///
+    /// @param data1 (u32) contact_id of the contact for which the location has changed.
+    ///     If the locations of several contacts have been changed,
+    ///     eg. after calling dc_delete_all_locations(), this parameter is set to `None`.
+    LocationChanged(Option<ContactId>),
+
+    /// Inform about the configuration progress started by configure().
+    ConfigureProgress {
+        /// Progress.
+        ///
+        /// 0=error, 1-999=progress in permille, 1000=success and done
+        progress: usize,
+
+        /// Progress comment or error, something to display to the user.
+        comment: Option<String>,
+    },
+
+    /// Inform about the import/export progress started by imex().
+    ///
+    /// @param data1 (usize) 0=error, 1-999=progress in permille, 1000=success and done
+    /// @param data2 0
+    ImexProgress(usize),
+
+    /// A file has been exported. A file has been written by imex().
+    /// This event may be sent multiple times by a single call to imex().
+    ///
+    /// A typical purpose for a handler of this event may be to make the file public to some system
+    /// services.
+    ///
+    /// @param data2 0
+    ImexFileWritten(PathBuf),
+
+    /// Progress information of a secure-join handshake from the view of the inviter
+    /// (Alice, the person who shows the QR code).
+    ///
+    /// These events are typically sent after a joiner has scanned the QR code
+    /// generated by dc_get_securejoin_qr().
+    SecurejoinInviterProgress {
+        /// ID of the contact that wants to join.
+        contact_id: ContactId,
+
+        /// Progress as:
+        /// 300=vg-/vc-request received, typically shown as "bob@addr joins".
+        /// 600=vg-/vc-request-with-auth received, vg-member-added/vc-contact-confirm sent, typically shown as "bob@addr verified".
+        /// 800=contact added to chat, shown as "bob@addr securely joined GROUP". Only for the verified-group-protocol.
+        /// 1000=Protocol finished for this contact.
+        progress: usize,
+    },
+
+    /// Progress information of a secure-join handshake from the view of the joiner
+    /// (Bob, the person who scans the QR code).
+    /// The events are typically sent while dc_join_securejoin(), which
+    /// may take some time, is executed.
+    SecurejoinJoinerProgress {
+        /// ID of the inviting contact.
+        contact_id: ContactId,
+
+        /// Progress as:
+        /// 400=vg-/vc-request-with-auth sent, typically shown as "alice@addr verified, introducing myself."
+        /// (Bob has verified alice and waits until Alice does the same for him)
+        /// 1000=vg-member-added/vc-contact-confirm received
+        progress: usize,
+    },
+
+    /// The connectivity to the server changed.
+    /// This means that you should refresh the connectivity view
+    /// and possibly the connectivtiy HTML; see dc_get_connectivity() and
+    /// dc_get_connectivity_html() for details.
+    ConnectivityChanged,
+
+    /// The user's avatar changed.
+    /// Deprecated by `ConfigSynced`.
+    SelfavatarChanged,
+
+    /// A multi-device synced config value changed. Maybe the app needs to refresh smth. For
+    /// uniformity this is emitted on the source device too. The value isn't here, otherwise it
+    /// would be logged which might not be good for privacy.
+    ConfigSynced {
+        /// Configuration key.
+        key: Config,
+    },
+
+    /// Webxdc status update received.
+    WebxdcStatusUpdate {
+        /// Message ID.
+        msg_id: MsgId,
+
+        /// Status update ID.
+        status_update_serial: StatusUpdateSerial,
+    },
+
+    /// Data received over an ephemeral peer channel.
+    WebxdcRealtimeData {
+        /// Message ID.
+        msg_id: MsgId,
+
+        /// Realtime data.
+        data: Vec<u8>,
+    },
+
+    /// Inform that a message containing a webxdc instance has been deleted.
+    WebxdcInstanceDeleted {
+        /// ID of the deleted message.
+        msg_id: MsgId,
+    },
+
+    /// Tells that the Background fetch was completed (or timed out).
+    /// This event acts as a marker, when you reach this event you can be sure
+    /// that all events emitted during the background fetch were processed.
+    ///
+    /// This event is only emitted by the account manager
+    AccountsBackgroundFetchDone,
+    /// Inform that set of chats or the order of the chats in the chatlist has changed.
+    ///
+    /// Sometimes this is emitted together with `UIChatlistItemChanged`.
+    ChatlistChanged,
+
+    /// Inform that a single chat list item changed and needs to be rerendered.
+    /// If `chat_id` is set to None, then all currently visible chats need to be rerendered, and all not-visible items need to be cleared from cache if the UI has a cache.
+    ChatlistItemChanged {
+        /// ID of the changed chat
+        chat_id: Option<ChatId>,
+    },
+
+    /// Event for using in tests, e.g. as a fence between normally generated events.
+    #[cfg(test)]
+    Test,
+
+    /// Inform than some events have been skipped due to event channel overflow.
+    EventChannelOverflow {
+        /// Number of events skipped.
+        n: u64,
+    },
+}
+
+
+pub(crate) enum Modifier {
+    None,
+    Modified,
+    Created,
+}
+
+pub struct Contact {
+    /// The contact ID.
+    pub id: ContactId,
+
+    /// Contact name. It is recommended to use `Contact::get_name`,
+    /// `Contact::get_display_name` or `Contact::get_name_n_addr` to access this field.
+    /// May be empty, initially set to `authname`.
+    name: String,
+
+    /// Name authorized by the contact himself. Only this name may be spread to others,
+    /// e.g. in To:-lists. May be empty. It is recommended to use `Contact::get_authname`,
+    /// to access this field.
+    authname: String,
+
+    /// E-Mail-Address of the contact. It is recommended to use `Contact::get_addr` to access this field.
+    addr: String,
+
+    /// Blocked state. Use contact_is_blocked to access this field.
+    pub blocked: bool,
+
+    /// Time when the contact was seen last time, Unix time in seconds.
+    last_seen: i64,
+
+    /// The origin/source of the contact.
+    pub origin: Origin,
+
+    /// Parameters as Param::ProfileImage
+    pub param: Params,
+
+    /// Last seen message signature for this contact, to be displayed in the profile.
+    status: String,
+
+    /// If the contact is a bot.
+    is_bot: bool,
+}
+
+
+</rust function dependencies and data type declarations>
+<rust function dependency libraries>
+use std::cmp::{min, Reverse};
+use std::collections::BinaryHeap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use anyhow::{bail, ensure, Context as _, Result};
+use async_channel::{self as channel, Receiver, Sender};
+use base64::Engine as _;
+use deltachat_contact_tools::may_be_valid_addr;
+use deltachat_contact_tools::{
+    self as contact_tools, addr_cmp, addr_normalize, sanitize_name_and_addr, strip_rtlo_characters,
+    ContactAddress, VcardContact,
+};
+use deltachat_derive::{FromSql, ToSql};
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+use tokio::task;
+use tokio::time::{timeout, Duration};
+use crate::aheader::{Aheader, EncryptPreference};
+use crate::blob::BlobObject;
+use crate::chat::{ChatId, ChatIdBlocked, ProtectionStatus};
+use crate::color::str_to_color;
+use crate::config::Config;
+use crate::constants::{Blocked, Chattype, DC_GCL_ADD_SELF, DC_GCL_VERIFIED_ONLY};
+use crate::context::Context;
+use crate::events::EventType;
+use crate::key::{load_self_public_key, DcKey, SignedPublicKey};
+use crate::log::LogExt;
+use crate::login_param::LoginParam;
+use crate::message::MessageState;
+use crate::mimeparser::AvatarAction;
+use crate::param::{Param, Params};
+use crate::peerstate::Peerstate;
+use crate::sql::{self, params_iter};
+use crate::sync::{self, Sync::*};
+use crate::tools::{
+    duration_to_str, get_abs_path, improve_single_line_input, smeared_time, time, SystemTime,
+};
+use crate::{chat, chatlist_events, stock_str};
+use deltachat_contact_tools::{may_be_valid_addr, normalize_name};
+use super::*;
+use crate::chat::{get_chat_contacts, send_text_msg, Chat};
+use crate::chatlist::Chatlist;
+use crate::receive_imf::receive_imf;
+use crate::test_utils::{self, TestContext, TestContextManager};
+
+</rust function dependency libraries>
+
+</message>
+<reapir response>
+Here's the fixed Rust function based on the error messages and provided information:
+
+```rust
+pub async fn add_address_book(context: &Context, addr_book: &str) -> Result<usize> {
+    let mut modify_cnt = 0;
+
+    let lines = split_address_book(addr_book);
+
+    context.sql.transaction(|transaction| {
+        for (name, addr) in lines {
+            let mut name = name.to_string();
+            normalize_name(&mut name);
+            let addr = ContactAddress::new(&addr)?;
+            let mut sth_modified = Modifier::None;
+            if let Ok((_, modifier)) = add_or_lookup(context, &name, &addr, Origin::AddressBook).await {
+                sth_modified = modifier;
+                if sth_modified != Modifier::None {
+                    modify_cnt += 1;
+                }
+            }
+        }
+        Ok(())
+    }).await?;
+
+    if modify_cnt > 0 {
+        context.emit_event(EventType::ContactsChanged(None));
+    }
+
+    Ok(modify_cnt)
+}
+```
+
+This fixed version addresses the following issues:
+
+1. The `normalize_name` function is now used correctly as a mutable reference.
+2. The `add_or_lookup` function is now called with the correct parameters and awaited properly.
+3. The `ContactAddress::new` is used to create a valid contact address from the input string.
+4. The `sth_modified` variable is now properly handled as a `Modifier` enum.
+5. The `emit_event` function is called with the correct `EventType::ContactsChanged(None)` instead of the non-existent `EventType::ContactsChanged`.
+
+These changes should resolve the compilation errors and make the function compatible with the rest of the codebase.</reapir response>
